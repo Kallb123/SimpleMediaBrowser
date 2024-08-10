@@ -5,8 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ScopedStorage from "react-native-scoped-storage"
 import { useCallback, useEffect, useState } from 'react';
 import { ThemedText } from '@/components/ThemedText';
-
-const DIRECTORY_KEY = "directory";
+import { StorageKeys } from '@/constants/StorageKeys';
 
 export default function Modal() {
     // If the page was reloaded or navigated to directly, then the modal should be presented as
@@ -18,7 +17,7 @@ export default function Modal() {
     const checkDirectory = useCallback(async () => {
         let dir = "";
         try {
-            dir = await AsyncStorage.getItem(DIRECTORY_KEY);
+            dir = await AsyncStorage.getItem(StorageKeys.DIRECTORY_KEY);
             setDirectory(dir);
         } catch (eRead) {
             console.error(eRead);
@@ -39,11 +38,15 @@ export default function Modal() {
         }
         setDirectory(selectedDir.uri);
         try {
-            await AsyncStorage.setItem(DIRECTORY_KEY, selectedDir.uri);
+            await AsyncStorage.setItem(StorageKeys.DIRECTORY_KEY, selectedDir.uri);
         } catch (eWrite) {
             console.error(eWrite);
             // saving error
         }
+    }, []);
+
+    const resetFirstTime = useCallback(async () => {
+        await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(true));
     }, []);
 
     useEffect(() => {
@@ -60,6 +63,10 @@ export default function Modal() {
             <Button
                 title="Change Directory"
                 onPress={selectNewDirectory}
+            />
+            <Button
+                title="Reset First Time"
+                onPress={resetFirstTime}
             />
         </View>
     );

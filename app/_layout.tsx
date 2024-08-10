@@ -1,34 +1,52 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, router, Href } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { StorageKeys } from '@/constants/StorageKeys';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
+  const [loaded, setLoaded] = useState(false);
+  
+  const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+    if (fontsLoaded) {
+      if (loaded) {
+        SplashScreen.hideAsync();
+        return;
+      }
+      firstTimeSetupCheck();
     }
-  }, [loaded]);
+  }, [fontsLoaded, loaded]);
 
-  if (!loaded) {
+  if (!fontsLoaded) {
     return null;
+  }
+
+  const firstTimeSetupCheck = async () => {
+    const firstTimeLookup = await AsyncStorage.getItem(StorageKeys.FIRST_TIME_SETUP_KEY);
+    console.log("First Time result:", firstTimeLookup);
+    if (!firstTimeLookup || firstTimeLookup !== "false") {
+      router.replace("firsttime" as Href);
+    }
+    setLoaded(true);
   }
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
+        <Stack.Screen name="firsttime" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
         <Stack.Screen
