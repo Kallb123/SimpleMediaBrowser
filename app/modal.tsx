@@ -6,23 +6,19 @@ import * as ScopedStorage from "react-native-scoped-storage"
 import { useCallback, useEffect, useState } from 'react';
 import { ThemedText } from '@/components/ThemedText';
 import { StorageKeys } from '@/constants/StorageKeys';
+import { selectDirectory, setDirectory } from '@/store/settingsReducer';
+import { useDispatch, useSelector } from 'react-redux';
 
 export default function Modal() {
     // If the page was reloaded or navigated to directly, then the modal should be presented as
     // a full screen page. You may need to change the UI to account for this.
     const isPresented = router.canGoBack();
 
-    const [directory, setDirectory] = useState("Unset");
+    const directory = useSelector(selectDirectory);
+    const dispatch = useDispatch();
 
     const checkDirectory = useCallback(async () => {
-        let dir = "";
-        try {
-            dir = await AsyncStorage.getItem(StorageKeys.DIRECTORY_KEY);
-            setDirectory(dir);
-        } catch (eRead) {
-            console.error(eRead);
-        }
-        if (!dir) {
+        if (!directory) {
             console.log("No directory set, asking for a new one");
             await selectNewDirectory();
         }
@@ -36,13 +32,7 @@ export default function Modal() {
             // Toast to say selection cancelled?
             return;
         }
-        setDirectory(selectedDir.uri);
-        try {
-            await AsyncStorage.setItem(StorageKeys.DIRECTORY_KEY, selectedDir.uri);
-        } catch (eWrite) {
-            console.error(eWrite);
-            // saving error
-        }
+        dispatch(setDirectory(selectedDir.uri))
     }, []);
 
     const resetFirstTime = useCallback(async () => {

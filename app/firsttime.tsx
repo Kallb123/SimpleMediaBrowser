@@ -33,9 +33,9 @@ export default function FirstTime() {
         <HelloWave />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
-        <Link replace href="(tabs)" asChild>
+        <Link replace href="/(tabs)" asChild>
           <Button
-              title="Go Home"
+            title="Go Home"
           />
         </Link>
       </ThemedView>

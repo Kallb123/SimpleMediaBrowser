@@ -4,10 +4,11 @@ import { Stack, router, Href } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
-
 import { useColorScheme } from '@/hooks/useColorScheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';
+import { Provider } from 'react-redux';
+import { store } from '@/store/store';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -45,18 +46,20 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="firsttime" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-        <Stack.Screen
-          name="modal"
-          options={{
-            // Set the presentation mode to modal for our modal route.
-            presentation: 'modal',
-          }}
-        />
-      </Stack>
+      <Provider store={store}>
+        <Stack>
+          <Stack.Screen name="firsttime" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
+          <Stack.Screen
+            name="modal"
+            options={{
+              // Set the presentation mode to modal for our modal route.
+              presentation: 'modal',
+            }}
+          />
+        </Stack>
+      </Provider>
     </ThemeProvider>
   );
 }
