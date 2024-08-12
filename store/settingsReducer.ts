@@ -3,7 +3,6 @@ import type { RootState } from './store'
 
 // Define a type for the slice state
 interface SettingsState {
-    firstTime: boolean
     directory: string
     contentType: 'tv' | 'movie'
     dataSource: 'tvdb'
@@ -14,7 +13,6 @@ interface SettingsState {
 
 // Define the initial state using that type
 const initialState: SettingsState = {
-    firstTime: true,
     directory: "",
     contentType: 'tv',
     dataSource: 'tvdb',
@@ -30,18 +28,14 @@ export const settingsSlice = createSlice({
   reducers: {
     // Use the PayloadAction type to declare the contents of `action.payload`
     setDirectory: (state, action: PayloadAction<string>) => {
-        state.directory = action.payload
-      },
-      setFirstTime: (state, action: PayloadAction<boolean>) => {
-        state.firstTime = action.payload
-      },
+      state.directory = action.payload
+    },
   },
 })
 
 export const { setDirectory } = settingsSlice.actions
 
 // Other code such as selectors can use the imported `RootState` type
-export const selectDirectory = (state: RootState) => state.settings.directory
-export const selectFirstTime = (state: RootState) => state.settings.firstTime
+export const selectDirectory = (state: RootState) => state.settingsReducer.directory
 
 export default settingsSlice.reducer
