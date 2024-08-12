@@ -1,6 +1,6 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack, router, Href } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
@@ -39,7 +39,7 @@ export default function RootLayout() {
     const firstTimeLookup = await AsyncStorage.getItem(StorageKeys.FIRST_TIME_SETUP_KEY);
     console.log("First Time result:", firstTimeLookup);
     if (!firstTimeLookup || firstTimeLookup !== "false") {
-      router.replace("firsttime" as Href);
+      router.replace("/firsttime");
     }
     setLoaded(true);
   }
@@ -49,7 +49,8 @@ export default function RootLayout() {
       <Provider store={store}>
         <Stack>
           <Stack.Screen name="firsttime" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
+          <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
           <Stack.Screen
             name="modal"

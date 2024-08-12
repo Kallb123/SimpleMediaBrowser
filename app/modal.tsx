@@ -2,8 +2,8 @@ import { View, Platform, Button } from 'react-native';
 import { Link, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ScopedStorage from "react-native-scoped-storage"
-import { useCallback, useEffect, useState } from 'react';
+import * as ScopedStorage from "react-native-scoped-storage";
+import { useCallback, useEffect } from 'react';
 import { ThemedText } from '@/components/ThemedText';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { selectDirectory, setDirectory } from '@/store/settingsReducer';
@@ -37,6 +37,7 @@ export default function Modal() {
 
     const resetFirstTime = useCallback(async () => {
         await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(true));
+        router.replace("/firsttime");
     }, []);
 
     useEffect(() => {
