@@ -72,25 +72,25 @@ export default function SettingsPrompt() {
 
   const save = () => {
     console.log(`Saving dir: ${directory}, pass: ${password}, media: ${mediaType}, dataSource: ${dataSource}, mediaStructure: ${mediaStructure}, orientation: ${viewOrientation}, scale: ${viewScale}`);
-    if (directory) {
+    if (directory && directory !== settingsDirectory) {
       dispatch(setDirectory(directory));
     }
-    if (password) {
+    if (password && password !== settingsPassword) {
       dispatch(setPassword(password));
     }
-    if (mediaType) {
+    if (mediaType && mediaType !== settingsMediaType) {
       dispatch(setMediaType(mediaType));
     }
-    if (dataSource) {
+    if (dataSource && dataSource !== settingsDataSource) {
       dispatch(setDataSource(dataSource));
     }
-    if (mediaStructure) {
+    if (mediaStructure && mediaStructure !== settingsMediaStructure) {
       dispatch(setMediaStructure(mediaStructure));
     }
-    if (viewOrientation) {
+    if (viewOrientation && viewOrientation !== settingsViewOrientation) {
       dispatch(setViewOrientation(viewOrientation));
     }
-    if (viewScale) {
+    if (viewScale && viewScale !== settingsViewScale) {
       dispatch(setViewScale(viewScale));
     }
     router.replace('/(drawer)')

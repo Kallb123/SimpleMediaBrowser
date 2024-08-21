@@ -7,6 +7,7 @@ import { useSelector } from 'react-redux';
 import { selectDirectory, selectPassword } from '@/store/settingsReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileInfo, getInfoAsync, StorageAccessFramework } from 'expo-file-system';
+import { FileScanner } from '@/scripts/fileScanner';
 
 interface MediaObject {
   filename: string
@@ -31,36 +32,9 @@ export default function HomeScreen() {
   }, [directory]);
 
   const checkMediaContents = async () => {
-    const contents = await StorageAccessFramework.readDirectoryAsync(directory);
+    const list = await FileScanner.getInstance().scanFolder(directory);
 
-    var contentInfo = await Promise.all(contents.map(async (c) => {
-        try {
-          const info = await getInfoAsync(c);
-          return info;
-        } catch (e) {
-
-        }
-        const info: FileInfo = {uri: c, isDirectory: true, exists: true, size: 0, modificationTime: 0};
-        return info;
-    }));
-
-    const allContents: MediaObject[] = contentInfo.map((c) => {
-      const uri = decodeURIComponent(c.uri);
-      const filename = uri.substring(uri.lastIndexOf('/') + 1, uri.length)
-      return {
-        filename: filename,
-        path: c.uri,
-        parsedPath: uri,
-        isDirectory: c.isDirectory
-      }
-    });
-
-    const filtered = allContents.filter((c) => {
-      if (c.filename.charAt(0) === '.') return null;
-      return c;
-    })
-
-    setMediaList(filtered);
+    setMediaList(list);
   }
 
   return (

@@ -10,14 +10,14 @@ export default function DrawerLayout() {
             name="index" // This is the name of the page and must match the url from root
             options={{
                 drawerLabel: 'Home',
-                title: null,
+                title: "",
             }}
             />
             <Drawer.Screen
             name="settingsprompt" // This is the name of the page and must match the url from root
             options={{
                 drawerLabel: 'Settings',
-                title: null,
+                title: "",
             }}
             />
         </Drawer>
