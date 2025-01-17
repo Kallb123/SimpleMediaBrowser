@@ -56,7 +56,7 @@ export default function HomeScreen() {
         <ThemedView style={styles.stepContainer}>
           <ThemedText type="subtitle">Problem</ThemedText>
           {
-            directory ? (
+            directory ? ( // TODO: Need to insert a loading status in here
               <ThemedText>
                 Your library directory is empty or invalid, set it up in <Link href={settingsPassword ? "/(drawer)/settingsprompt" : "/settings"}>Settings</Link>.
               </ThemedText>

@@ -1,4 +1,6 @@
 import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system";
+import { store } from "@/store/store";
+import { setScanList } from "@/store/libraryReducer";
 
 export interface IMediaLibrary {
     [show: string] : IMediaShow;
@@ -86,7 +88,9 @@ export class FileScanner {
           return c;
         });
 
-         return filtered;
+        store.dispatch(setScanList(filtered.map(f => f.path)));
+
+        return filtered;
     }
 
     getUserID() {
