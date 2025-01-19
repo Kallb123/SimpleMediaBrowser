@@ -8,6 +8,7 @@ import { selectDirectory, selectPassword } from '@/store/settingsReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileInfo, getInfoAsync, StorageAccessFramework } from 'expo-file-system';
 import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
+import { MediaItem } from '@/components/UI/MediaItem';
 
 export default function HomeScreen() {
   const directory = useSelector(selectDirectory);
@@ -39,7 +40,8 @@ export default function HomeScreen() {
           data={mediaList}
           renderItem={({ item }) => {
             return (
-              <ThemedText><Link href={item.path as Href}>{item.filename}</Link></ThemedText>
+              <MediaItem mediaObject={item} />
+              // <ThemedText><Link href={item.path as Href}>{item.filename}</Link></ThemedText>
             )
           }}
           estimatedItemSize={200}
