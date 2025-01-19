@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from './store';
+import { IMediaObject } from '@/scripts/FileScanner';
 
 export interface IMediaLibrary {
     [show: string] : IMediaShow;
@@ -23,19 +24,6 @@ export interface IMediaSeason {
     }
     seasonNumber: number;
     episodes: { [episode: string] : IMediaObject; };
-}
-
-export interface IMediaObject {
-    ids: {
-        tvdb: string | null;
-        imdb: string | null;
-    }
-    episodeNumber: number;
-    title: string;
-    filename: string
-    path: string
-    parsedPath: string
-    isDirectory: boolean
 }
 
 export type IRawScanList = string[];

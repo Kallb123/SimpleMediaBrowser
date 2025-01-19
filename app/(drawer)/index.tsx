@@ -7,20 +7,13 @@ import { useSelector } from 'react-redux';
 import { selectDirectory, selectPassword } from '@/store/settingsReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileInfo, getInfoAsync, StorageAccessFramework } from 'expo-file-system';
-import { FileScanner } from '@/scripts/fileScanner';
-
-interface MediaObject {
-  filename: string
-  path: string
-  parsedPath: string
-  isDirectory: boolean
-}
+import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
 
 export default function HomeScreen() {
   const directory = useSelector(selectDirectory);
   const settingsPassword = useSelector(selectPassword);
 
-  const [mediaList, setMediaList] = useState([] as MediaObject[]);
+  const [mediaList, setMediaList] = useState([] as IMediaObject[]);
 
   useEffect(() => {
     // Check whether there's a directory to read
