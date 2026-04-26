@@ -232,9 +232,10 @@ export class FileScanner {
         // Remove extension for easier matching
         const withoutExt = filename.replace(/\.[^.]+$/, '');
 
-        // SxxExx pattern — season: up to 2 digits (realistic max ~99); episode: up to 3 digits
+        // SxxExx pattern — requires a separator before [Ss] so numeric show names don't false-match.
+        // Season: up to 2 digits (realistic max ~99); episode: up to 3 digits (e.g. anime ep 100+).
         const sxxMatch = withoutExt.match(
-            /^(.*?)[\.\s_-]+[Ss](\d{1,2})[Ee](\d{1,3})(?:[\.\s_-]+(.*))?$/,
+            /^(.*?)[\.\s_-]+\b[Ss](\d{1,2})[Ee](\d{1,3})\b(?:[\.\s_-]+(.*))?$/,
         );
         if (sxxMatch) {
             return {
@@ -245,9 +246,10 @@ export class FileScanner {
             };
         }
 
-        // NxNN pattern — episode allows 1-3 digits for consistency with SxxExx
+        // NxNN pattern — requires a separator before the season digit so numbers inside show names
+        // don't false-match. Season: up to 2 digits; episode: up to 3 digits.
         const nxnnMatch = withoutExt.match(
-            /^(.*?)[\.\s_-]+(\d{1,2})x(\d{1,3})(?:[\.\s_-]+(.*))?$/,
+            /^(.*?)[\.\s_-]+\b(\d{1,2})x(\d{1,3})\b(?:[\.\s_-]+(.*))?$/,
         );
         if (nxnnMatch) {
             return {
@@ -298,14 +300,12 @@ export class FileScanner {
                 // rootDir/ShowName Season N/episode.mkv
                 if (parts.length >= 1) {
                     const folderName = parts[0];
-                    // Match 'Season N' (word) preferably; require a word boundary before bare 'SN'
-                    // to avoid false positives on show names that end with a letter+digit (e.g. 'ShowS2').
+                    // Single capture group via non-capturing alternatives:
+                    // matches 'Season N' (word) or a word-bounded 'SN' abbreviation at end.
                     const seasonMatch = folderName.match(
-                        /[Ss]eason\s*(\d+)|\b[Ss](\d+)$/,
+                        /(?:[Ss]eason\s*|\b[Ss])(\d+)$/,
                     );
-                    const season = seasonMatch
-                        ? parseInt(seasonMatch[1] ?? seasonMatch[2], 10)
-                        : 1;
+                    const season = seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
                     const showName = seasonMatch
                         ? folderName.slice(0, folderName.lastIndexOf(seasonMatch[0])).trim()
                         : folderName;
