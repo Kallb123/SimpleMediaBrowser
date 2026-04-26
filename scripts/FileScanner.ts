@@ -229,9 +229,9 @@ export class FileScanner {
         // Remove extension for easier matching
         const withoutExt = filename.replace(/\.[^.]+$/, '');
 
-        // SxxExx pattern
+        // SxxExx pattern — allow up to 3 digits for both season and episode numbers
         const sxxMatch = withoutExt.match(
-            /^(.*?)[\.\s_-]+[Ss](\d{1,2})[Ee](\d{1,2})(?:[\.\s_-]+(.*))?$/,
+            /^(.*?)[\.\s_-]+[Ss](\d{1,3})[Ee](\d{1,3})(?:[\.\s_-]+(.*))?$/,
         );
         if (sxxMatch) {
             return {
@@ -242,9 +242,9 @@ export class FileScanner {
             };
         }
 
-        // NxNN pattern
+        // NxNN pattern — episode allows 1-3 digits for consistency with SxxExx
         const nxnnMatch = withoutExt.match(
-            /^(.*?)[\.\s_-]+(\d{1,2})x(\d{2,})(?:[\.\s_-]+(.*))?$/,
+            /^(.*?)[\.\s_-]+(\d{1,2})x(\d{1,3})(?:[\.\s_-]+(.*))?$/,
         );
         if (nxnnMatch) {
             return {
@@ -273,9 +273,10 @@ export class FileScanner {
         const parts = file.relativePathParts;
         const baseTitle = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
 
-        // Try to extract an episode number from the filename
-        const epMatch = file.filename.match(/[Ee](\d{1,3})|[Ee][Pp](\d{1,3})/);
-        const episode = epMatch ? parseInt(epMatch[1] ?? epMatch[2], 10) : 0;
+        // Try to extract an episode number from the filename.
+        // [Ee][Pp]? optionally matches 'p/P', covering 'e5', 'E5', 'ep5', 'EP5', etc.
+        const epMatch = file.filename.match(/[Ee][Pp]?(\d{1,3})/);
+        const episode = epMatch ? parseInt(epMatch[1], 10) : 0;
 
         switch (viewType) {
             case 'flat':
@@ -293,7 +294,11 @@ export class FileScanner {
                 // rootDir/ShowName Season N/episode.mkv
                 if (parts.length >= 1) {
                     const folderName = parts[0];
-                    const seasonMatch = folderName.match(/[Ss]eason\s*(\d+)|[Ss](\d+)$/);
+                    // Match 'Season N' (word) preferably; require a separator before bare 'SN' to
+                    // avoid false positives on show names that end with a letter+digit.
+                    const seasonMatch = folderName.match(
+                        /[Ss]eason\s*(\d+)|[\s._-][Ss](\d+)$/,
+                    );
                     const season = seasonMatch
                         ? parseInt(seasonMatch[1] ?? seasonMatch[2], 10)
                         : 1;
@@ -310,8 +315,13 @@ export class FileScanner {
                 if (parts.length >= 2) {
                     const showName = parts[0];
                     const seasonFolder = parts[1];
-                    const seasonMatch = seasonFolder.match(/(\d+)/);
-                    const season = seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
+                    // Prefer an explicit 'Season N' word; otherwise take the first digit run.
+                    const namedSeasonMatch = seasonFolder.match(/[Ss]eason\s*(\d+)/i);
+                    const rawNumberMatch = seasonFolder.match(/(\d+)/);
+                    const seasonStr = namedSeasonMatch
+                        ? namedSeasonMatch[1]
+                        : rawNumberMatch?.[1] ?? '1';
+                    const season = parseInt(seasonStr, 10);
                     return { showName, season, episode, title: baseTitle };
                 }
                 if (parts.length === 1) {
