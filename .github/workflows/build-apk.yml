@@ -16,6 +16,8 @@ jobs:
   build:
     name: Build Android APK (${{ inputs.profile }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,4 +38,12 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build APK via EAS
-        run: eas build --platform android --profile ${{ inputs.profile }} --non-interactive
+        id: eas-build
+        run: |
+          OUTPUT=$(eas build --platform android --profile ${{ inputs.profile }} --non-interactive 2>&1 | tee /dev/stderr)
+          BUILD_URL=$(echo "$OUTPUT" | grep -oE 'https://expo\.dev/accounts/[^[:space:]]+' | tail -1)
+          echo "build-url=$BUILD_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Print APK download URL
+        if: steps.eas-build.outputs.build-url != ''
+        run: echo "APK download URL ${{ steps.eas-build.outputs.build-url }}"
