@@ -60,10 +60,13 @@ export const settingsSlice = createSlice({
     clearScanList: (state, action: PayloadAction<string>) => {
       state.scanList = [];
     },
+    setMediaLibrary: (state, action: PayloadAction<IMediaLibrary>) => {
+      state.mediaLibrary = action.payload;
+    },
   },
 })
 
-export const { addToScanList, setScanList, clearScanList } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
