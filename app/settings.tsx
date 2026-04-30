@@ -59,8 +59,8 @@ export default function SettingsPrompt() {
   const viewTypeOptions = [
     {id: 'flat', label: 'Flat', title: 'All episodes of all shows visible in one list'},
     {id: 'show', label: 'Show', title: 'A folder for each show, with all episodes of that show then visible in each folder'},
-    {id: 'showplusseason', label: 'Show + Season', title: 'A folder for each show and season, with the episodes of that season in the folder'},
-    {id: 'showslashseason', label: 'Show/Season', title: 'A folder for each show, with a further folder for each season, with episodes then visible within'},
+    {id: 'show+season', label: 'Show + Season', title: 'A folder for each show and season, with the episodes of that season in the folder'},
+    {id: 'show/season', label: 'Show/Season', title: 'A folder for each show, with a further folder for each season, with episodes then visible within'},
   ];
   
   const uiTypeOptions = [
