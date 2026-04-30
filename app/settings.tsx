@@ -6,14 +6,14 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
-import * as ScopedStorage from "react-native-scoped-storage";
 import { useDispatch, useSelector } from 'react-redux';
-import { contentTypes, dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, addMediaSource, removeMediaSource } from '@/store/settingsReducer';
+import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { FileScanner } from '@/scripts/FileScanner';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { AddMediaSource } from '@/components/UI/AddMediaSource';
 
 export default function SettingsPrompt() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -29,10 +29,6 @@ export default function SettingsPrompt() {
   const [viewOrientation, setLocalViewOrientation] = useState("" as viewOrientations);
   const [viewScale, setLocalViewScale] = useState(2);
 
-  // State for adding a new source
-  const [newSourceType, setNewSourceType] = useState<contentTypes>('tv');
-  const newSourceTypeRef = useRef(null);
-
   const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
   const mediaSources = useSelector(selectMediaSources);
@@ -44,11 +40,6 @@ export default function SettingsPrompt() {
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
   const viewOrientationRef = useRef(null);
-
-  const mediaTypeOptions = [
-    {id: 'tv' as contentTypes, label: 'TV'},
-    {id: 'movie' as contentTypes, label: 'Movies'},
-  ];
 
   const dataSourceOptions = [
     {id: 'tvdb', label: 'TVDB'},
@@ -92,16 +83,6 @@ export default function SettingsPrompt() {
     }
     router.replace('/(drawer)')
   };
-
-  const addNewSource = useCallback(async () => {
-    let selectedDir;
-    try {
-        selectedDir = await ScopedStorage.openDocumentTree(true);
-    } catch {
-        return;
-    }
-    dispatch(addMediaSource({ uri: selectedDir.uri, contentType: newSourceType }));
-  }, [newSourceType, dispatch]);
 
   const deleteSource = useCallback((uri: string) => {
     dispatch(removeMediaSource(uri));
@@ -154,32 +135,7 @@ export default function SettingsPrompt() {
         ))}
 
         {/* Add new source */}
-        <ThemedView style={styles.addSourceRow}>
-          <SelectDropdown
-            ref={newSourceTypeRef}
-            data={mediaTypeOptions}
-            defaultValue={mediaTypeOptions[0]}
-            onSelect={(selectedItem) => {
-              setNewSourceType(selectedItem.id);
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Type...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-          <Button title="Add Source" onPress={addNewSource} />
-        </ThemedView>
+        <AddMediaSource />
       </ThemedView>
 
       {/* Rescan */}
@@ -341,12 +297,6 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     fontSize: 16,
     color: '#E55',
-  },
-  addSourceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
   },
   dropdownButtonStyle: {
     width: 140,
