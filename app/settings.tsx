@@ -10,6 +10,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { contentTypes, dataSources, selectDataSource, selectDirectory, selectMediaStructure, selectMediaType, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setDirectory, setMediaStructure, setMediaType, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
+import { FileScanner } from '@/scripts/FileScanner';
 
 export default function SettingsPrompt() {
   const [directory, setLocalDirectory] = useState(null as string | null);
@@ -107,6 +108,12 @@ export default function SettingsPrompt() {
     setLocalDirectory(selectedDir.uri);
   }, []);
 
+  const scanNow = useCallback(async () => {
+    if (directory) {
+      await FileScanner.getInstance().scanFolder(directory);
+    }
+  }, []);
+
   const handleUIScaleChange = (value: number) => {
     setLocalViewScale(11-value);
   }
@@ -137,6 +144,12 @@ export default function SettingsPrompt() {
         />
       </ThemedView>
       <ThemedText>Directory is: {directory}</ThemedText>
+      <ThemedView style={styles.titleContainer}>
+        <Button
+            title="Rescan now"
+            onPress={scanNow}
+        />
+      </ThemedView>
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Media type:</ThemedText>
         <SelectDropdown

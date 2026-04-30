@@ -7,20 +7,14 @@ import { useSelector } from 'react-redux';
 import { selectDirectory, selectPassword } from '@/store/settingsReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileInfo, getInfoAsync, StorageAccessFramework } from 'expo-file-system';
-import { FileScanner } from '@/scripts/fileScanner';
-
-interface MediaObject {
-  filename: string
-  path: string
-  parsedPath: string
-  isDirectory: boolean
-}
+import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
+import { MediaItem } from '@/components/UI/MediaItem';
 
 export default function HomeScreen() {
   const directory = useSelector(selectDirectory);
   const settingsPassword = useSelector(selectPassword);
 
-  const [mediaList, setMediaList] = useState([] as MediaObject[]);
+  const [mediaList, setMediaList] = useState([] as IMediaObject[]);
 
   useEffect(() => {
     // Check whether there's a directory to read
@@ -46,7 +40,8 @@ export default function HomeScreen() {
           data={mediaList}
           renderItem={({ item }) => {
             return (
-              <ThemedText><Link href={item.path as Href}>{item.filename}</Link></ThemedText>
+              <MediaItem mediaObject={item} />
+              // <ThemedText><Link href={item.path as Href}>{item.filename}</Link></ThemedText>
             )
           }}
           estimatedItemSize={200}
@@ -56,7 +51,7 @@ export default function HomeScreen() {
         <ThemedView style={styles.stepContainer}>
           <ThemedText type="subtitle">Problem</ThemedText>
           {
-            directory ? (
+            directory ? ( // TODO: Need to insert a loading status in here
               <ThemedText>
                 Your library directory is empty or invalid, set it up in <Link href={settingsPassword ? "/(drawer)/settingsprompt" : "/settings"}>Settings</Link>.
               </ThemedText>
