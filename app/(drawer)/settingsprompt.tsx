@@ -15,7 +15,8 @@ export default function SettingsPrompt() {
   const settingsPassword = useSelector(selectPassword);
 
   const goSettings = () => {
-    if (password === settingsPassword) {
+    const storedPassword = settingsPassword ?? "";
+    if (password === storedPassword) {
       router.navigate('/settings');
     } else {
       // Toast
@@ -37,7 +38,7 @@ export default function SettingsPrompt() {
           value={password ?? ""}
           placeholder="Settings password"
           keyboardType="default"
-          secureTextEntry={false}
+          secureTextEntry={true}
         />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>

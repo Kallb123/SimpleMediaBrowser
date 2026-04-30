@@ -3,9 +3,10 @@ import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { useDispatch } from 'react-redux';
 import { setPassword } from '@/store/settingsReducer';
@@ -16,20 +17,12 @@ export default function FirstTime() {
   const [sourceAdded, setSourceAdded] = useState(false);
   const dispatch = useDispatch();
 
-  useEffect(() => {
-    // setFirstTime()
-  }, []);
-
-  const setFirstTime = async () => {
-    await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
-  }
-
   const finishedGoHome = useCallback(async () => {
     if (password) {
       dispatch(setPassword(password));
     }
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
-    router.replace('/(tabs)');
+    router.replace('/(drawer)');
   }, [password, dispatch]);
 
   return (
@@ -54,6 +47,16 @@ export default function FirstTime() {
           ✓ Source added. You can add more in Settings later.
         </ThemedText>
       )}
+      <ThemedView style={styles.titleContainer}>
+        <ThemedText>Settings password (optional):</ThemedText>
+        <ThemedTextInput
+          onChangeText={onChangePassword}
+          value={password ?? ""}
+          placeholder="Leave blank for no password"
+          keyboardType="default"
+          secureTextEntry={true}
+        />
+      </ThemedView>
       <ThemedView style={styles.titleContainer}>
         <Button
             title="Finished, Go Home"

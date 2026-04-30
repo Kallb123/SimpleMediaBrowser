@@ -38,13 +38,15 @@ interface LibraryState {
   mediaLibrary: IMediaLibrary;
   movies: IMediaObject[];
   scanList: IRawScanList;
+  isScanning: boolean;
 }
 
 // Define the initial state using that type
 const initialState: LibraryState = {
   mediaLibrary: {},
   movies: [],
-  scanList: []
+  scanList: [],
+  isScanning: false,
 }
 
 export const settingsSlice = createSlice({
@@ -68,14 +70,18 @@ export const settingsSlice = createSlice({
     setMovies: (state, action: PayloadAction<IMediaObject[]>) => {
       state.movies = action.payload;
     },
+    setIsScanning: (state, action: PayloadAction<boolean>) => {
+      state.isScanning = action.payload;
+    },
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
 export const selectMovies = (state: RootState) => state.libraryReducer.movies;
+export const selectIsScanning = (state: RootState) => state.libraryReducer.isScanning;
 
 export default settingsSlice.reducer

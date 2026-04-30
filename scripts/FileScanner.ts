@@ -1,6 +1,6 @@
 import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary, setMovies } from "@/store/libraryReducer";
+import { setScanList, setMediaLibrary, setMovies, setIsScanning } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
 import type { viewTypes, contentTypes } from "@/store/settingsReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
@@ -60,6 +60,8 @@ export class FileScanner {
 
     /** Scan all configured sources and update the Redux store with merged results. */
     async scanAllSources(sources: IMediaSource[]) {
+        store.dispatch(setIsScanning(true));
+        try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
 
@@ -89,6 +91,9 @@ export class FileScanner {
         store.dispatch(setScanList(allScanUris));
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
+        } finally {
+            store.dispatch(setIsScanning(false));
+        }
     }
 
     async scanFolder(directory: string) {

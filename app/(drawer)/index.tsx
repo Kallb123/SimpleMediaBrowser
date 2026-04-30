@@ -5,7 +5,7 @@ import { Link } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectPassword } from '@/store/settingsReducer';
-import { selectMediaLibrary, selectMovies } from '@/store/libraryReducer';
+import { selectMediaLibrary, selectMovies, selectIsScanning } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
@@ -191,9 +191,9 @@ export default function HomeScreen() {
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
 
-  const [navStack, setNavStack] = useState<NavLevel[]>([]);
+  const isScanning = useSelector(selectIsScanning);
 
-  // Trigger a scan whenever the sources change
+  const [navStack, setNavStack] = useState<NavLevel[]>([]);
   useEffect(() => {
     if (!mediaSources || mediaSources.length === 0) return;
     FileScanner.getInstance().scanAllSources(mediaSources);
@@ -260,6 +260,11 @@ export default function HomeScreen() {
             }}
             estimatedItemSize={50}
           />
+        </ThemedView>
+      ) : isScanning ? (
+        <ThemedView style={styles.stepContainer}>
+          <ThemedText type="subtitle">Scanning…</ThemedText>
+          <ThemedText>Scanning your library, please wait.</ThemedText>
         </ThemedView>
       ) : (
         <ThemedView style={styles.stepContainer}>
