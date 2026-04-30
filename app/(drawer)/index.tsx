@@ -323,7 +323,6 @@ export default function HomeScreen() {
                     logger.log('HomeScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
                     Linking.openURL(item.mediaObject.path).catch((e: unknown) => {
                       logger.error('HomeScreen', `Failed to open file: ${item.mediaObject.path}`, e);
-                      console.error('Failed to open file:', e);
                     });
                   };
 

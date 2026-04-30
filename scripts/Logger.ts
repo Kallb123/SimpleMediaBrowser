@@ -126,7 +126,9 @@ class Logger {
                 // Check file size and rotate if too large.
                 try {
                     const info = await FileSystem.getInfoAsync(LOG_FILE_PATH);
-                    if (info.exists && (info as any).size > MAX_FILE_BYTES) {
+                    // expo-file-system's FileInfo includes `size` when the file exists;
+                    // the TS type uses a discriminated union so we check exists first.
+                    if (info.exists && 'size' in info && (info.size as number) > MAX_FILE_BYTES) {
                         // Keep the second half of the file to preserve recent logs.
                         const existing = await FileSystem.readAsStringAsync(LOG_FILE_PATH, { encoding: FileSystem.EncodingType.UTF8 });
                         const halfway = Math.floor(existing.length / 2);
@@ -137,9 +139,12 @@ class Logger {
                     // Rotation failure is non-fatal.
                 }
 
+                // `append` is supported by expo-file-system at runtime but may not be
+                // present in the bundled type declarations for this SDK version.
                 await FileSystem.writeAsStringAsync(
                     LOG_FILE_PATH,
                     content + '\n',
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     { encoding: FileSystem.EncodingType.UTF8, append: true } as any,
                 );
             } catch {

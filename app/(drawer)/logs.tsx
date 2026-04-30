@@ -97,7 +97,7 @@ export default function LogsScreen() {
                 ) : (
                     lines.map((line: string, i: number) => (
                         <ThemedText
-                            key={i}
+                            key={`${i}-${line.substring(0, 20)}`}
                             style={[styles.logLine, { color: lineColor(line) }]}
                             selectable
                         >
