@@ -8,6 +8,7 @@ import { useCallback, useState } from 'react';
 import { router } from 'expo-router';
 import { useSelector } from 'react-redux';
 import { selectPassword } from '@/store/settingsReducer';
+import { logger } from '@/scripts/Logger';
 
 export default function SettingsPrompt() {
   const [password, setPassword] = useState("");
@@ -17,8 +18,10 @@ export default function SettingsPrompt() {
   const goSettings = () => {
     const storedPassword = settingsPassword ?? "";
     if (password === storedPassword) {
+      logger.log('SettingsPrompt', 'Password accepted – navigating to settings');
       router.navigate('/settings');
     } else {
+      logger.warn('SettingsPrompt', 'Password rejected – entered password does not match stored password');
       // Toast
       console.log(`Passwords don't match: ${password} - ${settingsPassword}`);
     }

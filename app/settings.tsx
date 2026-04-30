@@ -14,6 +14,7 @@ import { FileScanner } from '@/scripts/FileScanner';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { AddMediaSource } from '@/components/UI/AddMediaSource';
+import { logger } from '@/scripts/Logger';
 
 export default function SettingsPrompt() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -56,6 +57,8 @@ export default function SettingsPrompt() {
     {id: 'poster', label: 'Poster'},
     {id: 'banner', label: 'Banner'},
   ];
+
+  logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${mediaSources.length}`);
   
   useEffect(() => {
     setLocalPassword(settingsPassword as string);
@@ -66,29 +69,44 @@ export default function SettingsPrompt() {
   }, [settingsPassword, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale]);
 
   const save = () => {
+    logger.log('Settings', 'Save pressed – evaluating changes');
+    let changeCount = 0;
     if (password && password !== settingsPassword) {
+      logger.log('Settings', 'Persisting: password changed');
       dispatch(setPassword(password));
+      changeCount++;
     }
     if (dataSource && dataSource !== settingsDataSource) {
+      logger.log('Settings', `Persisting: dataSource changed ${settingsDataSource} → ${dataSource}`);
       dispatch(setDataSource(dataSource));
+      changeCount++;
     }
     if (mediaStructure && mediaStructure !== settingsMediaStructure) {
+      logger.log('Settings', `Persisting: mediaStructure changed ${settingsMediaStructure} → ${mediaStructure}`);
       dispatch(setMediaStructure(mediaStructure));
+      changeCount++;
     }
     if (viewOrientation && viewOrientation !== settingsViewOrientation) {
+      logger.log('Settings', `Persisting: viewOrientation changed ${settingsViewOrientation} → ${viewOrientation}`);
       dispatch(setViewOrientation(viewOrientation));
+      changeCount++;
     }
     if (viewScale && viewScale !== settingsViewScale) {
+      logger.log('Settings', `Persisting: viewScale changed ${settingsViewScale} → ${viewScale}`);
       dispatch(setViewScale(viewScale));
+      changeCount++;
     }
+    logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
     router.replace('/(drawer)')
   };
 
   const deleteSource = useCallback((uri: string) => {
+    logger.log('Settings', `Removing media source: ${uri}`);
     dispatch(removeMediaSource(uri));
   }, [dispatch]);
 
   const scanNow = useCallback(async () => {
+    logger.log('Settings', `Manual rescan triggered for ${mediaSources.length} source(s)`);
     await FileScanner.getInstance().scanAllSources(mediaSources);
   }, [mediaSources]);
 
