@@ -1,11 +1,12 @@
-import { Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { Image } from 'expo-image';
 import { Link } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectPassword } from '@/store/settingsReducer';
-import { selectMediaLibrary, selectMovies, selectIsScanning } from '@/store/libraryReducer';
+import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale } from '@/store/settingsReducer';
+import { selectMediaLibrary, selectMovies, selectIsScanning, selectThumbnails } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
@@ -20,8 +21,8 @@ type NavLevel = {
 };
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; key: string; onPress: () => void }
-  | { kind: 'file'; label: string; key: string; mediaObject: IMediaObject };
+  | { kind: 'folder'; label: string; key: string; thumbnailUri?: string; onPress: () => void }
+  | { kind: 'file'; label: string; key: string; thumbnailUri?: string; mediaObject: IMediaObject };
 
 // ── Helper: format an episode label with episode number prefix ───────────────
 
@@ -33,6 +34,23 @@ function formatEpisodeLabel(ep: IMediaObject): string {
   return ep.title || ep.filename;
 }
 
+// ── Helper: pick a representative thumbnail URI for a show folder ─────────────
+
+function pickShowThumbnail(
+  library: IMediaLibrary,
+  showName: string,
+  thumbnails: { [path: string]: string },
+): string | undefined {
+  const show = library[showName];
+  if (!show) return undefined;
+  for (const season of Object.values(show.seasons)) {
+    for (const ep of Object.values(season.episodes)) {
+      if (thumbnails[ep.path]) return thumbnails[ep.path];
+    }
+  }
+  return undefined;
+}
+
 // ── Helper: build items to display from library + nav state ──────────────────
 
 function buildDisplayItems(
@@ -40,6 +58,7 @@ function buildDisplayItems(
   movies: IMediaObject[],
   viewType: viewTypes,
   navStack: NavLevel[],
+  thumbnails: { [path: string]: string },
   navigateInto: (entry: NavLevel) => void,
 ): DisplayItem[] {
   switch (viewType) {
@@ -53,6 +72,7 @@ function buildDisplayItems(
               kind: 'file',
               label: formatEpisodeLabel(ep),
               key: ep.path,
+              thumbnailUri: thumbnails[ep.path],
               mediaObject: ep,
             });
           }
@@ -63,6 +83,7 @@ function buildDisplayItems(
           kind: 'file',
           label: movie.title || movie.filename,
           key: movie.path,
+          thumbnailUri: thumbnails[movie.path],
           mediaObject: movie,
         });
       }
@@ -76,12 +97,14 @@ function buildDisplayItems(
           kind: 'folder' as const,
           label: showName,
           key: showName,
+          thumbnailUri: pickShowThumbnail(library, showName, thumbnails),
           onPress: () => navigateInto({ label: showName, showName }),
         }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movie.title || movie.filename,
           key: movie.path,
+          thumbnailUri: thumbnails[movie.path],
           mediaObject: movie,
         }));
         return [...showFolders, ...movieItems];
@@ -96,6 +119,7 @@ function buildDisplayItems(
             kind: 'file',
             label: formatEpisodeLabel(ep),
             key: ep.path,
+            thumbnailUri: thumbnails[ep.path],
             mediaObject: ep,
           });
         }
@@ -110,10 +134,15 @@ function buildDisplayItems(
         for (const [showName, show] of Object.entries(library)) {
           for (const [seasonKey, season] of Object.entries(show.seasons)) {
             const label = `${showName} – Season ${season.seasonNumber}`;
+            // Use first episode thumbnail from this season
+            const firstEpThumb = Object.values(season.episodes)
+              .map((ep) => thumbnails[ep.path])
+              .find(Boolean);
             showSeasonFolders.push({
               kind: 'folder',
               label,
               key: `${showName}::${seasonKey}`,
+              thumbnailUri: firstEpThumb,
               onPress: () => navigateInto({ label, showName, seasonKey }),
             });
           }
@@ -123,6 +152,7 @@ function buildDisplayItems(
           kind: 'file' as const,
           label: movie.title || movie.filename,
           key: movie.path,
+          thumbnailUri: thumbnails[movie.path],
           mediaObject: movie,
         }));
         return [...showSeasonFolders, ...movieItems];
@@ -135,6 +165,7 @@ function buildDisplayItems(
         kind: 'file',
         label: formatEpisodeLabel(ep),
         key: ep.path,
+        thumbnailUri: thumbnails[ep.path],
         mediaObject: ep,
       }));
     }
@@ -147,12 +178,14 @@ function buildDisplayItems(
           kind: 'folder' as const,
           label: showName,
           key: showName,
+          thumbnailUri: pickShowThumbnail(library, showName, thumbnails),
           onPress: () => navigateInto({ label: showName, showName }),
         }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movie.title || movie.filename,
           key: movie.path,
+          thumbnailUri: thumbnails[movie.path],
           mediaObject: movie,
         }));
         return [...showFolders, ...movieItems];
@@ -165,10 +198,14 @@ function buildDisplayItems(
           .sort((a, b) => a[1].seasonNumber - b[1].seasonNumber)
           .map(([seasonKey, season]) => {
             const label = `Season ${season.seasonNumber}`;
+            const firstEpThumb = Object.values(season.episodes)
+              .map((ep) => thumbnails[ep.path])
+              .find(Boolean);
             return {
               kind: 'folder' as const,
               label,
               key: seasonKey,
+              thumbnailUri: firstEpThumb,
               onPress: () =>
                 navigateInto({
                   label,
@@ -186,6 +223,7 @@ function buildDisplayItems(
         kind: 'file',
         label: formatEpisodeLabel(ep),
         key: ep.path,
+        thumbnailUri: thumbnails[ep.path],
         mediaObject: ep,
       }));
     }
@@ -194,12 +232,25 @@ function buildDisplayItems(
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const CARD_GAP = 8;
+/** Minimum number of grid columns shown at the lowest viewScale. */
+const MIN_COLUMNS = 2;
+/** Maximum number of grid columns shown at the highest viewScale. */
+const MAX_COLUMNS = 5;
+/** Divisor used to map viewScale (1-10) to column count. */
+const SCALE_TO_COLUMNS_DIVISOR = 2.5;
+/** Approximate height of the card label area (paddingTop + paddingBottom + font line-height). */
+const LABEL_HEIGHT = 48;
+
 export default function HomeScreen() {
   const mediaSources = useSelector(selectMediaSources);
   const settingsPassword = useSelector(selectPassword);
   const viewType = useSelector(selectMediaStructure);
+  const viewScale = useSelector(selectViewScale);
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
+  const thumbnails = useSelector(selectThumbnails);
 
   const isScanning = useSelector(selectIsScanning);
 
@@ -222,9 +273,14 @@ export default function HomeScreen() {
     setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
   }, []);
 
+  // Map viewScale (1-10) to number of grid columns (MIN_COLUMNS-MAX_COLUMNS)
+  const numColumns = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, Math.round(viewScale / SCALE_TO_COLUMNS_DIVISOR)));
+  const cardWidth = (SCREEN_WIDTH - CARD_GAP * (numColumns + 1)) / numColumns;
+  const thumbnailHeight = Math.round(cardWidth * 9 / 16);
+
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, navigateInto),
-    [mediaLibrary, movies, viewType, navStack, navigateInto],
+    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, thumbnails, navigateInto),
+    [mediaLibrary, movies, viewType, navStack, thumbnails, navigateInto],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
@@ -251,24 +307,41 @@ export default function HomeScreen() {
           <FlashList
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
+            numColumns={numColumns}
             renderItem={({ item }: { item: DisplayItem }) => {
-              if (item.kind === 'folder') {
-                return (
-                  <TouchableOpacity onPress={item.onPress} style={styles.folderItem}>
-                    <ThemedText>📁 {item.label}</ThemedText>
-                  </TouchableOpacity>
-                );
-              }
+              const isFolder = item.kind === 'folder';
+              const handlePress = isFolder
+                ? item.onPress
+                : () => Linking.openURL(item.mediaObject.path).catch((e) => console.error('Failed to open file:', e));
+
               return (
                 <TouchableOpacity
-                  onPress={() => Linking.openURL(item.mediaObject.path).catch((e) => console.error('Failed to open file:', e))}
-                  style={styles.fileItem}
+                  onPress={handlePress}
+                  style={[styles.card, { width: cardWidth }]}
                 >
-                  <ThemedText>🎬 {item.label}</ThemedText>
+                  <View style={[styles.thumbnailBox, { height: thumbnailHeight }]}>
+                    {item.thumbnailUri ? (
+                      <Image
+                        source={{ uri: item.thumbnailUri }}
+                        style={styles.thumbnailImage}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <View style={styles.thumbnailPlaceholder}>
+                        <ThemedText style={styles.placeholderIcon}>
+                          {isFolder ? '📁' : '🎬'}
+                        </ThemedText>
+                      </View>
+                    )}
+                  </View>
+                  <ThemedText style={styles.cardLabel} numberOfLines={2}>
+                    {item.label}
+                  </ThemedText>
                 </TouchableOpacity>
               );
             }}
-            estimatedItemSize={50}
+            estimatedItemSize={thumbnailHeight + LABEL_HEIGHT}
+            contentContainerStyle={styles.gridContent}
           />
         </ThemedView>
       ) : isScanning ? (
@@ -330,13 +403,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     opacity: 0.7,
   },
-  folderItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  gridContent: {
+    padding: CARD_GAP,
   },
-  fileItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  card: {
+    margin: CARD_GAP / 2,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  thumbnailBox: {
+    width: '100%',
+    backgroundColor: '#222',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeholderIcon: {
+    fontSize: 32,
+  },
+  cardLabel: {
+    paddingHorizontal: 4,
+    paddingTop: 4,
+    paddingBottom: 6,
+    fontSize: 12,
   },
   stepContainer: {
     gap: 8,
