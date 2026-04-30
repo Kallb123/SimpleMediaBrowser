@@ -15,7 +15,8 @@ export default function SettingsPrompt() {
   const settingsPassword = useSelector(selectPassword);
 
   const goSettings = () => {
-    if (password === settingsPassword) {
+    const storedPassword = settingsPassword ?? "";
+    if (password === storedPassword) {
       router.navigate('/settings');
     } else {
       // Toast
