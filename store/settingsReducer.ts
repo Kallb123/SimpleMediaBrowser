@@ -19,6 +19,7 @@ interface SettingsState {
   viewType: viewTypes
   viewScale: number
   viewOrientation: viewOrientations
+  tmdbApiKey: string | null
 }
 
 // Define the initial state using that type
@@ -28,7 +29,8 @@ const initialState: SettingsState = {
   dataSource: 'tvdb',
   viewType: 'show/season',
   viewScale: 5,
-  viewOrientation: 'poster'
+  viewOrientation: 'poster',
+  tmdbApiKey: null,
 }
 
 export const settingsSlice = createSlice({
@@ -58,10 +60,13 @@ export const settingsSlice = createSlice({
     setViewScale: (state, action: PayloadAction<number>) => {
       state.viewScale = action.payload;
     },
+    setTmdbApiKey: (state, action: PayloadAction<string | null>) => {
+      state.tmdbApiKey = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources;
@@ -70,5 +75,6 @@ export const selectDataSource = (state: RootState) => state.settingsReducer.data
 export const selectMediaStructure = (state: RootState) => state.settingsReducer.viewType;
 export const selectViewOrientation = (state: RootState) => state.settingsReducer.viewOrientation;
 export const selectViewScale = (state: RootState) => state.settingsReducer.viewScale;
+export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdbApiKey;
 
 export default settingsSlice.reducer

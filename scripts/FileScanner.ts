@@ -5,11 +5,13 @@ import { setScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail } 
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
+import { MetadataService } from "@/scripts/MetadataService";
 
 export interface IMediaObject {
     ids: {
         tvdb: string | null;
         imdb: string | null;
+        tmdb: string | null;
     }
     episodeNumber: number;
     title: string;
@@ -17,6 +19,7 @@ export interface IMediaObject {
     path: string
     parsedPath: string
     isDirectory: boolean
+    poster: string;
 }
 
 // Re-export library types so other modules can import them from here
@@ -124,6 +127,19 @@ export class FileScanner {
             }),
         );
         logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+
+        // Enrich library with TMDB posters if an API key is configured
+        const tmdbApiKey = store.getState().settingsReducer.tmdbApiKey;
+        if (tmdbApiKey) {
+            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment in background');
+            const currentLibrary = store.getState().libraryReducer.mediaLibrary;
+            const currentMovies = store.getState().libraryReducer.movies;
+            MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey).catch((e) => {
+                logger.error('FileScanner', 'Metadata enrichment failed', e);
+            });
+        } else {
+            logger.log('FileScanner', 'No TMDB API key configured – skipping metadata enrichment');
+        }
         } catch (e) {
             logger.error('FileScanner', `scanAllSources threw an error`, e);
             throw e;
@@ -151,13 +167,14 @@ export class FileScanner {
           const uri = decodeURIComponent(c.uri);
           const filename = uri.substring(uri.lastIndexOf('/') + 1, uri.length)
           return {
-            ids : {tvdb: null, imdb: null},
+            ids : {tvdb: null, imdb: null, tmdb: null},
             title: "",
             episodeNumber: 0,
             filename: filename,
             path: c.uri,
             parsedPath: uri,
-            isDirectory: c.isDirectory
+            isDirectory: c.isDirectory,
+            poster: '',
           }
         });
     
@@ -227,7 +244,7 @@ export class FileScanner {
                 await this.recursiveCollect(info.uri, [...relativePathParts, filename], result, depth + 1);
             } else if (this.isMediaFile(filename)) {
                 result.push({
-                    ids: { tvdb: null, imdb: null },
+                    ids: { tvdb: null, imdb: null, tmdb: null },
                     title: '',
                     episodeNumber: 0,
                     filename,
@@ -235,6 +252,7 @@ export class FileScanner {
                     parsedPath: uri,
                     isDirectory: false,
                     relativePathParts,
+                    poster: '',
                 });
             }
         }
@@ -271,7 +289,7 @@ export class FileScanner {
 
             if (!library[showName]) {
                 library[showName] = {
-                    ids: { tvdb: null, imdb: null },
+                    ids: { tvdb: null, imdb: null, tmdb: null },
                     title: showName,
                     year: 0,
                     poster: '',
@@ -282,7 +300,7 @@ export class FileScanner {
             const seasonKey = `s${String(season).padStart(2, '0')}`;
             if (!library[showName].seasons[seasonKey]) {
                 library[showName].seasons[seasonKey] = {
-                    ids: { tvdb: null, imdb: null },
+                    ids: { tvdb: null, imdb: null, tmdb: null },
                     seasonNumber: season,
                     episodes: {},
                 };
