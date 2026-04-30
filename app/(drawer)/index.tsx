@@ -2,7 +2,7 @@ import { Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Link } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { selectDirectory, selectMediaStructure, selectPassword } from '@/store/settingsReducer';
 import { selectMediaLibrary } from '@/store/libraryReducer';
@@ -173,17 +173,17 @@ export default function HomeScreen() {
     setNavStack([]);
   }, [viewType]);
 
-  const navigateInto = (entry: NavLevel) => {
+  const navigateInto = useCallback((entry: NavLevel) => {
     setNavStack((prev: NavLevel[]) => [...prev, entry]);
-  };
+  }, []);
 
-  const navigateBack = () => {
+  const navigateBack = useCallback(() => {
     setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
-  };
+  }, []);
 
   const displayItems = useMemo(
     () => buildDisplayItems(mediaLibrary, viewType, navStack, navigateInto),
-    [mediaLibrary, viewType, navStack],
+    [mediaLibrary, viewType, navStack, navigateInto],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0;
@@ -220,7 +220,7 @@ export default function HomeScreen() {
               }
               return (
                 <TouchableOpacity
-                  onPress={() => Linking.openURL(item.mediaObject.path).catch(() => {})}
+                  onPress={() => Linking.openURL(item.mediaObject.path).catch((e) => console.error('Failed to open file:', e))}
                   style={styles.fileItem}
                 >
                   <ThemedText>🎬 {item.label}</ThemedText>

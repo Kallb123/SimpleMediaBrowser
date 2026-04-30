@@ -8,7 +8,7 @@ export type MediaItemProps =  {
 
 export function FileLink({ mediaObject }: MediaItemProps) {
   const handlePress = () => {
-    Linking.openURL(mediaObject.path).catch(() => {});
+    Linking.openURL(mediaObject.path).catch((e) => console.error('Failed to open file:', e));
   };
   return (
     <TouchableOpacity onPress={handlePress}>
