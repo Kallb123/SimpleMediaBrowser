@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Button, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Button, StyleSheet, Text, View } from 'react-native';
+import { ThemedTextInput } from '@/components/ThemedTextInput';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -11,8 +12,16 @@ import { contentTypes, dataSources, selectDataSource, selectDirectory, selectMed
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { FileScanner } from '@/scripts/FileScanner';
+import { useColorScheme } from '@/hooks/useColorScheme';
+import { Colors } from '@/constants/Colors';
 
 export default function SettingsPrompt() {
+  const colorScheme = useColorScheme() ?? 'light';
+  const theme = Colors[colorScheme];
+
+  const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
+  const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
+
   const [directory, setLocalDirectory] = useState(null as string | null);
   const [password, setLocalPassword] = useState(null as string | null);
   const [mediaType, setLocalMediaType] = useState("" as contentTypes);
@@ -127,8 +136,7 @@ export default function SettingsPrompt() {
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Password for settings:</ThemedText>
-        <TextInput
-          // style={styles.input}
+        <ThemedTextInput
           onChangeText={setLocalPassword}
           value={password ?? ""}
           placeholder="Settings password"
@@ -161,8 +169,8 @@ export default function SettingsPrompt() {
           }}
           renderButton={(selectedItem, isOpened) => {
             return (
-              <View style={styles.dropdownButtonStyle}>
-                <Text style={styles.dropdownButtonTxtStyle}>
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
                   {(selectedItem && selectedItem.label) || 'Please select...'}
                 </Text>
                 <Text>{isOpened ? "🔼" : "🔽"}</Text>
@@ -171,13 +179,13 @@ export default function SettingsPrompt() {
           }}
           renderItem={(item, index, isSelected) => {
             return (
-              <View style={{...styles.dropdownItemStyle, ...(isSelected && {backgroundColor: '#D2D9DF'})}}>
-                <Text style={styles.dropdownItemTxtStyle}>{item.label}</Text>
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
               </View>
             );
           }}
           showsVerticalScrollIndicator={false}
-          dropdownStyle={styles.dropdownMenuStyle}
+          dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
@@ -191,8 +199,8 @@ export default function SettingsPrompt() {
           }}
           renderButton={(selectedItem, isOpened) => {
             return (
-              <View style={styles.dropdownButtonStyle}>
-                <Text style={styles.dropdownButtonTxtStyle}>
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
                   {(selectedItem && selectedItem.label) || 'Please select...'}
                 </Text>
                 <Text>{isOpened ? "🔼" : "🔽"}</Text>
@@ -201,13 +209,13 @@ export default function SettingsPrompt() {
           }}
           renderItem={(item, index, isSelected) => {
             return (
-              <View style={{...styles.dropdownItemStyle, ...(isSelected && {backgroundColor: '#D2D9DF'})}}>
-                <Text style={styles.dropdownItemTxtStyle}>{item.label}</Text>
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
               </View>
             );
           }}
           showsVerticalScrollIndicator={false}
-          dropdownStyle={styles.dropdownMenuStyle}
+          dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
@@ -222,8 +230,8 @@ export default function SettingsPrompt() {
           }}
           renderButton={(selectedItem, isOpened) => {
             return (
-              <View style={styles.dropdownButtonStyle}>
-                <Text style={styles.dropdownButtonTxtStyle}>
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
                   {(selectedItem && selectedItem.label) || 'Please select...'}
                 </Text>
                 <Text>{isOpened ? "🔼" : "🔽"}</Text>
@@ -232,13 +240,13 @@ export default function SettingsPrompt() {
           }}
           renderItem={(item, index, isSelected) => {
             return (
-              <View style={{...styles.dropdownItemStyle, ...(isSelected && {backgroundColor: '#D2D9DF'})}}>
-                <Text style={styles.dropdownItemTxtStyle}>{item.label}</Text>
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
               </View>
             );
           }}
           showsVerticalScrollIndicator={false}
-          dropdownStyle={styles.dropdownMenuStyle}
+          dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
       </ThemedView>
       <ThemedView>
@@ -255,8 +263,8 @@ export default function SettingsPrompt() {
           }}
           renderButton={(selectedItem, isOpened) => {
             return (
-              <View style={styles.dropdownButtonStyle}>
-                <Text style={styles.dropdownButtonTxtStyle}>
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
                   {(selectedItem && selectedItem.label) || 'Please select...'}
                 </Text>
                 <Text>{isOpened ? "🔼" : "🔽"}</Text>
@@ -265,13 +273,13 @@ export default function SettingsPrompt() {
           }}
           renderItem={(item, index, isSelected) => {
             return (
-              <View style={{...styles.dropdownItemStyle, ...(isSelected && {backgroundColor: '#D2D9DF'})}}>
-                <Text style={styles.dropdownItemTxtStyle}>{item.label}</Text>
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
               </View>
             );
           }}
           showsVerticalScrollIndicator={false}
-          dropdownStyle={styles.dropdownMenuStyle}
+          dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
@@ -283,8 +291,8 @@ export default function SettingsPrompt() {
           step={1}
           value={11-settingsViewScale}
           onSlidingComplete={handleUIScaleChange}
-          minimumTrackTintColor="#FFFFFF"
-          maximumTrackTintColor="#000000"
+          minimumTrackTintColor={colorScheme === 'dark' ? '#ECEDEE' : '#11181C'}
+          maximumTrackTintColor={colorScheme === 'dark' ? '#687076' : '#9BA1A6'}
         />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
@@ -311,7 +319,6 @@ const styles = StyleSheet.create({
   dropdownButtonStyle: {
     width: 200,
     height: 50,
-    backgroundColor: '#E9ECEF',
     borderRadius: 12,
     flexDirection: 'row',
     justifyContent: 'center',
@@ -322,7 +329,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '500',
-    color: '#151E26',
   },
   dropdownButtonArrowStyle: {
     fontSize: 28,
@@ -332,7 +338,6 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   dropdownMenuStyle: {
-    backgroundColor: '#E9ECEF',
     borderRadius: 8,
   },
   dropdownItemStyle: {
@@ -347,7 +352,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '500',
-    color: '#151E26',
   },
   dropdownItemIconStyle: {
     fontSize: 28,

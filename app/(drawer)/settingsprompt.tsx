@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Button, StyleSheet, TextInput } from 'react-native';
+import { Button, StyleSheet } from 'react-native';
+import { ThemedTextInput } from '@/components/ThemedTextInput';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -31,8 +32,7 @@ export default function SettingsPrompt() {
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Password for settings:</ThemedText>
-        <TextInput
-          // style={styles.input}
+        <ThemedTextInput
           onChangeText={setPassword}
           value={password ?? ""}
           placeholder="Settings password"
