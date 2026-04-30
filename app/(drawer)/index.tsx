@@ -23,6 +23,16 @@ type DisplayItem =
   | { kind: 'folder'; label: string; key: string; onPress: () => void }
   | { kind: 'file'; label: string; key: string; mediaObject: IMediaObject };
 
+// ── Helper: format an episode label with episode number prefix ───────────────
+
+function formatEpisodeLabel(ep: IMediaObject): string {
+  if (ep.episodeNumber > 0) {
+    const epNum = `E${String(ep.episodeNumber).padStart(2, '0')}`;
+    return ep.title ? `${epNum} - ${ep.title}` : epNum;
+  }
+  return ep.title || ep.filename;
+}
+
 // ── Helper: build items to display from library + nav state ──────────────────
 
 function buildDisplayItems(
@@ -41,7 +51,7 @@ function buildDisplayItems(
           for (const ep of Object.values(season.episodes)) {
             items.push({
               kind: 'file',
-              label: ep.title || ep.filename,
+              label: formatEpisodeLabel(ep),
               key: ep.path,
               mediaObject: ep,
             });
@@ -84,7 +94,7 @@ function buildDisplayItems(
         for (const ep of Object.values(season.episodes)) {
           items.push({
             kind: 'file',
-            label: ep.title || ep.filename,
+            label: formatEpisodeLabel(ep),
             key: ep.path,
             mediaObject: ep,
           });
@@ -123,7 +133,7 @@ function buildDisplayItems(
       if (!season) return [];
       return Object.values(season.episodes).map((ep) => ({
         kind: 'file',
-        label: ep.title || ep.filename,
+        label: formatEpisodeLabel(ep),
         key: ep.path,
         mediaObject: ep,
       }));
@@ -174,7 +184,7 @@ function buildDisplayItems(
       if (!season) return [];
       return Object.values(season.episodes).map((ep) => ({
         kind: 'file',
-        label: ep.title || ep.filename,
+        label: formatEpisodeLabel(ep),
         key: ep.path,
         mediaObject: ep,
       }));

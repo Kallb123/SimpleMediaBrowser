@@ -2,7 +2,6 @@ import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system
 import { store } from "@/store/store";
 import { setScanList, setMediaLibrary, setMovies, setIsScanning } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
-import type { viewTypes, contentTypes } from "@/store/settingsReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 
 export interface IMediaObject {
@@ -65,15 +64,13 @@ export class FileScanner {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
 
-        const viewType: viewTypes = store.getState().settingsReducer?.viewType ?? 'show/season';
-
         // Collect TV files from all TV sources and merge into one library
         const allTvFiles: IScannedFile[] = [];
         for (const src of tvSources) {
             const files = await this.collectAllMediaFiles(src.uri);
             allTvFiles.push(...files);
         }
-        const mergedLibrary = this.buildLibrary(allTvFiles, viewType);
+        const mergedLibrary = this.buildLibrary(allTvFiles);
 
         // Collect movie files from all movie sources
         const allMovieFiles: IScannedFile[] = [];
@@ -133,8 +130,7 @@ export class FileScanner {
 
         // Recursively collect all media files and build the library
         const allMediaFiles = await this.collectAllMediaFiles(directory);
-        const viewType: viewTypes = store.getState().settingsReducer?.viewType ?? 'show/season';
-        const library = this.buildLibrary(allMediaFiles, viewType);
+        const library = this.buildLibrary(allMediaFiles);
         store.dispatch(setMediaLibrary(library));
 
         return filtered;
@@ -218,11 +214,11 @@ export class FileScanner {
 
     // ─── Library building ────────────────────────────────────────────────────
 
-    buildLibrary(files: IScannedFile[], viewType: viewTypes): IMediaLibrary {
+    buildLibrary(files: IScannedFile[]): IMediaLibrary {
         const library: IMediaLibrary = {};
 
         for (const file of files) {
-            const metadata = this.parseMediaFile(file, viewType);
+            const metadata = this.parseMediaFile(file);
             if (!metadata) continue;
 
             const { showName, season, episode, title } = metadata;
@@ -262,13 +258,13 @@ export class FileScanner {
         return library;
     }
 
-    private parseMediaFile(file: IScannedFile, viewType: viewTypes): ParsedMetadata | null {
+    private parseMediaFile(file: IScannedFile): ParsedMetadata | null {
         // Filename-based parsing takes priority (e.g. ShowName.S01E05.mkv)
         const fromFilename = this.parseFilename(file.filename);
         if (fromFilename) return fromFilename;
 
         // Fall back to inferring from the directory structure
-        return this.parseFromPath(file, viewType);
+        return this.parseFromPath(file);
     }
 
     // ─── Filename parser ─────────────────────────────────────────────────────
@@ -316,15 +312,17 @@ export class FileScanner {
     // ─── Path-based parser ───────────────────────────────────────────────────
 
     /**
-     * Infer show/season/episode from the directory hierarchy.
+     * Infer show/season/episode from the directory hierarchy without relying on
+     * any user-configured view/organisation mode.  The scanner always recurses
+     * all directories; the display layer (viewType) decides how the resulting
+     * library data is presented to the user.
      *
-     * viewType meanings (as set in settings):
-     *   flat        – all files are siblings, no folder hierarchy
-     *   show        – rootDir/ShowName/episode.mkv
-     *   show+season – rootDir/ShowName Season N/episode.mkv
-     *   show/season – rootDir/ShowName/Season N/episode.mkv
+     * Heuristics applied in order of directory depth:
+     *   2+ parts – parts[0] = show name, parts[1] = season folder
+     *   1 part   – parts[0] = show name, season defaults to 1
+     *   0 parts  – file sits directly in the root; no folder context, skip
      */
-    private parseFromPath(file: IScannedFile, viewType: viewTypes): ParsedMetadata | null {
+    private parseFromPath(file: IScannedFile): ParsedMetadata | null {
         const parts = file.relativePathParts;
         const baseTitle = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
 
@@ -334,59 +332,28 @@ export class FileScanner {
         const epMatch = file.filename.match(/\b[Ee][Pp]?(\d{1,3})\b/);
         const episode = epMatch ? parseInt(epMatch[1], 10) : 0;
 
-        switch (viewType) {
-            case 'flat':
-                // No usable folder structure; cannot infer show/season
-                return null;
-
-            case 'show':
-                // rootDir/ShowName/episode.mkv
-                if (parts.length >= 1) {
-                    return { showName: parts[0], season: 1, episode, title: baseTitle };
-                }
-                return null;
-
-            case 'show+season': {
-                // rootDir/ShowName Season N/episode.mkv
-                if (parts.length >= 1) {
-                    const folderName = parts[0];
-                    // Single capture group via non-capturing alternatives:
-                    // matches 'Season N' (word) or a word-bounded 'SN' abbreviation at end.
-                    const seasonMatch = folderName.match(
-                        /(?:[Ss]eason\s*|\b[Ss])(\d+)$/,
-                    );
-                    const season = seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
-                    const showName = seasonMatch
-                        ? folderName.slice(0, folderName.lastIndexOf(seasonMatch[0])).trim()
-                        : folderName;
-                    return { showName: showName || folderName, season, episode, title: baseTitle };
-                }
-                return null;
-            }
-
-            case 'show/season':
-                // rootDir/ShowName/Season N/episode.mkv
-                if (parts.length >= 2) {
-                    const showName = parts[0];
-                    const seasonFolder = parts[1];
-                    // Prefer an explicit 'Season N' word; otherwise take the first digit run.
-                    const namedSeasonMatch = seasonFolder.match(/[Ss]eason\s*(\d+)/i);
-                    const rawNumberMatch = seasonFolder.match(/(\d+)/);
-                    const seasonStr = namedSeasonMatch
-                        ? namedSeasonMatch[1]
-                        : rawNumberMatch?.[1] ?? '1';
-                    const season = parseInt(seasonStr, 10);
-                    return { showName, season, episode, title: baseTitle };
-                }
-                if (parts.length === 1) {
-                    // File sits directly in show folder (no season subfolder)
-                    return { showName: parts[0], season: 1, episode, title: baseTitle };
-                }
-                return null;
-
-            default:
-                return null;
+        if (parts.length >= 2) {
+            // rootDir/ShowName/SeasonFolder/episode.mkv  (or deeper)
+            const showName = parts[0];
+            const seasonFolder = parts[1];
+            // Prefer an explicit 'Season N' word; otherwise take the first digit run.
+            const namedSeasonMatch = seasonFolder.match(/[Ss]eason\s*(\d+)/i);
+            const rawNumberMatch = seasonFolder.match(/(\d+)/);
+            const seasonStr = namedSeasonMatch
+                ? namedSeasonMatch[1]
+                : rawNumberMatch?.[1] ?? '1';
+            const season = parseInt(seasonStr, 10);
+            return { showName, season, episode, title: baseTitle };
         }
+
+        if (parts.length === 1) {
+            // rootDir/ShowName/episode.mkv
+            return { showName: parts[0], season: 1, episode, title: baseTitle };
+        }
+
+        // File is directly in the root scan directory with no enclosing folder;
+        // there is no structural context from which to derive a show name.
+        return null;
     }
 
     // ─── Utilities ───────────────────────────────────────────────────────────
