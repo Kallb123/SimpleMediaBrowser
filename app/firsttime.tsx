@@ -1,20 +1,19 @@
 import { Image, StyleSheet, Button } from 'react-native';
-import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ScopedStorage from "react-native-scoped-storage";
 import { useCallback, useEffect, useState } from 'react';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { useDispatch } from 'react-redux';
-import { setDirectory, setPassword } from '@/store/settingsReducer';
+import { setPassword } from '@/store/settingsReducer';
+import { AddMediaSource } from '@/components/UI/AddMediaSource';
 
 export default function FirstTime() {
   const [password, onChangePassword] = useState(null as string | null);
-  const [dir, setDir] = useState(null as string | null);
+  const [sourceAdded, setSourceAdded] = useState(false);
   const dispatch = useDispatch();
 
   useEffect(() => {
@@ -25,27 +24,13 @@ export default function FirstTime() {
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
   }
 
-  const selectNewDirectory = useCallback(async () => {
-    let selectedDir;
-    try {
-        selectedDir = await ScopedStorage.openDocumentTree(true);
-    } catch (eNew) {
-        // Toast to say selection cancelled?
-        return;
-    }
-    setDir(selectedDir.uri);
-  }, []);
-
   const finishedGoHome = useCallback(async () => {
-    if (dir) {
-      dispatch(setDirectory(dir));
-    }
     if (password) {
       dispatch(setPassword(password));
     }
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
     router.replace('/(tabs)');
-  }, []);
+  }, [password, dispatch]);
 
   return (
     <ParallaxScrollView
@@ -61,25 +46,14 @@ export default function FirstTime() {
         <HelloWave />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
-        <ThemedText>Password for settings:</ThemedText>
-        <ThemedTextInput
-          onChangeText={onChangePassword}
-          value={password ?? ""}
-          placeholder="Settings password"
-          keyboardType="default"
-          secureTextEntry={true}
-        />
+        <ThemedText>Add a media source:</ThemedText>
       </ThemedView>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Select a directory:</ThemedText>
-        <Button
-            title="Change Directory"
-            onPress={selectNewDirectory}
-        />
-      </ThemedView>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>{dir}</ThemedText>
-      </ThemedView>
+      <AddMediaSource onAdded={() => setSourceAdded(true)} />
+      {sourceAdded && (
+        <ThemedText style={styles.addedNote} accessibilityLabel="Source added successfully. You can add more in Settings later.">
+          ✓ Source added. You can add more in Settings later.
+        </ThemedText>
+      )}
       <ThemedView style={styles.titleContainer}>
         <Button
             title="Finished, Go Home"
@@ -100,6 +74,10 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
+  addedNote: {
+    fontSize: 13,
+    opacity: 0.7,
+  },
   reactLogo: {
     height: 178,
     width: 290,
@@ -108,3 +86,4 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
 });
+

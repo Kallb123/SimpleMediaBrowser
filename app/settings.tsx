@@ -1,19 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Button, StyleSheet, Text, View } from 'react-native';
+import { Button, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
-import * as ScopedStorage from "react-native-scoped-storage";
 import { useDispatch, useSelector } from 'react-redux';
-import { contentTypes, dataSources, selectDataSource, selectDirectory, selectMediaStructure, selectMediaType, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setDirectory, setMediaStructure, setMediaType, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes } from '@/store/settingsReducer';
+import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { FileScanner } from '@/scripts/FileScanner';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { AddMediaSource } from '@/components/UI/AddMediaSource';
 
 export default function SettingsPrompt() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -22,9 +22,7 @@ export default function SettingsPrompt() {
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
 
-  const [directory, setLocalDirectory] = useState(null as string | null);
   const [password, setLocalPassword] = useState(null as string | null);
-  const [mediaType, setLocalMediaType] = useState("" as contentTypes);
   const [dataSource, setLocalDataSource] = useState("" as dataSources);
   const [mediaStructure, setLocalMediaStructure] = useState("" as viewTypes);
   const [structureDescription, setStructureDescription] = useState("");
@@ -33,27 +31,18 @@ export default function SettingsPrompt() {
 
   const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
-  const settingsDirectory = useSelector(selectDirectory);
-  const settingsMediaType = useSelector(selectMediaType);
+  const mediaSources = useSelector(selectMediaSources);
   const settingsDataSource = useSelector(selectDataSource);
   const settingsMediaStructure = useSelector(selectMediaStructure);
   const settingsViewOrientation = useSelector(selectViewOrientation);
   const settingsViewScale = useSelector(selectViewScale);
   
-  const mediaTypeRef = useRef(null);
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
   const viewOrientationRef = useRef(null);
 
-  const mediaTypeOptions = [
-    {id: 'tv', label: 'TV'},
-    {id: 'movies', label: 'Movies'},
-  ];
-
   const dataSourceOptions = [
     {id: 'tvdb', label: 'TVDB'},
-    // {id: 'imdb', label: 'IMDB'},
-    // {id: 'moviedb', label: 'TheMovieDB'},
   ];
 
   const viewTypeOptions = [
@@ -69,27 +58,16 @@ export default function SettingsPrompt() {
   ];
   
   useEffect(() => {
-    console.log(`Got dir: ${settingsDirectory}, pass: ${settingsPassword}, media: ${settingsMediaType}, dataSource: ${settingsDataSource}, mediaStructure: ${settingsMediaStructure}, orientation: ${settingsViewOrientation}, scale: ${settingsViewScale}`);
-    setLocalDirectory(settingsDirectory as string);
     setLocalPassword(settingsPassword as string);
-    if (mediaTypeRef.current) (mediaTypeRef.current as any).selectIndex(mediaTypeOptions.findIndex(o => o.id === settingsMediaType));
     if (dataSourceRef.current) (dataSourceRef.current as any).selectIndex(dataSourceOptions.findIndex(o => o.id === settingsDataSource));
     if (mediaStructureRef.current) (mediaStructureRef.current as any).selectIndex(viewTypeOptions.findIndex(o => o.id === settingsMediaStructure));
     if (viewOrientationRef.current) (viewOrientationRef.current as any).selectIndex(uiTypeOptions.findIndex(o => o.id === settingsViewOrientation));
-
     setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
-  }, [settingsDirectory, settingsPassword, settingsMediaType, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale]);
+  }, [settingsPassword, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale]);
 
   const save = () => {
-    console.log(`Saving dir: ${directory}, pass: ${password}, media: ${mediaType}, dataSource: ${dataSource}, mediaStructure: ${mediaStructure}, orientation: ${viewOrientation}, scale: ${viewScale}`);
-    if (directory && directory !== settingsDirectory) {
-      dispatch(setDirectory(directory));
-    }
     if (password && password !== settingsPassword) {
       dispatch(setPassword(password));
-    }
-    if (mediaType && mediaType !== settingsMediaType) {
-      dispatch(setMediaType(mediaType));
     }
     if (dataSource && dataSource !== settingsDataSource) {
       dispatch(setDataSource(dataSource));
@@ -106,22 +84,13 @@ export default function SettingsPrompt() {
     router.replace('/(drawer)')
   };
 
-  const selectNewDirectory = useCallback(async () => {
-    let selectedDir;
-    try {
-        selectedDir = await ScopedStorage.openDocumentTree(true);
-    } catch (eNew) {
-        // Toast to say selection cancelled?
-        return;
-    }
-    setLocalDirectory(selectedDir.uri);
-  }, []);
+  const deleteSource = useCallback((uri: string) => {
+    dispatch(removeMediaSource(uri));
+  }, [dispatch]);
 
   const scanNow = useCallback(async () => {
-    if (directory) {
-      await FileScanner.getInstance().scanFolder(directory);
-    }
-  }, []);
+    await FileScanner.getInstance().scanAllSources(mediaSources);
+  }, [mediaSources]);
 
   const handleUIScaleChange = (value: number) => {
     setLocalViewScale(11-value);
@@ -134,6 +103,8 @@ export default function SettingsPrompt() {
       <ThemedView style={styles.titleContainer}>
         <ThemedText type="title">Settings</ThemedText>
       </ThemedView>
+
+      {/* Password */}
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Password for settings:</ThemedText>
         <ThemedTextInput
@@ -144,107 +115,86 @@ export default function SettingsPrompt() {
           secureTextEntry={false}
         />
       </ThemedView>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Select a directory:</ThemedText>
-        <Button
-            title="Change Directory"
-            onPress={selectNewDirectory}
-        />
+
+      {/* Media Sources */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText type="subtitle">Media Sources</ThemedText>
+        {mediaSources.length === 0 && (
+          <ThemedText style={styles.emptyText}>No sources added yet.</ThemedText>
+        )}
+        {mediaSources.map((source) => (
+          <ThemedView key={source.uri} style={styles.sourceRow}>
+            <ThemedView style={styles.sourceInfo}>
+              <ThemedText style={styles.sourceType}>{source.contentType === 'tv' ? '📺 TV' : '🎬 Movies'}</ThemedText>
+              <ThemedText style={styles.sourceUri} numberOfLines={1}>{decodeURIComponent(source.uri)}</ThemedText>
+            </ThemedView>
+            <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>
+              <ThemedText style={styles.deleteButtonText}>✕</ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
+        ))}
+
+        {/* Add new source */}
+        <AddMediaSource />
       </ThemedView>
-      <ThemedText>Directory is: {directory}</ThemedText>
+
+      {/* Rescan */}
       <ThemedView style={styles.titleContainer}>
-        <Button
-            title="Rescan now"
-            onPress={scanNow}
-        />
+        <Button title="Rescan now" onPress={scanNow} />
       </ThemedView>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Media type:</ThemedText>
-        <SelectDropdown
-          ref={mediaTypeRef}
-          data={mediaTypeOptions}
-          defaultValue={settingsMediaType}
-          onSelect={(selectedItem, index) => {
-            setLocalMediaType(selectedItem.id);
-          }}
-          renderButton={(selectedItem, isOpened) => {
-            return (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            );
-          }}
-          renderItem={(item, index, isSelected) => {
-            return (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            );
-          }}
-          showsVerticalScrollIndicator={false}
-          dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-        />
-      </ThemedView>
+
+      {/* Data source */}
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Data source:</ThemedText>
         <SelectDropdown
           ref={dataSourceRef}
           data={dataSourceOptions}
           defaultValue={settingsDataSource}
-          onSelect={(selectedItem, index) => {
+          onSelect={(selectedItem) => {
             setLocalDataSource(selectedItem.id);
           }}
-          renderButton={(selectedItem, isOpened) => {
-            return (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            );
-          }}
-          renderItem={(item, index, isSelected) => {
-            return (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            );
-          }}
+          renderButton={(selectedItem, isOpened) => (
+            <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+              <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                {(selectedItem && selectedItem.label) || 'Please select...'}
+              </Text>
+              <Text>{isOpened ? "🔼" : "🔽"}</Text>
+            </View>
+          )}
+          renderItem={(item, index, isSelected) => (
+            <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+              <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+            </View>
+          )}
           showsVerticalScrollIndicator={false}
           dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
       </ThemedView>
+
+      {/* Media structure */}
       <ThemedView style={styles.titleContainer}>
-        <ThemedText>Media structure:</ThemedText>
+        <ThemedText>Media structure (TV):</ThemedText>
         <SelectDropdown
           ref={mediaStructureRef}
           data={viewTypeOptions}
           defaultValue={settingsMediaStructure}
-          onSelect={(selectedItem, index) => {
+          onSelect={(selectedItem) => {
             if (selectedItem.title) setStructureDescription(selectedItem.title);
             setLocalMediaStructure(selectedItem.id);
           }}
-          renderButton={(selectedItem, isOpened) => {
-            return (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            );
-          }}
-          renderItem={(item, index, isSelected) => {
-            return (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            );
-          }}
+          renderButton={(selectedItem, isOpened) => (
+            <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+              <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                {(selectedItem && selectedItem.label) || 'Please select...'}
+              </Text>
+              <Text>{isOpened ? "🔼" : "🔽"}</Text>
+            </View>
+          )}
+          renderItem={(item, index, isSelected) => (
+            <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+              <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+            </View>
+          )}
           showsVerticalScrollIndicator={false}
           dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
@@ -252,36 +202,36 @@ export default function SettingsPrompt() {
       <ThemedView>
         <ThemedText>{structureDescription}</ThemedText>
       </ThemedView>
+
+      {/* Interface type */}
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Interface type:</ThemedText>
         <SelectDropdown
           ref={viewOrientationRef}
           data={uiTypeOptions}
           defaultValue={settingsViewOrientation}
-          onSelect={(selectedItem, index) => {
+          onSelect={(selectedItem) => {
             setLocalViewOrientation(selectedItem.id);
           }}
-          renderButton={(selectedItem, isOpened) => {
-            return (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            );
-          }}
-          renderItem={(item, index, isSelected) => {
-            return (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            );
-          }}
+          renderButton={(selectedItem, isOpened) => (
+            <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+              <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                {(selectedItem && selectedItem.label) || 'Please select...'}
+              </Text>
+              <Text>{isOpened ? "🔼" : "🔽"}</Text>
+            </View>
+          )}
+          renderItem={(item, index, isSelected) => (
+            <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+              <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+            </View>
+          )}
           showsVerticalScrollIndicator={false}
           dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
       </ThemedView>
+
+      {/* UI scale */}
       <ThemedView style={styles.titleContainer}>
         <ThemedText>UI scale:</ThemedText>
         <Slider
@@ -295,11 +245,10 @@ export default function SettingsPrompt() {
           maximumTrackTintColor={colorScheme === 'dark' ? '#687076' : '#9BA1A6'}
         />
       </ThemedView>
+
+      {/* Save */}
       <ThemedView style={styles.titleContainer}>
-        <Button
-            title="Save"
-            onPress={save}
-        />
+        <Button title="Save" onPress={save} />
       </ThemedView>
     </ParallaxScrollView>
   );
@@ -315,9 +264,42 @@ const styles = StyleSheet.create({
   titleContainer: {
     flexDirection: 'row',
     gap: 8,
+    alignItems: 'center',
+  },
+  sectionContainer: {
+    gap: 8,
+  },
+  emptyText: {
+    opacity: 0.5,
+    fontStyle: 'italic',
+  },
+  sourceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  sourceInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  sourceType: {
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  sourceUri: {
+    fontSize: 11,
+    opacity: 0.6,
+  },
+  deleteButton: {
+    padding: 8,
+  },
+  deleteButtonText: {
+    fontSize: 16,
+    color: '#E55',
   },
   dropdownButtonStyle: {
-    width: 200,
+    width: 140,
     height: 50,
     borderRadius: 12,
     flexDirection: 'row',

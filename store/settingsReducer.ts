@@ -6,11 +6,15 @@ export type dataSources = 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
 
+export interface IMediaSource {
+  uri: string;
+  contentType: contentTypes;
+}
+
 // Define a type for the slice state
 interface SettingsState {
   settingsPassword: string | null
-  directory: string
-  contentType: contentTypes
+  mediaSources: IMediaSource[]
   dataSource: dataSources
   viewType: viewTypes
   viewScale: number
@@ -20,8 +24,7 @@ interface SettingsState {
 // Define the initial state using that type
 const initialState: SettingsState = {
   settingsPassword: null,
-  directory: "",
-  contentType: 'tv',
+  mediaSources: [],
   dataSource: 'tvdb',
   viewType: 'show/season',
   viewScale: 5,
@@ -34,14 +37,14 @@ export const settingsSlice = createSlice({
   initialState,
   reducers: {
     // Use the PayloadAction type to declare the contents of `action.payload`
-    setDirectory: (state, action: PayloadAction<string>) => {
-      state.directory = action.payload;
+    addMediaSource: (state, action: PayloadAction<IMediaSource>) => {
+      state.mediaSources.push(action.payload);
+    },
+    removeMediaSource: (state, action: PayloadAction<string>) => {
+      state.mediaSources = state.mediaSources.filter((s) => s.uri !== action.payload);
     },
     setPassword: (state, action: PayloadAction<string>) => {
       state.settingsPassword = action.payload;
-    },
-    setMediaType: (state, action: PayloadAction<contentTypes>) => {
-      state.contentType = action.payload;
     },
     setDataSource: (state, action: PayloadAction<dataSources>) => {
       state.dataSource = action.payload;
@@ -58,12 +61,11 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { setDirectory, setPassword, setMediaType, setDataSource, setMediaStructure, setViewOrientation, setViewScale } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
-export const selectDirectory = (state: RootState) => state.settingsReducer.directory;
+export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources;
 export const selectPassword = (state: RootState) => state.settingsReducer.settingsPassword;
-export const selectMediaType = (state: RootState) => state.settingsReducer.contentType;
 export const selectDataSource = (state: RootState) => state.settingsReducer.dataSource;
 export const selectMediaStructure = (state: RootState) => state.settingsReducer.viewType;
 export const selectViewOrientation = (state: RootState) => state.settingsReducer.viewOrientation;

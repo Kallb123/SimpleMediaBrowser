@@ -1,8 +1,9 @@
 import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary } from "@/store/libraryReducer";
+import { setScanList, setMediaLibrary, setMovies } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
-import type { viewTypes } from "@/store/settingsReducer";
+import type { viewTypes, contentTypes } from "@/store/settingsReducer";
+import type { IMediaSource } from "@/store/settingsReducer";
 
 export interface IMediaObject {
     ids: {
@@ -55,6 +56,39 @@ export class FileScanner {
         }
 
         return this.myInstance;
+    }
+
+    /** Scan all configured sources and update the Redux store with merged results. */
+    async scanAllSources(sources: IMediaSource[]) {
+        const tvSources = sources.filter((s) => s.contentType === 'tv');
+        const movieSources = sources.filter((s) => s.contentType === 'movie');
+
+        const viewType: viewTypes = store.getState().settingsReducer?.viewType ?? 'show/season';
+
+        // Collect TV files from all TV sources and merge into one library
+        const allTvFiles: IScannedFile[] = [];
+        for (const src of tvSources) {
+            const files = await this.collectAllMediaFiles(src.uri);
+            allTvFiles.push(...files);
+        }
+        const mergedLibrary = this.buildLibrary(allTvFiles, viewType);
+
+        // Collect movie files from all movie sources
+        const allMovieFiles: IScannedFile[] = [];
+        for (const src of movieSources) {
+            const files = await this.collectAllMediaFiles(src.uri);
+            allMovieFiles.push(...files);
+        }
+        const movies = this.buildMovieList(allMovieFiles);
+
+        // Build a combined scan list for diagnostic purposes
+        const allScanUris: string[] = [
+            ...allTvFiles.map((f) => f.path),
+            ...allMovieFiles.map((f) => f.path),
+        ];
+        store.dispatch(setScanList(allScanUris));
+        store.dispatch(setMediaLibrary(mergedLibrary));
+        store.dispatch(setMovies(movies));
     }
 
     async scanFolder(directory: string) {
@@ -164,6 +198,17 @@ export class FileScanner {
         if (dotIndex === -1) return false;
         const ext = filename.substring(dotIndex).toLowerCase();
         return VIDEO_EXTENSIONS.has(ext);
+    }
+
+    // ─── Movie list building ─────────────────────────────────────────────────
+
+    buildMovieList(files: IScannedFile[]): IMediaObject[] {
+        return files.map((file) => {
+            // Destructure out relativePathParts so it is not included in the stored IMediaObject
+            const { relativePathParts, ...mediaObj } = file;
+            const title = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
+            return { ...mediaObj, title };
+        });
     }
 
     // ─── Library building ────────────────────────────────────────────────────
