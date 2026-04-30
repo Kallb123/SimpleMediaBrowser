@@ -58,8 +58,11 @@ export default function SettingsPrompt() {
     {id: 'banner', label: 'Banner'},
   ];
 
-  logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${mediaSources.length}`);
-  
+  useEffect(() => {
+    logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${mediaSources.length}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setLocalPassword(settingsPassword as string);
     if (dataSourceRef.current) (dataSourceRef.current as any).selectIndex(dataSourceOptions.findIndex(o => o.id === settingsDataSource));

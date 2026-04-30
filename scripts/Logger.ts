@@ -128,7 +128,7 @@ class Logger {
                     const info = await FileSystem.getInfoAsync(LOG_FILE_PATH);
                     // expo-file-system's FileInfo includes `size` when the file exists;
                     // the TS type uses a discriminated union so we check exists first.
-                    if (info.exists && 'size' in info && (info.size as number) > MAX_FILE_BYTES) {
+                    if (info.exists && 'size' in info && info.size > MAX_FILE_BYTES) {
                         // Keep the second half of the file to preserve recent logs.
                         const existing = await FileSystem.readAsStringAsync(LOG_FILE_PATH, { encoding: FileSystem.EncodingType.UTF8 });
                         const halfway = Math.floor(existing.length / 2);
