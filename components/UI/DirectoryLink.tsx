@@ -1,13 +1,16 @@
 import { IMediaObject } from '@/scripts/FileScanner';
 import { ThemedText } from '../ThemedText';
-import { Href, Link } from 'expo-router';
+import { TouchableOpacity } from 'react-native';
 
-export type MediaItemProps =  {
-  mediaObject: IMediaObject
+export type DirectoryLinkProps = {
+  mediaObject: IMediaObject;
+  onPress?: () => void;
 };
 
-export function DirectoryLink({ mediaObject }: MediaItemProps) {
+export function DirectoryLink({ mediaObject, onPress }: DirectoryLinkProps) {
   return (
-    <ThemedText><Link href={mediaObject.path as Href}>{mediaObject.filename}</Link></ThemedText>
+    <TouchableOpacity onPress={onPress}>
+      <ThemedText>📁 {mediaObject.filename}</ThemedText>
+    </TouchableOpacity>
   );
 }

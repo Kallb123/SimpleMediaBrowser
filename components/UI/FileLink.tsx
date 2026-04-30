@@ -1,13 +1,18 @@
 import { IMediaObject } from '@/scripts/FileScanner';
 import { ThemedText } from '../ThemedText';
-import { Href, Link } from 'expo-router';
+import { Linking, TouchableOpacity } from 'react-native';
 
 export type MediaItemProps =  {
   mediaObject: IMediaObject
 };
 
 export function FileLink({ mediaObject }: MediaItemProps) {
+  const handlePress = () => {
+    Linking.openURL(mediaObject.path).catch(() => {});
+  };
   return (
-    <ThemedText><Link href={mediaObject.path as Href}>{mediaObject.filename}</Link></ThemedText>
+    <TouchableOpacity onPress={handlePress}>
+      <ThemedText>{mediaObject.filename}</ThemedText>
+    </TouchableOpacity>
   );
 }
