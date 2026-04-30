@@ -6,6 +6,7 @@ import { useDispatch } from 'react-redux';
 import { addMediaSource, contentTypes, IMediaSource } from '@/store/settingsReducer';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { logger } from '@/scripts/Logger';
 
 const MEDIA_TYPE_OPTIONS: { id: contentTypes; label: string }[] = [
   { id: 'tv', label: '📺 TV' },
@@ -33,15 +34,19 @@ export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
   const dispatch = useDispatch();
 
   const pickDirectory = useCallback(async () => {
+    logger.log('AddMediaSource', `Opening directory picker for type: ${selectedType}`);
     let selectedDir;
     try {
       selectedDir = await ScopedStorage.openDocumentTree(true);
-    } catch {
+    } catch (e) {
+      logger.warn('AddMediaSource', 'User cancelled directory picker or picker threw', e);
       // User cancelled the picker
       return;
     }
+    logger.log('AddMediaSource', `Directory selected: uri=${selectedDir.uri} type=${selectedType}`);
     const source: IMediaSource = { uri: selectedDir.uri, contentType: selectedType };
     dispatch(addMediaSource(source));
+    logger.log('AddMediaSource', `Dispatched addMediaSource for uri=${selectedDir.uri}`);
     onAdded?.(source);
   }, [selectedType, dispatch, onAdded]);
 

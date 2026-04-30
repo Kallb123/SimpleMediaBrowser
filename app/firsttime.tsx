@@ -11,17 +11,22 @@ import { StorageKeys } from '@/constants/StorageKeys';
 import { useDispatch } from 'react-redux';
 import { setPassword } from '@/store/settingsReducer';
 import { AddMediaSource } from '@/components/UI/AddMediaSource';
+import { logger } from '@/scripts/Logger';
 
 export default function FirstTime() {
   const [password, onChangePassword] = useState(null as string | null);
   const [sourceAdded, setSourceAdded] = useState(false);
   const dispatch = useDispatch();
 
+  logger.log('FirstTime', 'FirstTime screen rendered');
+
   const finishedGoHome = useCallback(async () => {
+    logger.log('FirstTime', `Finishing first-time setup. Password set: ${!!password}`);
     if (password) {
       dispatch(setPassword(password));
     }
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
+    logger.log('FirstTime', 'First-time setup key written to AsyncStorage. Navigating to home.');
     router.replace('/(drawer)');
   }, [password, dispatch]);
 
@@ -41,7 +46,10 @@ export default function FirstTime() {
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Add a media source:</ThemedText>
       </ThemedView>
-      <AddMediaSource onAdded={() => setSourceAdded(true)} />
+      <AddMediaSource onAdded={(source) => {
+          logger.log('FirstTime', `Media source added: type=${source.contentType} uri=${source.uri}`);
+          setSourceAdded(true);
+        }} />
       {sourceAdded && (
         <ThemedText style={styles.addedNote} accessibilityLabel="Source added successfully. You can add more in Settings later.">
           ✓ Source added. You can add more in Settings later.

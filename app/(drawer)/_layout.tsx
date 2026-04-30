@@ -25,6 +25,13 @@ export default function DrawerLayout() {
                 title: "",
             }}
             />
+            <Drawer.Screen
+            name="logs" // Debug log viewer
+            options={{
+                drawerLabel: '🪲 Debug Logs',
+                title: "Debug Logs",
+            }}
+            />
         </Drawer>
     );
   }

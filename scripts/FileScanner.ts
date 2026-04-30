@@ -4,6 +4,7 @@ import { store } from "@/store/store";
 import { setScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
+import { logger } from "@/scripts/Logger";
 
 export interface IMediaObject {
     ids: {
@@ -60,26 +61,35 @@ export class FileScanner {
 
     /** Scan all configured sources and update the Redux store with merged results. */
     async scanAllSources(sources: IMediaSource[]) {
+        logger.log('FileScanner', `scanAllSources called with ${sources.length} source(s)`);
+        sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
         store.dispatch(setIsScanning(true));
         try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
+        logger.log('FileScanner', `TV sources: ${tvSources.length}, Movie sources: ${movieSources.length}`);
 
         // Collect TV files from all TV sources and merge into one library
         const allTvFiles: IScannedFile[] = [];
         for (const src of tvSources) {
+            logger.log('FileScanner', `Scanning TV source: ${src.uri}`);
             const files = await this.collectAllMediaFiles(src.uri);
+            logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
             allTvFiles.push(...files);
         }
         const mergedLibrary = this.buildLibrary(allTvFiles);
+        logger.log('FileScanner', `Built TV library with ${Object.keys(mergedLibrary).length} show(s) from ${allTvFiles.length} file(s)`);
 
         // Collect movie files from all movie sources
         const allMovieFiles: IScannedFile[] = [];
         for (const src of movieSources) {
+            logger.log('FileScanner', `Scanning Movie source: ${src.uri}`);
             const files = await this.collectAllMediaFiles(src.uri);
+            logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
             allMovieFiles.push(...files);
         }
         const movies = this.buildMovieList(allMovieFiles);
+        logger.log('FileScanner', `Built movie list with ${movies.length} movie(s)`);
 
         // Build a combined scan list for diagnostic purposes
         const allScanUris: string[] = [
@@ -89,6 +99,7 @@ export class FileScanner {
         store.dispatch(setScanList(allScanUris));
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
+        logger.log('FileScanner', `Scan complete. Total media files dispatched: ${allScanUris.length}`);
 
         // Generate thumbnails for all scanned media files concurrently (skip already-cached paths)
         const existingThumbnails = store.getState().libraryReducer.thumbnails;
@@ -97,22 +108,32 @@ export class FileScanner {
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
         ];
         const uncached = allMediaFiles.filter((m) => !existingThumbnails[m.path]);
+        logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
+        let thumbSuccess = 0;
+        let thumbFail = 0;
         await Promise.allSettled(
             uncached.map(async (media) => {
                 try {
                     const result = await VideoThumbnails.getThumbnailAsync(media.path, { time: 5000 });
                     store.dispatch(setThumbnail({ path: media.path, uri: result.uri }));
-                } catch {
-                    // Thumbnail generation failed for this file; skip silently
+                    thumbSuccess++;
+                } catch (e) {
+                    thumbFail++;
+                    logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
                 }
             }),
         );
+        logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+        } catch (e) {
+            logger.error('FileScanner', `scanAllSources threw an error`, e);
+            throw e;
         } finally {
             store.dispatch(setIsScanning(false));
         }
     }
 
     async scanFolder(directory: string) {
+        logger.log('FileScanner', `scanFolder: ${directory}`);
         const contents = await StorageAccessFramework.readDirectoryAsync(directory);
     
         var contentInfo = await Promise.all(contents.map(async (c) => {
@@ -146,6 +167,7 @@ export class FileScanner {
         });
 
         store.dispatch(setScanList(filtered.map(f => f.path)));
+        logger.log('FileScanner', `scanFolder filtered to ${filtered.length} item(s)`);
 
         // Recursively collect all media files and build the library
         const allMediaFiles = await this.collectAllMediaFiles(directory);
@@ -169,14 +191,19 @@ export class FileScanner {
         result: IScannedFile[],
         depth: number,
     ): Promise<void> {
-        if (depth > MAX_SCAN_DEPTH) return; // Safety guard against deeply nested structures
+        if (depth > MAX_SCAN_DEPTH) {
+            logger.warn('FileScanner', `Max scan depth (${MAX_SCAN_DEPTH}) reached at: ${directory}`);
+            return;
+        }
 
         let contents: string[];
         try {
             contents = await StorageAccessFramework.readDirectoryAsync(directory);
-        } catch {
+        } catch (e) {
+            logger.warn('FileScanner', `Cannot read directory (depth=${depth}): ${directory}`, e);
             return; // Directory not accessible
         }
+        logger.log('FileScanner', `Scanning dir (depth=${depth}, ${contents.length} entries): ${decodeURIComponent(directory).split('/').slice(-2).join('/')}`);
 
         const infoList = await Promise.all(
             contents.map(async (c) => {
