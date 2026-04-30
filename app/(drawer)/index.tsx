@@ -234,6 +234,14 @@ function buildDisplayItems(
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_GAP = 8;
+/** Minimum number of grid columns shown at the lowest viewScale. */
+const MIN_COLUMNS = 2;
+/** Maximum number of grid columns shown at the highest viewScale. */
+const MAX_COLUMNS = 5;
+/** Divisor used to map viewScale (1-10) to column count. */
+const SCALE_TO_COLUMNS_DIVISOR = 2.5;
+/** Approximate height of the card label area (paddingTop + paddingBottom + font line-height). */
+const LABEL_HEIGHT = 48;
 
 export default function HomeScreen() {
   const mediaSources = useSelector(selectMediaSources);
@@ -265,8 +273,8 @@ export default function HomeScreen() {
     setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
   }, []);
 
-  // Map viewScale (1-10) to number of grid columns (2-5)
-  const numColumns = Math.max(2, Math.min(5, Math.round(viewScale / 2.5)));
+  // Map viewScale (1-10) to number of grid columns (MIN_COLUMNS-MAX_COLUMNS)
+  const numColumns = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, Math.round(viewScale / SCALE_TO_COLUMNS_DIVISOR)));
   const cardWidth = (SCREEN_WIDTH - CARD_GAP * (numColumns + 1)) / numColumns;
   const thumbnailHeight = Math.round(cardWidth * 9 / 16);
 
@@ -332,7 +340,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               );
             }}
-            estimatedItemSize={thumbnailHeight + 48}
+            estimatedItemSize={thumbnailHeight + LABEL_HEIGHT}
             contentContainerStyle={styles.gridContent}
           />
         </ThemedView>

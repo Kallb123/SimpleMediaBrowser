@@ -90,21 +90,23 @@ export class FileScanner {
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
 
-        // Generate thumbnails for all scanned media files (skip already-cached paths)
+        // Generate thumbnails for all scanned media files concurrently (skip already-cached paths)
         const existingThumbnails = store.getState().libraryReducer.thumbnails;
         const allMediaFiles: IMediaObject[] = [
             ...allTvFiles.map(({ relativePathParts, ...obj }) => obj),
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
         ];
-        for (const media of allMediaFiles) {
-            if (existingThumbnails[media.path]) continue;
-            try {
-                const result = await VideoThumbnails.getThumbnailAsync(media.path, { time: 5000 });
-                store.dispatch(setThumbnail({ path: media.path, uri: result.uri }));
-            } catch {
-                // Thumbnail generation failed for this file; skip silently
-            }
-        }
+        const uncached = allMediaFiles.filter((m) => !existingThumbnails[m.path]);
+        await Promise.allSettled(
+            uncached.map(async (media) => {
+                try {
+                    const result = await VideoThumbnails.getThumbnailAsync(media.path, { time: 5000 });
+                    store.dispatch(setThumbnail({ path: media.path, uri: result.uri }));
+                } catch {
+                    // Thumbnail generation failed for this file; skip silently
+                }
+            }),
+        );
         } finally {
             store.dispatch(setIsScanning(false));
         }
