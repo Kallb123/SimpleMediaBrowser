@@ -50,7 +50,9 @@ export default function FirstTime() {
       </ThemedView>
       <AddMediaSource onAdded={() => setSourceAdded(true)} />
       {sourceAdded && (
-        <ThemedText style={styles.addedNote}>✓ Source added. You can add more in Settings later.</ThemedText>
+        <ThemedText style={styles.addedNote} accessibilityLabel="Source added successfully. You can add more in Settings later.">
+          ✓ Source added. You can add more in Settings later.
+        </ThemedText>
       )}
       <ThemedView style={styles.titleContainer}>
         <Button

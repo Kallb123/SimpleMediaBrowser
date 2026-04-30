@@ -73,7 +73,7 @@ export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
         showsVerticalScrollIndicator={false}
         dropdownStyle={[styles.dropdownMenu, { backgroundColor: dropdownBg }]}
       />
-      <Button title="Add Source" onPress={pickDirectory} />
+      <Button title="Add Source" onPress={pickDirectory} accessibilityLabel="Add media source directory" />
     </View>
   );
 }
