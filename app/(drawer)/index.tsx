@@ -4,8 +4,8 @@ import { ThemedView } from '@/components/ThemedView';
 import { Link } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { selectDirectory, selectMediaStructure, selectPassword } from '@/store/settingsReducer';
-import { selectMediaLibrary } from '@/store/libraryReducer';
+import { selectMediaSources, selectMediaStructure, selectPassword } from '@/store/settingsReducer';
+import { selectMediaLibrary, selectMovies } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
@@ -27,13 +27,14 @@ type DisplayItem =
 
 function buildDisplayItems(
   library: IMediaLibrary,
+  movies: IMediaObject[],
   viewType: viewTypes,
   navStack: NavLevel[],
   navigateInto: (entry: NavLevel) => void,
 ): DisplayItem[] {
   switch (viewType) {
     case 'flat': {
-      // All episodes from every show/season in one flat list
+      // All episodes from every show/season in one flat list, plus movies
       const items: DisplayItem[] = [];
       for (const show of Object.values(library)) {
         for (const season of Object.values(show.seasons)) {
@@ -47,18 +48,33 @@ function buildDisplayItems(
           }
         }
       }
+      for (const movie of movies) {
+        items.push({
+          kind: 'file',
+          label: movie.title || movie.filename,
+          key: movie.path,
+          mediaObject: movie,
+        });
+      }
       return items;
     }
 
     case 'show': {
       if (navStack.length === 0) {
-        // Root: one folder per show
-        return Object.keys(library).sort().map((showName) => ({
-          kind: 'folder',
+        // Root: one folder per show + movie files
+        const showFolders: DisplayItem[] = Object.keys(library).sort().map((showName) => ({
+          kind: 'folder' as const,
           label: showName,
           key: showName,
           onPress: () => navigateInto({ label: showName, showName }),
         }));
+        const movieItems: DisplayItem[] = movies.map((movie) => ({
+          kind: 'file' as const,
+          label: movie.title || movie.filename,
+          key: movie.path,
+          mediaObject: movie,
+        }));
+        return [...showFolders, ...movieItems];
       }
       // Inside a show: all episodes from every season
       const show = library[navStack[0].showName!];
@@ -79,12 +95,12 @@ function buildDisplayItems(
 
     case 'show+season': {
       if (navStack.length === 0) {
-        // Root: one folder per show+season combination
-        const items: DisplayItem[] = [];
+        // Root: one folder per show+season combination + movie files
+        const showSeasonFolders: DisplayItem[] = [];
         for (const [showName, show] of Object.entries(library)) {
           for (const [seasonKey, season] of Object.entries(show.seasons)) {
             const label = `${showName} – Season ${season.seasonNumber}`;
-            items.push({
+            showSeasonFolders.push({
               kind: 'folder',
               label,
               key: `${showName}::${seasonKey}`,
@@ -92,7 +108,14 @@ function buildDisplayItems(
             });
           }
         }
-        return items.sort((a, b) => a.label.localeCompare(b.label));
+        showSeasonFolders.sort((a, b) => a.label.localeCompare(b.label));
+        const movieItems: DisplayItem[] = movies.map((movie) => ({
+          kind: 'file' as const,
+          label: movie.title || movie.filename,
+          key: movie.path,
+          mediaObject: movie,
+        }));
+        return [...showSeasonFolders, ...movieItems];
       }
       // Inside a show+season folder: episodes of that season
       const { showName, seasonKey } = navStack[0];
@@ -109,13 +132,20 @@ function buildDisplayItems(
     case 'show/season':
     default: {
       if (navStack.length === 0) {
-        // Root: one folder per show
-        return Object.keys(library).sort().map((showName) => ({
-          kind: 'folder',
+        // Root: one folder per show + movie files
+        const showFolders: DisplayItem[] = Object.keys(library).sort().map((showName) => ({
+          kind: 'folder' as const,
           label: showName,
           key: showName,
           onPress: () => navigateInto({ label: showName, showName }),
         }));
+        const movieItems: DisplayItem[] = movies.map((movie) => ({
+          kind: 'file' as const,
+          label: movie.title || movie.filename,
+          key: movie.path,
+          mediaObject: movie,
+        }));
+        return [...showFolders, ...movieItems];
       }
       if (navStack.length === 1) {
         // Inside a show: one folder per season
@@ -126,7 +156,7 @@ function buildDisplayItems(
           .map(([seasonKey, season]) => {
             const label = `Season ${season.seasonNumber}`;
             return {
-              kind: 'folder',
+              kind: 'folder' as const,
               label,
               key: seasonKey,
               onPress: () =>
@@ -155,18 +185,19 @@ function buildDisplayItems(
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
-  const directory = useSelector(selectDirectory);
+  const mediaSources = useSelector(selectMediaSources);
   const settingsPassword = useSelector(selectPassword);
   const viewType = useSelector(selectMediaStructure);
   const mediaLibrary = useSelector(selectMediaLibrary);
+  const movies = useSelector(selectMovies);
 
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
 
-  // Trigger a scan whenever the directory changes
+  // Trigger a scan whenever the sources change
   useEffect(() => {
-    if (!directory) return;
-    FileScanner.getInstance().scanFolder(directory);
-  }, [directory]);
+    if (!mediaSources || mediaSources.length === 0) return;
+    FileScanner.getInstance().scanAllSources(mediaSources);
+  }, [mediaSources]);
 
   // Reset navigation when viewType changes
   useEffect(() => {
@@ -182,18 +213,18 @@ export default function HomeScreen() {
   }, []);
 
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, viewType, navStack, navigateInto),
-    [mediaLibrary, viewType, navStack, navigateInto],
+    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, navigateInto),
+    [mediaLibrary, movies, viewType, navStack, navigateInto],
   );
 
-  const hasLibraryContent = Object.keys(mediaLibrary).length > 0;
+  const hasContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
 
   // Build breadcrumb label: "Home / Show / Season 1"
   const breadcrumb = ['Home', ...navStack.map((n: NavLevel) => n.label)].join(' › ');
 
   return (
     <View style={styles.container}>
-      {directory && hasLibraryContent ? (
+      {mediaSources.length > 0 && hasContent ? (
         <ThemedView style={styles.listContainer}>
           {/* Breadcrumb / back navigation */}
           <ThemedView style={styles.breadcrumbRow}>
@@ -233,9 +264,9 @@ export default function HomeScreen() {
       ) : (
         <ThemedView style={styles.stepContainer}>
           <ThemedText type="subtitle">Problem</ThemedText>
-          {directory ? (
+          {mediaSources.length > 0 ? (
             <ThemedText>
-              Your library directory is empty or invalid, set it up in{' '}
+              Your library directories are empty or invalid, check them in{' '}
               <Link href={settingsPassword ? '/(drawer)/settingsprompt' : '/settings'}>
                 Settings
               </Link>
@@ -255,6 +286,7 @@ export default function HomeScreen() {
     </View>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {
@@ -297,4 +329,3 @@ const styles = StyleSheet.create({
     padding: 16,
   },
 });
-

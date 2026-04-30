@@ -36,12 +36,14 @@ export type viewOrientations = 'poster' | 'banner';
 // Define a type for the slice state
 interface LibraryState {
   mediaLibrary: IMediaLibrary;
+  movies: IMediaObject[];
   scanList: IRawScanList;
 }
 
 // Define the initial state using that type
 const initialState: LibraryState = {
   mediaLibrary: {},
+  movies: [],
   scanList: []
 }
 
@@ -63,13 +65,17 @@ export const settingsSlice = createSlice({
     setMediaLibrary: (state, action: PayloadAction<IMediaLibrary>) => {
       state.mediaLibrary = action.payload;
     },
+    setMovies: (state, action: PayloadAction<IMediaObject[]>) => {
+      state.movies = action.payload;
+    },
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
+export const selectMovies = (state: RootState) => state.libraryReducer.movies;
 
 export default settingsSlice.reducer

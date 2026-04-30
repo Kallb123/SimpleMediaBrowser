@@ -1,5 +1,4 @@
 import { Image, StyleSheet, Button } from 'react-native';
-import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
@@ -10,7 +9,7 @@ import * as ScopedStorage from "react-native-scoped-storage";
 import { useCallback, useEffect, useState } from 'react';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { useDispatch } from 'react-redux';
-import { setDirectory, setPassword } from '@/store/settingsReducer';
+import { addMediaSource, setPassword } from '@/store/settingsReducer';
 
 export default function FirstTime() {
   const [password, onChangePassword] = useState(null as string | null);
@@ -38,14 +37,14 @@ export default function FirstTime() {
 
   const finishedGoHome = useCallback(async () => {
     if (dir) {
-      dispatch(setDirectory(dir));
+      dispatch(addMediaSource({ uri: dir, contentType: 'tv' }));
     }
     if (password) {
       dispatch(setPassword(password));
     }
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
     router.replace('/(tabs)');
-  }, []);
+  }, [dir, password, dispatch]);
 
   return (
     <ParallaxScrollView
@@ -61,19 +60,9 @@ export default function FirstTime() {
         <HelloWave />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
-        <ThemedText>Password for settings:</ThemedText>
-        <ThemedTextInput
-          onChangeText={onChangePassword}
-          value={password ?? ""}
-          placeholder="Settings password"
-          keyboardType="default"
-          secureTextEntry={true}
-        />
-      </ThemedView>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Select a directory:</ThemedText>
+        <ThemedText>Select a media directory:</ThemedText>
         <Button
-            title="Change Directory"
+            title="Choose Directory"
             onPress={selectNewDirectory}
         />
       </ThemedView>
