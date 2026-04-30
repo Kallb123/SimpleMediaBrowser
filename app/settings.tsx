@@ -112,7 +112,7 @@ export default function SettingsPrompt() {
           value={password ?? ""}
           placeholder="Settings password"
           keyboardType="default"
-          secureTextEntry={false}
+          secureTextEntry={true}
         />
       </ThemedView>
 

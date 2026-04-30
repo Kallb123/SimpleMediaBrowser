@@ -54,7 +54,7 @@ export default function FirstTime() {
           value={password ?? ""}
           placeholder="Leave blank for no password"
           keyboardType="default"
-          secureTextEntry={false}
+          secureTextEntry={true}
         />
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
