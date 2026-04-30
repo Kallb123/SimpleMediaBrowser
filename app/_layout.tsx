@@ -9,9 +9,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { Provider } from 'react-redux';
 import { store } from '@/store/store';
+import { logger } from '@/scripts/Logger';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
+
+logger.log('RootLayout', 'App starting up');
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -23,6 +26,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (fontsLoaded) {
+      logger.log('RootLayout', 'Fonts loaded');
       if (loaded) {
         SplashScreen.hideAsync();
         return;
@@ -36,10 +40,15 @@ export default function RootLayout() {
   }
 
   const firstTimeSetupCheck = async () => {
+    logger.log('RootLayout', 'Checking first-time setup key');
     const firstTimeLookup = await AsyncStorage.getItem(StorageKeys.FIRST_TIME_SETUP_KEY);
     console.log("First Time result:", firstTimeLookup);
+    logger.log('RootLayout', `First-time setup key value: ${firstTimeLookup}`);
     if (!firstTimeLookup || firstTimeLookup !== "false") {
+      logger.log('RootLayout', 'First-time setup not complete – redirecting to /firsttime');
       router.replace("/firsttime");
+    } else {
+      logger.log('RootLayout', 'First-time setup already complete – proceeding to main app');
     }
     setLoaded(true);
   }

@@ -11,6 +11,7 @@ import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
 import type { viewTypes } from '@/store/settingsReducer';
+import { logger } from '@/scripts/Logger';
 
 // ── Navigation types ─────────────────────────────────────────────────────────
 
@@ -256,7 +257,11 @@ export default function HomeScreen() {
 
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
   useEffect(() => {
-    if (!mediaSources || mediaSources.length === 0) return;
+    if (!mediaSources || mediaSources.length === 0) {
+      logger.log('HomeScreen', 'No media sources configured – skipping scan');
+      return;
+    }
+    logger.log('HomeScreen', `Media sources changed (${mediaSources.length} source(s)) – triggering scan`);
     FileScanner.getInstance().scanAllSources(mediaSources);
   }, [mediaSources]);
 
@@ -266,10 +271,12 @@ export default function HomeScreen() {
   }, [viewType]);
 
   const navigateInto = useCallback((entry: NavLevel) => {
+    logger.log('HomeScreen', `Navigate into: ${entry.label} (showName=${entry.showName ?? '-'}, seasonKey=${entry.seasonKey ?? '-'})`);
     setNavStack((prev: NavLevel[]) => [...prev, entry]);
   }, []);
 
   const navigateBack = useCallback(() => {
+    logger.log('HomeScreen', 'Navigate back');
     setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
   }, []);
 
@@ -312,7 +319,13 @@ export default function HomeScreen() {
               const isFolder = item.kind === 'folder';
               const handlePress = isFolder
                 ? item.onPress
-                : () => Linking.openURL(item.mediaObject.path).catch((e) => console.error('Failed to open file:', e));
+                : () => {
+                    logger.log('HomeScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
+                    Linking.openURL(item.mediaObject.path).catch((e: unknown) => {
+                      logger.error('HomeScreen', `Failed to open file: ${item.mediaObject.path}`, e);
+                      console.error('Failed to open file:', e);
+                    });
+                  };
 
               return (
                 <TouchableOpacity
