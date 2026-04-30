@@ -1,4 +1,5 @@
-import { Image, StyleSheet, Button, TextInput } from 'react-native';
+import { Image, StyleSheet, Button } from 'react-native';
+import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
@@ -61,8 +62,7 @@ export default function FirstTime() {
       </ThemedView>
       <ThemedView style={styles.titleContainer}>
         <ThemedText>Password for settings:</ThemedText>
-        <TextInput
-          // style={styles.input}
+        <ThemedTextInput
           onChangeText={onChangePassword}
           value={password ?? ""}
           placeholder="Settings password"

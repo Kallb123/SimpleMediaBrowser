@@ -1,11 +1,16 @@
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { Drawer } from 'expo-router/drawer';
+import { Colors } from '@/constants/Colors';
 
 export default function DrawerLayout() {
     const colorScheme = useColorScheme();
+    const theme = (colorScheme ?? 'light') as 'light' | 'dark';
   
     return (
-        <Drawer>
+        <Drawer screenOptions={{
+            headerTintColor: Colors[theme].text,
+            headerStyle: { backgroundColor: Colors[theme].background },
+        }}>
             <Drawer.Screen
             name="index" // This is the name of the page and must match the url from root
             options={{
