@@ -217,14 +217,14 @@ export default function HomeScreen() {
     [mediaLibrary, movies, viewType, navStack, navigateInto],
   );
 
-  const hasContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
+  const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
 
   // Build breadcrumb label: "Home / Show / Season 1"
   const breadcrumb = ['Home', ...navStack.map((n: NavLevel) => n.label)].join(' › ');
 
   return (
     <View style={styles.container}>
-      {mediaSources.length > 0 && hasContent ? (
+      {mediaSources.length > 0 && hasLibraryContent ? (
         <ThemedView style={styles.listContainer}>
           {/* Breadcrumb / back navigation */}
           <ThemedView style={styles.breadcrumbRow}>

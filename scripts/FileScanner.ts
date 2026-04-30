@@ -204,6 +204,7 @@ export class FileScanner {
 
     buildMovieList(files: IScannedFile[]): IMediaObject[] {
         return files.map((file) => {
+            // Destructure out relativePathParts so it is not included in the stored IMediaObject
             const { relativePathParts, ...mediaObj } = file;
             const title = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
             return { ...mediaObj, title };
