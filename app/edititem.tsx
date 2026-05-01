@@ -231,7 +231,7 @@ export default function EditItemScreen() {
         type: ['image/jpeg', 'image/png', 'image/webp'],
         copyToCacheDirectory: false,
       });
-      if (result.canceled || !result.assets?.length) return;
+      if (result.canceled) return;
       logger.log('EditItem', `Local image picked: ${result.assets[0].uri}`);
       const localUri = await copyPickedPoster(result.assets[0].uri, itemKey);
       applyPoster(localUri);
