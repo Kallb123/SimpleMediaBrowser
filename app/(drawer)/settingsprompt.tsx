@@ -4,7 +4,7 @@ import { ThemedTextInput } from '@/components/ThemedTextInput';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import { useSelector } from 'react-redux';
 import { selectPassword } from '@/store/settingsReducer';
@@ -14,6 +14,13 @@ export default function SettingsPrompt() {
   const [password, setPassword] = useState("");
 
   const settingsPassword = useSelector(selectPassword);
+
+  useEffect(() => {
+    if (!settingsPassword) {
+      logger.log('SettingsPrompt', 'No password set – skipping prompt and navigating to settings');
+      router.navigate('/settings');
+    }
+  }, [settingsPassword]);
 
   const goSettings = () => {
     const storedPassword = settingsPassword ?? "";
