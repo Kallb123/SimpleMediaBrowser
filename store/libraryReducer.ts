@@ -8,7 +8,7 @@ export interface IMediaOverride {
   title?: string;
   /** Sort key used to order the item (falls back to title override, then original name). */
   sortTitle?: string;
-  /** TMDB numeric ID stored after a rematch. */
+  /** TMDB numeric ID stored as a string after a rematch. */
   tmdbId?: string;
   /** Release year stored after a successful TMDB match/rematch. */
   year?: number;

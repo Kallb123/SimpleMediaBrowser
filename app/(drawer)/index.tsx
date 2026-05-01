@@ -165,37 +165,31 @@ function buildDisplayItems(
     case 'show+season': {
       if (navStack.length === 0) {
         // Root: one folder per show+season combination + movie files
-        const showSeasonFolders: DisplayItem[] = [];
+        type ShowSeasonEntry = { item: DisplayItem; sortKey: string };
+        const showSeasonEntries: ShowSeasonEntry[] = [];
         for (const [showName, show] of Object.entries(library)) {
           for (const [seasonKey, season] of Object.entries(show.seasons)) {
             const displayShow = showDisplayLabel(showName, overrides);
             const label = `${displayShow} – Season ${season.seasonNumber}`;
-            const sortLabel = `${showSortKey(showName, overrides)} – Season ${String(season.seasonNumber).padStart(4, '0')}`;
+            const sortKey = `${showSortKey(showName, overrides)} – Season ${String(season.seasonNumber).padStart(4, '0')}`;
             // Prefer the show's API poster; fall back to first episode thumbnail from this season
             const firstEpThumb = Object.values(season.episodes)
               .map((ep) => thumbnails[ep.path])
               .find(Boolean);
-            showSeasonFolders.push({
-              kind: 'folder',
-              label,
-              key: `${showName}::${seasonKey}::${sortLabel}`, // embed sort label in key for sorting
-              thumbnailUri: show.poster || firstEpThumb,
-              onPress: () => navigateInto({ label, showName, seasonKey }),
-              mediaType: 'season',
+            showSeasonEntries.push({
+              sortKey,
+              item: {
+                kind: 'folder',
+                label,
+                key: `${showName}::${seasonKey}`,
+                thumbnailUri: show.poster || firstEpThumb,
+                onPress: () => navigateInto({ label, showName, seasonKey }),
+                mediaType: 'season',
+              },
             });
           }
         }
-        showSeasonFolders.sort((a, b) => {
-          // Extract sort key (the part after the last '::')
-          const sortA = a.key.split('::').slice(2).join('::');
-          const sortB = b.key.split('::').slice(2).join('::');
-          return sortA.localeCompare(sortB);
-        });
-        // Restore original keys without sort label embedded
-        const cleanedFolders: DisplayItem[] = showSeasonFolders.map((f) => ({
-          ...f,
-          key: f.key.split('::').slice(0, 2).join('::'),
-        }));
+        showSeasonEntries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
@@ -205,7 +199,7 @@ function buildDisplayItems(
           mediaObject: movie,
           mediaType: 'movie' as const,
         }));
-        return [...cleanedFolders, ...movieItems];
+        return [...showSeasonEntries.map((e) => e.item), ...movieItems];
       }
       // Inside a show+season folder: episodes of that season
       const { showName, seasonKey } = navStack[0];
