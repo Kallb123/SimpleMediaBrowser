@@ -382,8 +382,9 @@ export class FileScanner {
                 ? relativePathParts[0].replace(/[\._-]+/g, ' ').trim()
                 : filenameTitle;
             // Apply folder poster if detected during scan.
-            const folderKey = relativePathParts[0];
-            const poster = (folderKey && posterMap?.get(folderKey)) ?? '';
+            const poster = relativePathParts.length > 0
+                ? (posterMap?.get(relativePathParts[0]) ?? '')
+                : '';
             return { ...mediaObj, title, poster };
         });
     }

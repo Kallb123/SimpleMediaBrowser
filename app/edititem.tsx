@@ -244,7 +244,8 @@ export default function EditItemScreen() {
   };
 
   const handleGoogleImageSearch = () => {
-    const query = encodeURIComponent(`${currentTitle ?? ''} poster`);
+    const searchTerm = titleInput.trim() || currentTitle || '';
+    const query = encodeURIComponent(`${searchTerm} poster`);
     const url = `https://www.google.com/search?q=${query}&tbm=isch`;
     logger.log('EditItem', `Opening Google Image Search: ${url}`);
     Linking.openURL(url).catch((e) => logger.warn('EditItem', 'Failed to open browser', e));
