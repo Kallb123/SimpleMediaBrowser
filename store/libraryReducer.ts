@@ -12,6 +12,11 @@ export interface IMediaOverride {
   tmdbId?: string;
   /** Release year stored after a successful TMDB match/rematch. */
   year?: number;
+  /**
+   * Local file URI for a manually selected poster image (browse locally or TMDB rematch).
+   * Persisted across rescans so user-chosen posters survive library rebuilds.
+   */
+  poster?: string;
 }
 
 export interface IMediaLibrary {

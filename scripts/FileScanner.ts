@@ -1,4 +1,5 @@
 import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system";
+import * as FileSystem from "expo-file-system";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { store } from "@/store/store";
 import { setScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail } from "@/store/libraryReducer";
@@ -46,6 +47,51 @@ const NON_DIRECTORY_EXTENSIONS = new Set([
 /** Maximum folder depth to recurse into during a scan. Protects against infinite symlink loops. */
 const MAX_SCAN_DEPTH = 8;
 
+/** Local directory where poster images are persisted for offline use. */
+const POSTERS_DIR = (FileSystem.documentDirectory ?? '') + 'smb_posters/';
+
+/**
+ * Well-known filenames that represent a folder/series/movie poster image.
+ * Checked case-insensitively during directory scanning.
+ */
+const POSTER_FILENAMES = new Set([
+    'folder.jpg', 'folder.jpeg',
+    'poster.jpg', 'poster.jpeg',
+    'cover.jpg',  'cover.jpeg',
+    'show.jpg',   'show.jpeg',
+    'movie.jpg',  'movie.jpeg',
+]);
+
+/**
+ * Copy a poster image (which may be a SAF content:// URI) into the app's
+ * persistent smb_posters directory.  Returns the local file:// URI.
+ * If the destination already exists it is returned immediately.
+ */
+async function copyLocalPoster(sourceUri: string, key: string): Promise<string> {
+    const dirInfo = await FileSystem.getInfoAsync(POSTERS_DIR);
+    if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(POSTERS_DIR, { intermediates: true });
+    }
+    const safeName = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const localPath = POSTERS_DIR + `${safeName}_local.jpg`;
+    const existing = await FileSystem.getInfoAsync(localPath);
+    if (existing.exists) {
+        return localPath;
+    }
+    try {
+        await FileSystem.copyAsync({ from: sourceUri, to: localPath });
+    } catch {
+        // copyAsync may not work with all SAF content:// URIs; fall back to base64 read/write.
+        const base64 = await StorageAccessFramework.readAsStringAsync(sourceUri, {
+            encoding: FileSystem.EncodingType.Base64,
+        });
+        await FileSystem.writeAsStringAsync(localPath, base64, {
+            encoding: FileSystem.EncodingType.Base64,
+        });
+    }
+    return localPath;
+}
+
 interface ParsedMetadata {
     showName: string;
     season: number;
@@ -87,24 +133,28 @@ export class FileScanner {
 
         // Collect TV files from all TV sources and merge into one library
         const allTvFiles: IScannedFile[] = [];
+        const tvPosterMap = new Map<string, string>();
         for (const src of tvSources) {
             logger.log('FileScanner', `Scanning TV source: ${src.uri}`);
-            const files = await this.collectAllMediaFiles(src.uri);
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri);
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
             allTvFiles.push(...files);
+            posterMap.forEach((uri, key) => { if (!tvPosterMap.has(key)) tvPosterMap.set(key, uri); });
         }
-        const mergedLibrary = this.buildLibrary(allTvFiles);
+        const mergedLibrary = this.buildLibrary(allTvFiles, tvPosterMap);
         logger.log('FileScanner', `Built TV library with ${Object.keys(mergedLibrary).length} show(s) from ${allTvFiles.length} file(s)`);
 
         // Collect movie files from all movie sources
         const allMovieFiles: IScannedFile[] = [];
+        const moviePosterMap = new Map<string, string>();
         for (const src of movieSources) {
             logger.log('FileScanner', `Scanning Movie source: ${src.uri}`);
-            const files = await this.collectAllMediaFiles(src.uri);
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri);
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
             allMovieFiles.push(...files);
+            posterMap.forEach((uri, key) => { if (!moviePosterMap.has(key)) moviePosterMap.set(key, uri); });
         }
-        const movies = this.buildMovieList(allMovieFiles);
+        const movies = this.buildMovieList(allMovieFiles, moviePosterMap);
         logger.log('FileScanner', `Built movie list with ${movies.length} movie(s)`);
 
         // Build a combined scan list for diagnostic purposes
@@ -200,8 +250,8 @@ export class FileScanner {
         logger.log('FileScanner', `scanFolder filtered to ${filtered.length} item(s)`);
 
         // Recursively collect all media files and build the library
-        const allMediaFiles = await this.collectAllMediaFiles(directory);
-        const library = this.buildLibrary(allMediaFiles);
+        const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(directory);
+        const library = this.buildLibrary(allMediaFiles, posterMap);
         store.dispatch(setMediaLibrary(library));
 
         return filtered;
@@ -209,16 +259,20 @@ export class FileScanner {
 
     // ─── Recursive collection ────────────────────────────────────────────────
 
-    private async collectAllMediaFiles(rootDirectory: string): Promise<IScannedFile[]> {
+    private async collectAllMediaFiles(
+        rootDirectory: string,
+    ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string> }> {
         const result: IScannedFile[] = [];
-        await this.recursiveCollect(rootDirectory, [], result, 0);
-        return result;
+        const posterMap = new Map<string, string>();
+        await this.recursiveCollect(rootDirectory, [], result, posterMap, 0);
+        return { files: result, posterMap };
     }
 
     private async recursiveCollect(
         directory: string,
         relativePathParts: string[],
         result: IScannedFile[],
+        posterMap: Map<string, string>,
         depth: number,
     ): Promise<void> {
         if (depth > MAX_SCAN_DEPTH) {
@@ -270,11 +324,29 @@ export class FileScanner {
                     poster: '',
                 });
             } else {
+                const dotIdx = filename.lastIndexOf('.');
+                const ext = dotIdx !== -1 ? filename.substring(dotIdx).toLowerCase() : '';
+
+                // Detect well-known poster image filenames (folder.jpg, poster.jpg, etc.)
+                // and copy them to persistent local storage so they survive without the
+                // original storage permission.  Only record the first poster found per folder.
+                if (relativePathParts.length >= 1 && POSTER_FILENAMES.has(filename.toLowerCase())) {
+                    const folderKey = relativePathParts[0];
+                    if (!posterMap.has(folderKey)) {
+                        try {
+                            const localUri = await copyLocalPoster(resolvedUri, folderKey);
+                            posterMap.set(folderKey, localUri);
+                            logger.log('FileScanner', `Local poster found for "${folderKey}": ${filename}`);
+                        } catch (e) {
+                            logger.warn('FileScanner', `Failed to copy local poster for "${folderKey}"`, e);
+                        }
+                    }
+                    continue;
+                }
+
                 // Skip files with known non-directory extensions (subtitles,
                 // images, metadata side-cars, etc.) to avoid the overhead of
                 // an always-failing readDirectoryAsync call for each one.
-                const dotIdx = filename.lastIndexOf('.');
-                const ext = dotIdx !== -1 ? filename.substring(dotIdx).toLowerCase() : '';
                 if (NON_DIRECTORY_EXTENSIONS.has(ext)) continue;
 
                 // Treat anything else as a potential directory and recurse.
@@ -282,7 +354,7 @@ export class FileScanner {
                 // is not actually a directory, so this is safe. This avoids
                 // relying on getInfoAsync's isDirectory field, which is
                 // unreliable for Android SAF document URIs.
-                await this.recursiveCollect(resolvedUri, [...relativePathParts, filename], result, depth + 1);
+                await this.recursiveCollect(resolvedUri, [...relativePathParts, filename], result, posterMap, depth + 1);
             }
         }
     }
@@ -296,7 +368,7 @@ export class FileScanner {
 
     // ─── Movie list building ─────────────────────────────────────────────────
 
-    buildMovieList(files: IScannedFile[]): IMediaObject[] {
+    buildMovieList(files: IScannedFile[], posterMap?: Map<string, string>): IMediaObject[] {
         return files.map((file) => {
             // Destructure out relativePathParts so it is not included in the stored IMediaObject
             const { relativePathParts, ...mediaObj } = file;
@@ -309,13 +381,17 @@ export class FileScanner {
             const title = relativePathParts.length === 1
                 ? relativePathParts[0].replace(/[\._-]+/g, ' ').trim()
                 : filenameTitle;
-            return { ...mediaObj, title };
+            // Apply folder poster if detected during scan.
+            const poster = relativePathParts.length > 0
+                ? (posterMap?.get(relativePathParts[0]) ?? '')
+                : '';
+            return { ...mediaObj, title, poster };
         });
     }
 
     // ─── Library building ────────────────────────────────────────────────────
 
-    buildLibrary(files: IScannedFile[]): IMediaLibrary {
+    buildLibrary(files: IScannedFile[], posterMap?: Map<string, string>): IMediaLibrary {
         const library: IMediaLibrary = {};
 
         for (const file of files) {
@@ -325,11 +401,16 @@ export class FileScanner {
             const { showName, season, episode, title } = metadata;
 
             if (!library[showName]) {
+                // Use the raw folder name (relativePathParts[0]) to look up any local
+                // poster image found during the scan, since folder names may differ
+                // from the parsed show name extracted from the episode filename.
+                const folderKey = file.relativePathParts[0];
+                const folderPoster = (folderKey && posterMap?.get(folderKey)) ?? '';
                 library[showName] = {
                     ids: { tvdb: null, imdb: null, tmdb: null },
                     title: showName,
                     year: 0,
-                    poster: '',
+                    poster: folderPoster,
                     seasons: {},
                 };
             }

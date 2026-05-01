@@ -72,8 +72,21 @@ export class MetadataService {
         const showNames = Object.keys(library);
         logger.log('MetadataService', `enrichLibrary: ${showNames.length} show(s) to process`);
 
+        const overrides = store.getState().libraryReducer.mediaOverrides;
+
         for (const showName of showNames) {
             const show = library[showName];
+
+            // Honour a user-set poster override (from manual TMDB rematch or local browse).
+            const overridePoster = overrides[`show:${showName}`]?.poster;
+            if (overridePoster) {
+                const overrideInfo = await FileSystem.getInfoAsync(overridePoster);
+                if (overrideInfo.exists) {
+                    store.dispatch(updateShowMetadata({ showName, tmdbId: show.ids.tmdb ?? '', poster: overridePoster }));
+                    logger.log('MetadataService', `Applying poster override for "${showName}"`);
+                    continue;
+                }
+            }
 
             // Skip if we already have a locally cached poster for this show.
             if (show.poster) {
@@ -125,7 +138,20 @@ export class MetadataService {
     async enrichMovies(movies: IMediaObject[], apiKey: string): Promise<void> {
         logger.log('MetadataService', `enrichMovies: ${movies.length} movie(s) to process`);
 
+        const overrides = store.getState().libraryReducer.mediaOverrides;
+
         for (const movie of movies) {
+            // Honour a user-set poster override (from manual TMDB rematch or local browse).
+            const overridePoster = overrides[`movie:${movie.path}`]?.poster;
+            if (overridePoster) {
+                const overrideInfo = await FileSystem.getInfoAsync(overridePoster);
+                if (overrideInfo.exists) {
+                    store.dispatch(updateMovieMetadata({ path: movie.path, tmdbId: movie.ids.tmdb ?? '', poster: overridePoster }));
+                    logger.log('MetadataService', `Applying poster override for movie "${movie.title}"`);
+                    continue;
+                }
+            }
+
             // Skip if we already have a locally cached poster for this movie.
             if (movie.poster) {
                 const info = await FileSystem.getInfoAsync(movie.poster);

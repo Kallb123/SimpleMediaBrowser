@@ -3,19 +3,23 @@ import {
   ActivityIndicator,
   Button,
   FlatList,
+  Linking,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
+import * as DocumentPicker from 'expo-document-picker';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedView } from '@/components/ThemedView';
 import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
+  selectMediaLibrary,
   selectMediaOverrides,
+  selectMovies,
   setMediaOverride,
   updateShowMetadata,
   updateMovieMetadata,
@@ -38,11 +42,15 @@ interface TmdbResult {
   first_air_date?: string;
 }
 
-async function downloadPoster(tmdbId: string, posterPath: string): Promise<string> {
+async function ensurePostersDir(): Promise<void> {
   const info = await FileSystem.getInfoAsync(POSTERS_DIR);
   if (!info.exists) {
     await FileSystem.makeDirectoryAsync(POSTERS_DIR, { intermediates: true });
   }
+}
+
+async function downloadPoster(tmdbId: string, posterPath: string): Promise<string> {
+  await ensurePostersDir();
   const safeName = tmdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const localPath = POSTERS_DIR + `${safeName}.jpg`;
   const existing = await FileSystem.getInfoAsync(localPath);
@@ -54,6 +62,28 @@ async function downloadPoster(tmdbId: string, posterPath: string): Promise<strin
   return result.uri;
 }
 
+/**
+ * Copy a locally picked image (file:// or content:// URI) into the app's
+ * persistent smb_posters directory and return the local file:// URI.
+ */
+async function copyPickedPoster(sourceUri: string, key: string): Promise<string> {
+  await ensurePostersDir();
+  const safeName = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const localPath = POSTERS_DIR + `${safeName}_custom.jpg`;
+  try {
+    await FileSystem.copyAsync({ from: sourceUri, to: localPath });
+  } catch {
+    // Fall back to base64 read/write for SAF content:// URIs.
+    const base64 = await FileSystem.StorageAccessFramework.readAsStringAsync(sourceUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    await FileSystem.writeAsStringAsync(localPath, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  }
+  return localPath;
+}
+
 export default function EditItemScreen() {
   const { itemType, itemKey, currentTitle } = useLocalSearchParams<{
     itemType: 'show' | 'movie' | 'episode';
@@ -63,12 +93,29 @@ export default function EditItemScreen() {
 
   const dispatch = useDispatch();
   const mediaOverrides = useSelector(selectMediaOverrides);
+  const mediaLibrary = useSelector(selectMediaLibrary);
+  const movies = useSelector(selectMovies);
   const tmdbApiKey = useSelector(selectTmdbApiKey);
 
   const existingOverride = mediaOverrides[itemKey] ?? {};
 
   const [titleInput, setTitleInput] = useState(existingOverride.title ?? currentTitle ?? '');
   const [sortTitleInput, setSortTitleInput] = useState(existingOverride.sortTitle ?? '');
+
+  // Current poster URI: prefer the override poster, then the library poster.
+  const currentLibraryPoster = (() => {
+    if (itemType === 'show') {
+      const showName = itemKey.replace(/^show:/, '');
+      return mediaLibrary[showName]?.poster ?? '';
+    } else if (itemType === 'movie') {
+      const path = itemKey.replace(/^movie:/, '');
+      return movies.find((m) => m.path === path)?.poster ?? '';
+    }
+    return '';
+  })();
+  const [activePosterUri, setActivePosterUri] = useState<string>(
+    existingOverride.poster || currentLibraryPoster || '',
+  );
 
   // TMDB search state (only for show/movie)
   const [searchQuery, setSearchQuery] = useState(existingOverride.title ?? currentTitle ?? '');
@@ -77,6 +124,9 @@ export default function EditItemScreen() {
   const [searchError, setSearchError] = useState('');
   const [applyingMatch, setApplyingMatch] = useState(false);
   const [matchApplied, setMatchApplied] = useState<number | null>(null);
+
+  // Browse-locally state
+  const [browsingLocally, setBrowsingLocally] = useState(false);
 
   const canRematch = (itemType === 'show' || itemType === 'movie') && !!tmdbApiKey;
 
@@ -90,6 +140,21 @@ export default function EditItemScreen() {
       },
     }));
     router.back();
+  };
+
+  /** Apply a chosen poster URI to the library and persist it in overrides. */
+  const applyPoster = (localUri: string) => {
+    setActivePosterUri(localUri);
+    if (itemType === 'show') {
+      const showName = itemKey.replace(/^show:/, '');
+      dispatch(updateShowMetadata({ showName, tmdbId: mediaLibrary[showName]?.ids.tmdb ?? '', poster: localUri }));
+    } else if (itemType === 'movie') {
+      const path = itemKey.replace(/^movie:/, '');
+      const movie = movies.find((m) => m.path === path);
+      dispatch(updateMovieMetadata({ path, tmdbId: movie?.ids.tmdb ?? '', poster: localUri }));
+    }
+    // Persist the poster URI in mediaOverrides so it survives rescans.
+    dispatch(setMediaOverride({ key: itemKey, override: { poster: localUri } }));
   };
 
   const handleSearch = async () => {
@@ -139,23 +204,8 @@ export default function EditItemScreen() {
         }
       }
 
-      // Update the in-library poster so it shows up immediately in the grid
-      if (itemType === 'show') {
-        // itemKey is "show:<showName>"
-        const showName = itemKey.replace(/^show:/, '');
-        dispatch(updateShowMetadata({
-          showName,
-          tmdbId,
-          poster: localPosterUri ?? '',
-        }));
-      } else if (itemType === 'movie') {
-        // itemKey is "movie:<path>"
-        const path = itemKey.replace(/^movie:/, '');
-        dispatch(updateMovieMetadata({
-          path,
-          tmdbId,
-          poster: localPosterUri ?? '',
-        }));
+      if (localPosterUri) {
+        applyPoster(localPosterUri);
       }
 
       // Store override metadata (tmdbId + year) so it survives rescans
@@ -174,6 +224,33 @@ export default function EditItemScreen() {
     }
   };
 
+  const handleBrowseLocally = async () => {
+    setBrowsingLocally(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/jpeg', 'image/png', 'image/webp'],
+        copyToCacheDirectory: false,
+      });
+      if (result.type === 'cancel') return;
+      logger.log('EditItem', `Local image picked: ${result.uri}`);
+      const localUri = await copyPickedPoster(result.uri, itemKey);
+      applyPoster(localUri);
+      logger.log('EditItem', `Custom poster saved: ${localUri}`);
+    } catch (e) {
+      logger.error('EditItem', 'Browse locally failed', e);
+    } finally {
+      setBrowsingLocally(false);
+    }
+  };
+
+  const handleGoogleImageSearch = () => {
+    const searchTerm = titleInput.trim() || currentTitle || '';
+    const query = encodeURIComponent(`${searchTerm} poster`);
+    const url = `https://www.google.com/search?q=${query}&tbm=isch`;
+    logger.log('EditItem', `Opening Google Image Search: ${url}`);
+    Linking.openURL(url).catch((e) => logger.warn('EditItem', 'Failed to open browser', e));
+  };
+
   const itemTypeLabel =
     itemType === 'show' ? 'TV Show' : itemType === 'movie' ? 'Movie' : 'Episode';
 
@@ -183,6 +260,48 @@ export default function EditItemScreen() {
         <ThemedText type="subtitle">Edit {itemTypeLabel}</ThemedText>
         <ThemedText style={styles.subtitle} numberOfLines={2}>{currentTitle}</ThemedText>
       </ThemedView>
+
+      {/* Current poster preview + poster editing options (shows and movies only) */}
+      {(itemType === 'show' || itemType === 'movie') && (
+        <ThemedView style={styles.section}>
+          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>Poster</ThemedText>
+
+          {activePosterUri ? (
+            <Image
+              source={{ uri: activePosterUri }}
+              style={styles.posterPreview}
+              contentFit="contain"
+            />
+          ) : (
+            <View style={styles.posterPlaceholder}>
+              <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
+              <ThemedText style={styles.hint}>No poster set</ThemedText>
+            </View>
+          )}
+
+          <ThemedView style={styles.posterButtonRow}>
+            <TouchableOpacity
+              style={styles.posterButton}
+              onPress={handleGoogleImageSearch}
+            >
+              <ThemedText style={styles.posterButtonText}>🔍 Google Images</ThemedText>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.posterButton}
+              onPress={handleBrowseLocally}
+              disabled={browsingLocally}
+            >
+              <ThemedText style={styles.posterButtonText}>
+                {browsingLocally ? 'Picking…' : '📁 Browse Locally'}
+              </ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
+          <ThemedText style={styles.hint}>
+            Google Images opens your browser to search for a poster. Browse Locally lets you pick any image file from your device and copies it for offline use.
+          </ThemedText>
+        </ThemedView>
+      )}
 
       {/* Title override */}
       <ThemedView style={styles.field}>
@@ -211,7 +330,7 @@ export default function EditItemScreen() {
       {canRematch && (
         <ThemedView style={styles.section}>
           <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            Rematch on TMDB
+            Search TMDB for Poster
           </ThemedText>
 
           <ThemedView style={styles.searchRow}>
@@ -286,7 +405,7 @@ export default function EditItemScreen() {
       {!tmdbApiKey && (itemType === 'show' || itemType === 'movie') && (
         <ThemedView style={styles.section}>
           <ThemedText style={styles.hint}>
-            Add a TMDB API key in Settings to enable rematching.
+            Add a TMDB API key in Settings to enable TMDB poster search.
           </ThemedText>
         </ThemedView>
       )}
@@ -335,6 +454,41 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 15,
+  },
+  posterPreview: {
+    width: 120,
+    height: 180,
+    borderRadius: 6,
+    backgroundColor: '#222',
+    alignSelf: 'center',
+  },
+  posterPlaceholder: {
+    width: 120,
+    height: 180,
+    borderRadius: 6,
+    backgroundColor: '#333',
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  posterButtonRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  posterButton: {
+    flex: 1,
+    backgroundColor: '#0a7ea4',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  posterButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
   },
   searchRow: {
     flexDirection: 'row',
