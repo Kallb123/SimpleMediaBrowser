@@ -26,7 +26,7 @@ import {
 } from '@/store/libraryReducer';
 import { selectTmdbApiKey } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';

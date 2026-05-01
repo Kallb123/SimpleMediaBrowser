@@ -1,6 +1,6 @@
 import { Button, StyleSheet, Text, View } from 'react-native';
 import { useCallback, useRef, useState } from 'react';
-import * as ScopedStorage from 'react-native-scoped-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import SelectDropdown from 'react-native-select-dropdown';
 import { useDispatch } from 'react-redux';
 import { addMediaSource, contentTypes, IMediaSource } from '@/store/settingsReducer';
@@ -35,18 +35,16 @@ export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
 
   const pickDirectory = useCallback(async () => {
     logger.log('AddMediaSource', `Opening directory picker for type: ${selectedType}`);
-    let selectedDir;
-    try {
-      selectedDir = await ScopedStorage.openDocumentTree(true);
-    } catch (e) {
-      logger.warn('AddMediaSource', 'User cancelled directory picker or picker threw', e);
-      // User cancelled the picker
+    const result = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+    if (!result.granted) {
+      logger.warn('AddMediaSource', 'User cancelled directory picker or permission denied');
       return;
     }
-    logger.log('AddMediaSource', `Directory selected: uri=${selectedDir.uri} type=${selectedType}`);
-    const source: IMediaSource = { uri: selectedDir.uri, contentType: selectedType };
+    const uri = result.directoryUri;
+    logger.log('AddMediaSource', `Directory selected: uri=${uri} type=${selectedType}`);
+    const source: IMediaSource = { uri, contentType: selectedType };
     dispatch(addMediaSource(source));
-    logger.log('AddMediaSource', `Dispatched addMediaSource for uri=${selectedDir.uri}`);
+    logger.log('AddMediaSource', `Dispatched addMediaSource for uri=${uri}`);
     onAdded?.(source);
   }, [selectedType, dispatch, onAdded]);
 

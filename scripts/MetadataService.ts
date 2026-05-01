@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { store } from '@/store/store';
 import { updateShowMetadata, updateMovieMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary } from '@/store/libraryReducer';
