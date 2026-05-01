@@ -215,7 +215,7 @@ export class FileScanner {
         logger.log('FileScanner', `scanFolder: ${directory}`);
         const contents = await StorageAccessFramework.readDirectoryAsync(directory);
     
-        var contentInfo = await Promise.all(contents.map(async (c) => {
+        const contentInfo = await Promise.all(contents.map(async (c) => {
             try {
               const info = await getInfoAsync(c);
               return info;
