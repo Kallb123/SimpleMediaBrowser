@@ -30,6 +30,19 @@ const VIDEO_EXTENSIONS = new Set([
     '.ts', '.m2ts', '.webm', '.mpg', '.mpeg', '.3gp',
 ]);
 
+/**
+ * Extensions that are definitively non-directory file types.  Entries with
+ * these extensions are skipped without attempting to recurse into them,
+ * avoiding unnecessary readDirectoryAsync calls for subtitle/image/metadata
+ * side-car files that live alongside video files.
+ */
+const NON_DIRECTORY_EXTENSIONS = new Set([
+    '.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx', // subtitles
+    '.nfo', '.xml', '.json', '.txt', '.md',          // metadata / text
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tbn', // images
+    '.mp3', '.aac', '.flac', '.ogg', '.wav', '.m4a', // audio-only
+]);
+
 /** Maximum folder depth to recurse into during a scan. Protects against infinite symlink loops. */
 const MAX_SCAN_DEPTH = 8;
 
@@ -257,10 +270,16 @@ export class FileScanner {
                     poster: '',
                 });
             } else {
-                // Treat anything that isn't a known media file as a potential
-                // directory and recurse. readDirectoryAsync will throw (and be
-                // caught) if the entry is not actually a directory, so this is
-                // safe for subtitle files, NFOs, etc. This approach avoids
+                // Skip files with known non-directory extensions (subtitles,
+                // images, metadata side-cars, etc.) to avoid the overhead of
+                // an always-failing readDirectoryAsync call for each one.
+                const dotIdx = filename.lastIndexOf('.');
+                const ext = dotIdx !== -1 ? filename.substring(dotIdx).toLowerCase() : '';
+                if (NON_DIRECTORY_EXTENSIONS.has(ext)) continue;
+
+                // Treat anything else as a potential directory and recurse.
+                // readDirectoryAsync will throw (and be caught) if the entry
+                // is not actually a directory, so this is safe. This avoids
                 // relying on getInfoAsync's isDirectory field, which is
                 // unreliable for Android SAF document URIs.
                 await this.recursiveCollect(resolvedUri, [...relativePathParts, filename], result, depth + 1);
@@ -282,12 +301,12 @@ export class FileScanner {
             // Destructure out relativePathParts so it is not included in the stored IMediaObject
             const { relativePathParts, ...mediaObj } = file;
             const filenameTitle = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
-            // When the movie file sits inside a folder (common pattern:
-            // "Movie Name (2023)/movie.mkv"), the outermost folder name is
-            // typically the canonical movie title, so prefer it over the
-            // filename. Fall back to the filename when there is no enclosing
-            // folder (file is directly in the root scan directory).
-            const title = relativePathParts.length > 0
+            // When the movie file sits inside exactly one folder (common pattern:
+            // "Movie Name (2023)/movie.mkv"), the folder name is typically the
+            // canonical movie title, so prefer it over the filename.  For files
+            // nested more than one level deep (e.g. extras/trailers inside a
+            // movie folder) the filename is more specific and accurate.
+            const title = relativePathParts.length === 1
                 ? relativePathParts[0].replace(/[\._-]+/g, ' ').trim()
                 : filenameTitle;
             return { ...mediaObj, title };
