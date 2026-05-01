@@ -24,14 +24,19 @@ function withGradleWrapper(config) {
         'gradle-wrapper.properties'
       );
 
-      if (fs.existsSync(wrapperPropsPath)) {
-        let contents = fs.readFileSync(wrapperPropsPath, 'utf-8');
-        contents = contents.replace(
-          /^distributionUrl=.*$/m,
-          `distributionUrl=https\\://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip`
+      if (!fs.existsSync(wrapperPropsPath)) {
+        console.warn(
+          `[withGradleWrapper] gradle-wrapper.properties not found at ${wrapperPropsPath} — Gradle version not patched.`
         );
-        fs.writeFileSync(wrapperPropsPath, contents, 'utf-8');
+        return config;
       }
+
+      let contents = fs.readFileSync(wrapperPropsPath, 'utf-8');
+      contents = contents.replace(
+        /^distributionUrl=.*$/gm,
+        `distributionUrl=https\\://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip`
+      );
+      fs.writeFileSync(wrapperPropsPath, contents, 'utf-8');
 
       return config;
     },
