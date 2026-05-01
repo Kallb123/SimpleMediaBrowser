@@ -7,7 +7,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource } from '@/store/settingsReducer';
+import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { FileScanner } from '@/scripts/FileScanner';
@@ -24,6 +24,7 @@ export default function SettingsPrompt() {
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
 
   const [password, setLocalPassword] = useState(null as string | null);
+  const [tmdbApiKey, setLocalTmdbApiKey] = useState(null as string | null);
   const [dataSource, setLocalDataSource] = useState("" as dataSources);
   const [mediaStructure, setLocalMediaStructure] = useState("" as viewTypes);
   const [structureDescription, setStructureDescription] = useState("");
@@ -34,6 +35,7 @@ export default function SettingsPrompt() {
   const settingsPassword = useSelector(selectPassword);
   const mediaSources = useSelector(selectMediaSources);
   const settingsDataSource = useSelector(selectDataSource);
+  const settingsTmdbApiKey = useSelector(selectTmdbApiKey);
   const settingsMediaStructure = useSelector(selectMediaStructure);
   const settingsViewOrientation = useSelector(selectViewOrientation);
   const settingsViewScale = useSelector(selectViewScale);
@@ -65,11 +67,12 @@ export default function SettingsPrompt() {
 
   useEffect(() => {
     setLocalPassword(settingsPassword as string);
+    setLocalTmdbApiKey(settingsTmdbApiKey);
     if (dataSourceRef.current) (dataSourceRef.current as any).selectIndex(dataSourceOptions.findIndex(o => o.id === settingsDataSource));
     if (mediaStructureRef.current) (mediaStructureRef.current as any).selectIndex(viewTypeOptions.findIndex(o => o.id === settingsMediaStructure));
     if (viewOrientationRef.current) (viewOrientationRef.current as any).selectIndex(uiTypeOptions.findIndex(o => o.id === settingsViewOrientation));
     setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
-  }, [settingsPassword, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale]);
 
   const save = () => {
     logger.log('Settings', 'Save pressed – evaluating changes');
@@ -97,6 +100,11 @@ export default function SettingsPrompt() {
     if (viewScale && viewScale !== settingsViewScale) {
       logger.log('Settings', `Persisting: viewScale changed ${settingsViewScale} → ${viewScale}`);
       dispatch(setViewScale(viewScale));
+      changeCount++;
+    }
+    if (tmdbApiKey !== settingsTmdbApiKey) {
+      logger.log('Settings', 'Persisting: tmdbApiKey changed');
+      dispatch(setTmdbApiKey(tmdbApiKey || null));
       changeCount++;
     }
     logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
@@ -135,6 +143,21 @@ export default function SettingsPrompt() {
           keyboardType="default"
           secureTextEntry={true}
         />
+      </ThemedView>
+
+      {/* TMDB API Key */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText>TMDB API Key:</ThemedText>
+        <ThemedTextInput
+          onChangeText={setLocalTmdbApiKey}
+          value={tmdbApiKey ?? ""}
+          placeholder="Paste your TMDB API key"
+          keyboardType="default"
+          secureTextEntry={false}
+        />
+        <ThemedText style={styles.emptyText}>
+          Register for a free key at themoviedb.org. Posters are downloaded and cached locally for offline use.
+        </ThemedText>
       </ThemedView>
 
       {/* Media Sources */}

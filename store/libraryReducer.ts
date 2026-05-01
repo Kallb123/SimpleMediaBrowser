@@ -10,6 +10,7 @@ export interface IMediaShow {
     ids: {
         tvdb: string | null;
         imdb: string | null;
+        tmdb: string | null;
     }
     title: string;
     year: number;
@@ -21,6 +22,7 @@ export interface IMediaSeason {
     ids: {
         tvdb: string | null;
         imdb: string | null;
+        tmdb: string | null;
     }
     seasonNumber: number;
     episodes: { [episode: string] : IMediaObject; };
@@ -81,10 +83,26 @@ export const settingsSlice = createSlice({
     clearThumbnails: (state) => {
       state.thumbnails = {};
     },
+    updateShowMetadata: (state, action: PayloadAction<{ showName: string; tmdbId: string; poster: string }>) => {
+      const show = state.mediaLibrary[action.payload.showName];
+      if (show) {
+        show.ids.tmdb = action.payload.tmdbId;
+        show.poster = action.payload.poster;
+      } else {
+        console.warn(`[libraryReducer] updateShowMetadata: show "${action.payload.showName}" not found`);
+      }
+    },
+    updateMovieMetadata: (state, action: PayloadAction<{ path: string; tmdbId: string; poster: string }>) => {
+      const movie = state.movies.find((m) => m.path === action.payload.path);
+      if (movie) {
+        movie.ids.tmdb = action.payload.tmdbId;
+        movie.poster = action.payload.poster;
+      }
+    },
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail, clearThumbnails } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
