@@ -48,7 +48,7 @@ export interface IMediaSeason {
 export type IRawScanList = string[];
 
 export type contentTypes = 'tv' | 'movie';
-export type dataSources = 'tvdb';
+export type dataSources = 'tmdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
 

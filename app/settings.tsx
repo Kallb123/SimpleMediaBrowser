@@ -45,7 +45,7 @@ export default function SettingsPrompt() {
   const viewOrientationRef = useRef(null);
 
   const dataSourceOptions = [
-    {id: 'tvdb', label: 'TVDB'},
+    {id: 'tmdb', label: 'TMDB'},
   ];
 
   const viewTypeOptions = [
@@ -145,8 +145,36 @@ export default function SettingsPrompt() {
         />
       </ThemedView>
 
-      {/* TMDB API Key */}
+      {/* Data source */}
       <ThemedView style={styles.sectionContainer}>
+        <ThemedView style={styles.titleContainer}>
+          <ThemedText>Data source:</ThemedText>
+          <SelectDropdown
+            ref={dataSourceRef}
+            data={dataSourceOptions}
+            defaultValue={settingsDataSource}
+            onSelect={(selectedItem) => {
+              setLocalDataSource(selectedItem.id);
+            }}
+            renderButton={(selectedItem, isOpened) => (
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                  {(selectedItem && selectedItem.label) || 'Please select...'}
+                </Text>
+                <Text>{isOpened ? "🔼" : "🔽"}</Text>
+              </View>
+            )}
+            renderItem={(item, index, isSelected) => (
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+          />
+        </ThemedView>
+
+        {/* TMDB API Key */}
         <ThemedText>TMDB API Key:</ThemedText>
         <ThemedTextInput
           onChangeText={setLocalTmdbApiKey}
@@ -185,34 +213,6 @@ export default function SettingsPrompt() {
       {/* Rescan */}
       <ThemedView style={styles.titleContainer}>
         <Button title="Rescan now" onPress={scanNow} />
-      </ThemedView>
-
-      {/* Data source */}
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Data source:</ThemedText>
-        <SelectDropdown
-          ref={dataSourceRef}
-          data={dataSourceOptions}
-          defaultValue={settingsDataSource}
-          onSelect={(selectedItem) => {
-            setLocalDataSource(selectedItem.id);
-          }}
-          renderButton={(selectedItem, isOpened) => (
-            <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-              <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                {(selectedItem && selectedItem.label) || 'Please select...'}
-              </Text>
-              <Text>{isOpened ? "🔼" : "🔽"}</Text>
-            </View>
-          )}
-          renderItem={(item, index, isSelected) => (
-            <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-              <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-            </View>
-          )}
-          showsVerticalScrollIndicator={false}
-          dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-        />
       </ThemedView>
 
       {/* Media structure */}
