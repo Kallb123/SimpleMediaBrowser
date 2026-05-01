@@ -2,7 +2,7 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { RootState } from './store'
 
 export type contentTypes = 'tv' | 'movie';
-export type dataSources = 'tvdb';
+export type dataSources = 'tmdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
 
@@ -26,7 +26,7 @@ interface SettingsState {
 const initialState: SettingsState = {
   settingsPassword: null,
   mediaSources: [],
-  dataSource: 'tvdb',
+  dataSource: 'tmdb',
   viewType: 'show/season',
   viewScale: 5,
   viewOrientation: 'poster',
