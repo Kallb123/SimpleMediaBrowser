@@ -30,7 +30,9 @@ async function ensurePostersDir(): Promise<void> {
  */
 async function downloadPoster(tmdbId: string, posterPath: string): Promise<string> {
     await ensurePostersDir();
-    const localPath = POSTERS_DIR + `${tmdbId}.jpg`;
+    // Sanitize the TMDB ID so it cannot contain path-traversal characters.
+    const safeName = tmdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const localPath = POSTERS_DIR + `${safeName}.jpg`;
     const existing = await FileSystem.getInfoAsync(localPath);
     if (existing.exists) {
         logger.log('MetadataService', `Poster already cached locally for TMDB ID ${tmdbId}`);
@@ -54,10 +56,15 @@ export class MetadataService {
 
     /** Enrich both the TV library and the movie list concurrently. */
     async enrichAll(library: IMediaLibrary, movies: IMediaObject[], apiKey: string): Promise<void> {
-        await Promise.allSettled([
+        const results = await Promise.allSettled([
             this.enrichLibrary(library, apiKey),
             this.enrichMovies(movies, apiKey),
         ]);
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                logger.error('MetadataService', 'enrichAll: a task was rejected', result.reason);
+            }
+        }
     }
 
     /** Fetch TMDB posters for every show in the library that does not yet have one cached. */

@@ -23,7 +23,7 @@ type NavLevel = {
 
 type DisplayItem =
   | { kind: 'folder'; label: string; key: string; thumbnailUri?: string; onPress: () => void }
-  | { kind: 'file'; label: string; key: string; thumbnailUri?: string; mediaObject: IMediaObject };
+  | { kind: 'file'; label: string; key: string; thumbnailUri?: string; posterUri?: string; mediaObject: IMediaObject };
 
 // ── Helper: format an episode label with episode number prefix ───────────────
 
@@ -85,6 +85,7 @@ function buildDisplayItems(
           label: movie.title || movie.filename,
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
+          posterUri: movie.poster || undefined,
           mediaObject: movie,
         });
       }
@@ -98,7 +99,7 @@ function buildDisplayItems(
           kind: 'folder' as const,
           label: showName,
           key: showName,
-          thumbnailUri: pickShowThumbnail(library, showName, thumbnails),
+          thumbnailUri: library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
           onPress: () => navigateInto({ label: showName, showName }),
         }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
@@ -106,6 +107,7 @@ function buildDisplayItems(
           label: movie.title || movie.filename,
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
+          posterUri: movie.poster || undefined,
           mediaObject: movie,
         }));
         return [...showFolders, ...movieItems];
@@ -135,7 +137,7 @@ function buildDisplayItems(
         for (const [showName, show] of Object.entries(library)) {
           for (const [seasonKey, season] of Object.entries(show.seasons)) {
             const label = `${showName} – Season ${season.seasonNumber}`;
-            // Use first episode thumbnail from this season
+            // Prefer the show's API poster; fall back to first episode thumbnail from this season
             const firstEpThumb = Object.values(season.episodes)
               .map((ep) => thumbnails[ep.path])
               .find(Boolean);
@@ -143,7 +145,7 @@ function buildDisplayItems(
               kind: 'folder',
               label,
               key: `${showName}::${seasonKey}`,
-              thumbnailUri: firstEpThumb,
+              thumbnailUri: show.poster || firstEpThumb,
               onPress: () => navigateInto({ label, showName, seasonKey }),
             });
           }
@@ -154,6 +156,7 @@ function buildDisplayItems(
           label: movie.title || movie.filename,
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
+          posterUri: movie.poster || undefined,
           mediaObject: movie,
         }));
         return [...showSeasonFolders, ...movieItems];
@@ -179,7 +182,7 @@ function buildDisplayItems(
           kind: 'folder' as const,
           label: showName,
           key: showName,
-          thumbnailUri: pickShowThumbnail(library, showName, thumbnails),
+          thumbnailUri: library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
           onPress: () => navigateInto({ label: showName, showName }),
         }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
@@ -187,6 +190,7 @@ function buildDisplayItems(
           label: movie.title || movie.filename,
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
+          posterUri: movie.poster || undefined,
           mediaObject: movie,
         }));
         return [...showFolders, ...movieItems];
@@ -199,6 +203,7 @@ function buildDisplayItems(
           .sort((a, b) => a[1].seasonNumber - b[1].seasonNumber)
           .map(([seasonKey, season]) => {
             const label = `Season ${season.seasonNumber}`;
+            // Prefer the show's API poster; fall back to first episode thumbnail in the season
             const firstEpThumb = Object.values(season.episodes)
               .map((ep) => thumbnails[ep.path])
               .find(Boolean);
@@ -206,7 +211,7 @@ function buildDisplayItems(
               kind: 'folder' as const,
               label,
               key: seasonKey,
-              thumbnailUri: firstEpThumb,
+              thumbnailUri: show.poster || firstEpThumb,
               onPress: () =>
                 navigateInto({
                   label,
@@ -256,6 +261,7 @@ export default function HomeScreen() {
   const isScanning = useSelector(selectIsScanning);
 
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
+  const [pressedKey, setPressedKey] = useState<string | null>(null);
   useEffect(() => {
     if (!mediaSources || mediaSources.length === 0) {
       logger.log('HomeScreen', 'No media sources configured – skipping scan');
@@ -317,6 +323,12 @@ export default function HomeScreen() {
             numColumns={numColumns}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
+              const hasPoster = item.kind === 'file' && !!item.posterUri;
+              const hasBothImages = hasPoster && !!item.thumbnailUri;
+              const isRevealed = pressedKey === item.key;
+              // Files with a poster show the poster by default; long-press reveals the video thumbnail.
+              const displayUri = hasPoster && !isRevealed ? item.posterUri : item.thumbnailUri;
+
               const handlePress = isFolder
                 ? item.onPress
                 : () => {
@@ -329,12 +341,14 @@ export default function HomeScreen() {
               return (
                 <TouchableOpacity
                   onPress={handlePress}
+                  onLongPress={hasBothImages ? () => setPressedKey(item.key) : undefined}
+                  onPressOut={hasBothImages ? () => setPressedKey(null) : undefined}
                   style={[styles.card, { width: cardWidth }]}
                 >
                   <View style={[styles.thumbnailBox, { height: thumbnailHeight }]}>
-                    {item.thumbnailUri ? (
+                    {displayUri ? (
                       <Image
-                        source={{ uri: item.thumbnailUri }}
+                        source={{ uri: displayUri }}
                         style={styles.thumbnailImage}
                         contentFit="cover"
                       />

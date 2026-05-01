@@ -88,6 +88,8 @@ export const settingsSlice = createSlice({
       if (show) {
         show.ids.tmdb = action.payload.tmdbId;
         show.poster = action.payload.poster;
+      } else {
+        console.warn(`[libraryReducer] updateShowMetadata: show "${action.payload.showName}" not found`);
       }
     },
     updateMovieMetadata: (state, action: PayloadAction<{ path: string; tmdbId: string; poster: string }>) => {

@@ -102,6 +102,11 @@ export default function SettingsPrompt() {
       dispatch(setViewScale(viewScale));
       changeCount++;
     }
+    if (tmdbApiKey !== settingsTmdbApiKey) {
+      logger.log('Settings', 'Persisting: tmdbApiKey changed');
+      dispatch(setTmdbApiKey(tmdbApiKey || null));
+      changeCount++;
+    }
     logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
     router.replace('/(drawer)')
   };
@@ -138,6 +143,21 @@ export default function SettingsPrompt() {
           keyboardType="default"
           secureTextEntry={true}
         />
+      </ThemedView>
+
+      {/* TMDB API Key */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText>TMDB API Key:</ThemedText>
+        <ThemedTextInput
+          onChangeText={setLocalTmdbApiKey}
+          value={tmdbApiKey ?? ""}
+          placeholder="Paste your TMDB API key"
+          keyboardType="default"
+          secureTextEntry={false}
+        />
+        <ThemedText style={styles.emptyText}>
+          Register for a free key at themoviedb.org. Posters are downloaded and cached locally for offline use.
+        </ThemedText>
       </ThemedView>
 
       {/* Media Sources */}
