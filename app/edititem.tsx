@@ -231,9 +231,9 @@ export default function EditItemScreen() {
         type: ['image/jpeg', 'image/png', 'image/webp'],
         copyToCacheDirectory: false,
       });
-      if (result.type === 'cancel') return;
-      logger.log('EditItem', `Local image picked: ${result.uri}`);
-      const localUri = await copyPickedPoster(result.uri, itemKey);
+      if (result.canceled) return;
+      logger.log('EditItem', `Local image picked: ${result.assets[0].uri}`);
+      const localUri = await copyPickedPoster(result.assets[0].uri, itemKey);
       applyPoster(localUri);
       logger.log('EditItem', `Custom poster saved: ${localUri}`);
     } catch (e) {
