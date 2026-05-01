@@ -2,6 +2,18 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from './store';
 import { IMediaObject } from '@/scripts/FileScanner';
 
+/** User-supplied overrides for a media item (show, movie, or episode). */
+export interface IMediaOverride {
+  /** Display title shown in the UI (takes priority over the scanned/TMDB title). */
+  title?: string;
+  /** Sort key used to order the item (falls back to title override, then original name). */
+  sortTitle?: string;
+  /** TMDB numeric ID stored after a rematch. */
+  tmdbId?: string;
+  /** Release year stored after a successful TMDB match/rematch. */
+  year?: number;
+}
+
 export interface IMediaLibrary {
     [show: string] : IMediaShow;
 }
@@ -42,6 +54,13 @@ interface LibraryState {
   scanList: IRawScanList;
   isScanning: boolean;
   thumbnails: { [path: string]: string };
+  /**
+   * User-supplied overrides keyed by a namespaced string:
+   *   "show:<showName>"      – for a TV show folder
+   *   "movie:<path>"         – for a movie file
+   *   "episode:<path>"       – for an episode file
+   */
+  mediaOverrides: { [key: string]: IMediaOverride };
 }
 
 // Define the initial state using that type
@@ -51,6 +70,7 @@ const initialState: LibraryState = {
   scanList: [],
   isScanning: false,
   thumbnails: {},
+  mediaOverrides: {},
 }
 
 export const settingsSlice = createSlice({
@@ -99,10 +119,19 @@ export const settingsSlice = createSlice({
         movie.poster = action.payload.poster;
       }
     },
+    setMediaOverride: (state, action: PayloadAction<{ key: string; override: IMediaOverride }>) => {
+      state.mediaOverrides[action.payload.key] = {
+        ...(state.mediaOverrides[action.payload.key] ?? {}),
+        ...action.payload.override,
+      };
+    },
+    clearMediaOverride: (state, action: PayloadAction<string>) => {
+      delete state.mediaOverrides[action.payload];
+    },
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
@@ -110,5 +139,6 @@ export const selectMediaLibrary = (state: RootState) => state.libraryReducer.med
 export const selectMovies = (state: RootState) => state.libraryReducer.movies;
 export const selectIsScanning = (state: RootState) => state.libraryReducer.isScanning;
 export const selectThumbnails = (state: RootState) => state.libraryReducer.thumbnails;
+export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;
 
 export default settingsSlice.reducer

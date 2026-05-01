@@ -2,16 +2,18 @@ import { BackHandler, Dimensions, Linking, StyleSheet, TouchableOpacity, View } 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Image } from 'expo-image';
-import { Link } from 'expo-router';
+import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
-import { selectMediaLibrary, selectMovies, selectIsScanning, selectThumbnails } from '@/store/libraryReducer';
+import { selectMediaLibrary, selectMovies, selectIsScanning, selectThumbnails, selectMediaOverrides } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
+import type { IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
+import { useEditMode } from '@/contexts/EditModeContext';
 
 // ── Navigation types ─────────────────────────────────────────────────────────
 
@@ -22,39 +24,8 @@ type NavLevel = {
 };
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; key: string; thumbnailUri?: string; onPress: () => void }
-  | { kind: 'file'; label: string; key: string; thumbnailUri?: string; posterUri?: string; mediaObject: IMediaObject };
-
-// ── Helper: format an episode label with episode number prefix ───────────────
-
-/** Returns "Exx - title" – used when the season is already clear from folder context. */
-function formatEpisodeLabel(ep: IMediaObject): string {
-  if (ep.episodeNumber > 0) {
-    const epNum = `E${String(ep.episodeNumber).padStart(2, '0')}`;
-    return ep.title ? `${epNum} - ${ep.title}` : epNum;
-  }
-  return ep.title || ep.filename;
-}
-
-/** Returns "SxxExx title" – used when the season number must be shown alongside the episode. */
-function formatEpisodeWithSeason(seasonNumber: number, ep: IMediaObject): string {
-  if (ep.episodeNumber > 0) {
-    const sNum = `S${String(seasonNumber).padStart(2, '0')}`;
-    const eNum = `E${String(ep.episodeNumber).padStart(2, '0')}`;
-    return ep.title ? `${sNum}${eNum} ${ep.title}` : `${sNum}${eNum}`;
-  }
-  return ep.title || ep.filename;
-}
-
-/** Returns "show name SxxExx title" – used in the flat view where no folder provides context. */
-function formatFlatEpisodeLabel(showName: string, seasonNumber: number, ep: IMediaObject): string {
-  if (ep.episodeNumber > 0) {
-    const sNum = `S${String(seasonNumber).padStart(2, '0')}`;
-    const eNum = `E${String(ep.episodeNumber).padStart(2, '0')}`;
-    return ep.title ? `${showName} ${sNum}${eNum} ${ep.title}` : `${showName} ${sNum}${eNum}`;
-  }
-  return ep.title ? `${showName} ${ep.title}` : `${showName} ${ep.filename}`;
-}
+  | { kind: 'folder'; label: string; key: string; thumbnailUri?: string; onPress: () => void; mediaType: 'show' | 'season' }
+  | { kind: 'file'; label: string; key: string; thumbnailUri?: string; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
 
 // ── Helper: pick a representative thumbnail URI for a show folder ─────────────
 
@@ -75,12 +46,39 @@ function pickShowThumbnail(
 
 // ── Helper: build items to display from library + nav state ──────────────────
 
+/** Returns the effective display label for a show, applying overrides if present. */
+function showDisplayLabel(showName: string, overrides: { [key: string]: IMediaOverride }): string {
+  return overrides[`show:${showName}`]?.title ?? showName;
+}
+
+/** Returns the effective sort key for a show (sortTitle > title > showName). */
+function showSortKey(showName: string, overrides: { [key: string]: IMediaOverride }): string {
+  const o = overrides[`show:${showName}`];
+  return o?.sortTitle ?? o?.title ?? showName;
+}
+
+/** Returns the effective display label for an episode, applying overrides to the title portion. */
+function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }, prefix: string): string {
+  const override = overrides[`episode:${ep.path}`];
+  const title = override?.title ?? ep.title;
+  if (prefix) {
+    return title ? `${prefix} - ${title}` : prefix;
+  }
+  return title || ep.filename;
+}
+
+/** Returns the effective display label for a movie, applying overrides if present. */
+function movieDisplayLabel(movie: IMediaObject, overrides: { [key: string]: IMediaOverride }): string {
+  return overrides[`movie:${movie.path}`]?.title ?? movie.title ?? movie.filename;
+}
+
 function buildDisplayItems(
   library: IMediaLibrary,
   movies: IMediaObject[],
   viewType: viewTypes,
   navStack: NavLevel[],
   thumbnails: { [path: string]: string },
+  overrides: { [key: string]: IMediaOverride },
   navigateInto: (entry: NavLevel) => void,
 ): DisplayItem[] {
   switch (viewType) {
@@ -90,12 +88,16 @@ function buildDisplayItems(
       for (const [showName, show] of Object.entries(library)) {
         for (const season of Object.values(show.seasons)) {
           for (const ep of Object.values(season.episodes)) {
+            const sNum = `S${String(season.seasonNumber).padStart(2, '0')}`;
+            const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
+            const prefix = ep.episodeNumber > 0 ? `${showDisplayLabel(showName, overrides)} ${sNum}${eNum}` : '';
             items.push({
               kind: 'file',
-              label: formatFlatEpisodeLabel(showName, season.seasonNumber, ep),
+              label: episodeDisplayLabel(ep, overrides, prefix),
               key: ep.path,
               thumbnailUri: thumbnails[ep.path],
               mediaObject: ep,
+              mediaType: 'episode',
             });
           }
         }
@@ -103,11 +105,12 @@ function buildDisplayItems(
       for (const movie of movies) {
         items.push({
           kind: 'file',
-          label: movie.title || movie.filename,
+          label: movieDisplayLabel(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
           posterUri: movie.poster || undefined,
           mediaObject: movie,
+          mediaType: 'movie',
         });
       }
       return items;
@@ -115,21 +118,25 @@ function buildDisplayItems(
 
     case 'show': {
       if (navStack.length === 0) {
-        // Root: one folder per show + movie files
-        const showFolders: DisplayItem[] = Object.keys(library).sort().map((showName) => ({
-          kind: 'folder' as const,
-          label: showName,
-          key: showName,
-          thumbnailUri: library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
-          onPress: () => navigateInto({ label: showName, showName }),
-        }));
+        // Root: one folder per show (sorted by sort key) + movie files
+        const showFolders: DisplayItem[] = Object.keys(library)
+          .sort((a, b) => showSortKey(a, overrides).localeCompare(showSortKey(b, overrides)))
+          .map((showName) => ({
+            kind: 'folder' as const,
+            label: showDisplayLabel(showName, overrides),
+            key: showName,
+            thumbnailUri: library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
+            onPress: () => navigateInto({ label: showName, showName }),
+            mediaType: 'show' as const,
+          }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
-          label: movie.title || movie.filename,
+          label: movieDisplayLabel(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
           posterUri: movie.poster || undefined,
           mediaObject: movie,
+          mediaType: 'movie' as const,
         }));
         return [...showFolders, ...movieItems];
       }
@@ -139,12 +146,16 @@ function buildDisplayItems(
       const items: DisplayItem[] = [];
       for (const season of Object.values(show.seasons)) {
         for (const ep of Object.values(season.episodes)) {
+          const sNum = `S${String(season.seasonNumber).padStart(2, '0')}`;
+          const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
+          const prefix = ep.episodeNumber > 0 ? `${sNum}${eNum}` : '';
           items.push({
             kind: 'file',
-            label: formatEpisodeWithSeason(season.seasonNumber, ep),
+            label: episodeDisplayLabel(ep, overrides, prefix),
             key: ep.path,
             thumbnailUri: thumbnails[ep.path],
             mediaObject: ep,
+            mediaType: 'episode',
           });
         }
       }
@@ -157,7 +168,9 @@ function buildDisplayItems(
         const showSeasonFolders: DisplayItem[] = [];
         for (const [showName, show] of Object.entries(library)) {
           for (const [seasonKey, season] of Object.entries(show.seasons)) {
-            const label = `${showName} – Season ${season.seasonNumber}`;
+            const displayShow = showDisplayLabel(showName, overrides);
+            const label = `${displayShow} – Season ${season.seasonNumber}`;
+            const sortLabel = `${showSortKey(showName, overrides)} – Season ${String(season.seasonNumber).padStart(4, '0')}`;
             // Prefer the show's API poster; fall back to first episode thumbnail from this season
             const firstEpThumb = Object.values(season.episodes)
               .map((ep) => thumbnails[ep.path])
@@ -165,54 +178,74 @@ function buildDisplayItems(
             showSeasonFolders.push({
               kind: 'folder',
               label,
-              key: `${showName}::${seasonKey}`,
+              key: `${showName}::${seasonKey}::${sortLabel}`, // embed sort label in key for sorting
               thumbnailUri: show.poster || firstEpThumb,
               onPress: () => navigateInto({ label, showName, seasonKey }),
+              mediaType: 'season',
             });
           }
         }
-        showSeasonFolders.sort((a, b) => a.label.localeCompare(b.label));
+        showSeasonFolders.sort((a, b) => {
+          // Extract sort key (the part after the last '::')
+          const sortA = a.key.split('::').slice(2).join('::');
+          const sortB = b.key.split('::').slice(2).join('::');
+          return sortA.localeCompare(sortB);
+        });
+        // Restore original keys without sort label embedded
+        const cleanedFolders: DisplayItem[] = showSeasonFolders.map((f) => ({
+          ...f,
+          key: f.key.split('::').slice(0, 2).join('::'),
+        }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
-          label: movie.title || movie.filename,
+          label: movieDisplayLabel(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
           posterUri: movie.poster || undefined,
           mediaObject: movie,
+          mediaType: 'movie' as const,
         }));
-        return [...showSeasonFolders, ...movieItems];
+        return [...cleanedFolders, ...movieItems];
       }
       // Inside a show+season folder: episodes of that season
       const { showName, seasonKey } = navStack[0];
       const season = library[showName!]?.seasons[seasonKey!];
       if (!season) return [];
-      return Object.values(season.episodes).map((ep) => ({
-        kind: 'file',
-        label: formatEpisodeLabel(ep),
-        key: ep.path,
-        thumbnailUri: thumbnails[ep.path],
-        mediaObject: ep,
-      }));
+      return Object.values(season.episodes).map((ep) => {
+        const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
+        return {
+          kind: 'file' as const,
+          label: episodeDisplayLabel(ep, overrides, eNum),
+          key: ep.path,
+          thumbnailUri: thumbnails[ep.path],
+          mediaObject: ep,
+          mediaType: 'episode' as const,
+        };
+      });
     }
 
     case 'show/season':
     default: {
       if (navStack.length === 0) {
-        // Root: one folder per show + movie files
-        const showFolders: DisplayItem[] = Object.keys(library).sort().map((showName) => ({
-          kind: 'folder' as const,
-          label: showName,
-          key: showName,
-          thumbnailUri: library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
-          onPress: () => navigateInto({ label: showName, showName }),
-        }));
+        // Root: one folder per show (sorted by sort key) + movie files
+        const showFolders: DisplayItem[] = Object.keys(library)
+          .sort((a, b) => showSortKey(a, overrides).localeCompare(showSortKey(b, overrides)))
+          .map((showName) => ({
+            kind: 'folder' as const,
+            label: showDisplayLabel(showName, overrides),
+            key: showName,
+            thumbnailUri: library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
+            onPress: () => navigateInto({ label: showName, showName }),
+            mediaType: 'show' as const,
+          }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
-          label: movie.title || movie.filename,
+          label: movieDisplayLabel(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnails[movie.path],
           posterUri: movie.poster || undefined,
           mediaObject: movie,
+          mediaType: 'movie' as const,
         }));
         return [...showFolders, ...movieItems];
       }
@@ -239,6 +272,7 @@ function buildDisplayItems(
                   showName: navStack[0].showName,
                   seasonKey,
                 }),
+              mediaType: 'season' as const,
             };
           });
       }
@@ -246,13 +280,17 @@ function buildDisplayItems(
       const show = library[navStack[0].showName!];
       const season = show?.seasons[navStack[1].seasonKey!];
       if (!season) return [];
-      return Object.values(season.episodes).map((ep) => ({
-        kind: 'file',
-        label: formatEpisodeLabel(ep),
-        key: ep.path,
-        thumbnailUri: thumbnails[ep.path],
-        mediaObject: ep,
-      }));
+      return Object.values(season.episodes).map((ep) => {
+        const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
+        return {
+          kind: 'file' as const,
+          label: episodeDisplayLabel(ep, overrides, eNum),
+          key: ep.path,
+          thumbnailUri: thumbnails[ep.path],
+          mediaObject: ep,
+          mediaType: 'episode' as const,
+        };
+      });
     }
   }
 }
@@ -279,6 +317,9 @@ export default function HomeScreen() {
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
   const thumbnails = useSelector(selectThumbnails);
+  const mediaOverrides = useSelector(selectMediaOverrides);
+
+  const { editMode } = useEditMode();
 
   const isScanning = useSelector(selectIsScanning);
 
@@ -329,14 +370,38 @@ export default function HomeScreen() {
     : Math.round(cardWidth * 9 / 16);
 
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, thumbnails, navigateInto),
-    [mediaLibrary, movies, viewType, navStack, thumbnails, navigateInto],
+    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, thumbnails, mediaOverrides, navigateInto),
+    [mediaLibrary, movies, viewType, navStack, thumbnails, mediaOverrides, navigateInto],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
 
   // Build breadcrumb label: "Home / Show / Season 1"
-  const breadcrumb = ['Home', ...navStack.map((n: NavLevel) => n.label)].join(' › ');
+  const breadcrumb = [
+    editMode ? '✏️ Home' : 'Home',
+    ...navStack.map((n: NavLevel) => n.label),
+  ].join(' › ');
+
+  /** Open the edit screen for a given display item. */
+  const openEditScreen = useCallback((item: DisplayItem) => {
+    let itemType: 'show' | 'movie' | 'episode';
+    let itemKey: string;
+    if (item.kind === 'folder' && item.mediaType === 'show') {
+      itemType = 'show';
+      itemKey = `show:${item.key}`;
+    } else if (item.kind === 'file') {
+      itemType = item.mediaType === 'movie' ? 'movie' : 'episode';
+      itemKey = `${item.mediaType}:${item.mediaObject.path}`;
+    } else {
+      // Season folders are not editable
+      return;
+    }
+    logger.log('HomeScreen', `Opening edit screen: type=${itemType} key=${itemKey}`);
+    router.push({
+      pathname: '/edititem',
+      params: { itemType, itemKey, currentTitle: item.label },
+    });
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -363,7 +428,7 @@ export default function HomeScreen() {
               const hasPoster = item.kind === 'file' && !!item.posterUri;
               const hasBothImages = hasPoster && !!item.thumbnailUri;
               const isRevealed = pressedKey === item.key;
-              // Files with a poster show the poster by default; long-press reveals the video thumbnail.
+              // Files with a poster show the poster by default; long-press reveals the video thumbnail (unless in edit mode).
               const displayUri = hasPoster && !isRevealed ? item.posterUri : item.thumbnailUri;
 
               const handlePress = isFolder
@@ -375,11 +440,29 @@ export default function HomeScreen() {
                     });
                   };
 
+              // In edit mode: long-press opens the edit screen for any editable item.
+              // Otherwise: long-press on items that have both a poster and a thumbnail reveals the thumbnail.
+              const isEditableInEditMode = editMode && (
+                item.mediaType === 'show' ||
+                item.mediaType === 'movie' ||
+                item.mediaType === 'episode'
+              );
+              const handleLongPress = isEditableInEditMode
+                ? () => openEditScreen(item)
+                : hasBothImages
+                  ? () => setPressedKey(item.key)
+                  : undefined;
+              const handlePressOut = isEditableInEditMode
+                ? undefined
+                : hasBothImages
+                  ? () => setPressedKey(null)
+                  : undefined;
+
               return (
                 <TouchableOpacity
                   onPress={handlePress}
-                  onLongPress={hasBothImages ? () => setPressedKey(item.key) : undefined}
-                  onPressOut={hasBothImages ? () => setPressedKey(null) : undefined}
+                  onLongPress={handleLongPress}
+                  onPressOut={handlePressOut}
                   style={[styles.card, { width: cardWidth }]}
                 >
                   <View style={[styles.thumbnailBox, { height: thumbnailHeight }]}>
@@ -394,6 +477,12 @@ export default function HomeScreen() {
                         <ThemedText style={styles.placeholderIcon}>
                           {isFolder ? '📁' : '🎬'}
                         </ThemedText>
+                      </View>
+                    )}
+                    {/* Edit mode indicator overlay */}
+                    {isEditableInEditMode && (
+                      <View style={styles.editOverlay}>
+                        <ThemedText style={styles.editOverlayIcon}>✏️</ThemedText>
                       </View>
                     )}
                   </View>
@@ -497,6 +586,17 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 6,
     fontSize: 12,
+  },
+  editOverlay: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 12,
+    padding: 3,
+  },
+  editOverlayIcon: {
+    fontSize: 14,
   },
   stepContainer: {
     gap: 8,

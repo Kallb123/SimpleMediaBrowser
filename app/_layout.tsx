@@ -10,6 +10,7 @@ import { StorageKeys } from '@/constants/StorageKeys';
 import { Provider } from 'react-redux';
 import { store } from '@/store/store';
 import { logger } from '@/scripts/Logger';
+import { EditModeProvider } from '@/contexts/EditModeContext';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -56,19 +57,27 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Provider store={store}>
-        <Stack>
-          <Stack.Screen name="firsttime" options={{ headerShown: false }} />
-          <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
-          <Stack.Screen name="settings" options={{ headerShown: false }} />
-          <Stack.Screen name="+not-found" />
-          <Stack.Screen
-            name="modal"
-            options={{
-              // Set the presentation mode to modal for our modal route.
-              presentation: 'modal',
-            }}
-          />
-        </Stack>
+        <EditModeProvider>
+          <Stack>
+            <Stack.Screen name="firsttime" options={{ headerShown: false }} />
+            <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
+            <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen name="+not-found" />
+            <Stack.Screen
+              name="modal"
+              options={{
+                presentation: 'modal',
+              }}
+            />
+            <Stack.Screen
+              name="edititem"
+              options={{
+                presentation: 'modal',
+                title: 'Edit Item',
+              }}
+            />
+          </Stack>
+        </EditModeProvider>
       </Provider>
     </ThemeProvider>
   );
