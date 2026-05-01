@@ -1,11 +1,11 @@
-import { Dimensions, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { BackHandler, Dimensions, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Image } from 'expo-image';
 import { Link } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale } from '@/store/settingsReducer';
+import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectThumbnails } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
@@ -27,12 +27,33 @@ type DisplayItem =
 
 // ── Helper: format an episode label with episode number prefix ───────────────
 
+/** Returns "Exx - title" – used when the season is already clear from folder context. */
 function formatEpisodeLabel(ep: IMediaObject): string {
   if (ep.episodeNumber > 0) {
     const epNum = `E${String(ep.episodeNumber).padStart(2, '0')}`;
     return ep.title ? `${epNum} - ${ep.title}` : epNum;
   }
   return ep.title || ep.filename;
+}
+
+/** Returns "SxxExx title" – used when the season number must be shown alongside the episode. */
+function formatEpisodeWithSeason(seasonNumber: number, ep: IMediaObject): string {
+  if (ep.episodeNumber > 0) {
+    const sNum = `S${String(seasonNumber).padStart(2, '0')}`;
+    const eNum = `E${String(ep.episodeNumber).padStart(2, '0')}`;
+    return ep.title ? `${sNum}${eNum} ${ep.title}` : `${sNum}${eNum}`;
+  }
+  return ep.title || ep.filename;
+}
+
+/** Returns "show name SxxExx title" – used in the flat view where no folder provides context. */
+function formatFlatEpisodeLabel(showName: string, seasonNumber: number, ep: IMediaObject): string {
+  if (ep.episodeNumber > 0) {
+    const sNum = `S${String(seasonNumber).padStart(2, '0')}`;
+    const eNum = `E${String(ep.episodeNumber).padStart(2, '0')}`;
+    return ep.title ? `${showName} ${sNum}${eNum} ${ep.title}` : `${showName} ${sNum}${eNum}`;
+  }
+  return ep.title ? `${showName} ${ep.title}` : `${showName} ${ep.filename}`;
 }
 
 // ── Helper: pick a representative thumbnail URI for a show folder ─────────────
@@ -66,12 +87,12 @@ function buildDisplayItems(
     case 'flat': {
       // All episodes from every show/season in one flat list, plus movies
       const items: DisplayItem[] = [];
-      for (const show of Object.values(library)) {
+      for (const [showName, show] of Object.entries(library)) {
         for (const season of Object.values(show.seasons)) {
           for (const ep of Object.values(season.episodes)) {
             items.push({
               kind: 'file',
-              label: formatEpisodeLabel(ep),
+              label: formatFlatEpisodeLabel(showName, season.seasonNumber, ep),
               key: ep.path,
               thumbnailUri: thumbnails[ep.path],
               mediaObject: ep,
@@ -120,7 +141,7 @@ function buildDisplayItems(
         for (const ep of Object.values(season.episodes)) {
           items.push({
             kind: 'file',
-            label: formatEpisodeLabel(ep),
+            label: formatEpisodeWithSeason(season.seasonNumber, ep),
             key: ep.path,
             thumbnailUri: thumbnails[ep.path],
             mediaObject: ep,
@@ -254,6 +275,7 @@ export default function HomeScreen() {
   const settingsPassword = useSelector(selectPassword);
   const viewType = useSelector(selectMediaStructure);
   const viewScale = useSelector(selectViewScale);
+  const viewOrientation = useSelector(selectViewOrientation);
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
   const thumbnails = useSelector(selectThumbnails);
@@ -286,10 +308,25 @@ export default function HomeScreen() {
     setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
   }, []);
 
+  // Intercept the Android hardware back button to pop the nav stack when inside a folder.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (navStack.length > 0) {
+        navigateBack();
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [navStack, navigateBack]);
+
   // Map viewScale (1-10) to number of grid columns (MIN_COLUMNS-MAX_COLUMNS)
   const numColumns = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, Math.round(viewScale / SCALE_TO_COLUMNS_DIVISOR)));
   const cardWidth = (SCREEN_WIDTH - CARD_GAP * (numColumns + 1)) / numColumns;
-  const thumbnailHeight = Math.round(cardWidth * 9 / 16);
+  // Poster orientation uses a 2:3 portrait ratio; banner/thumbnail orientation uses 16:9 landscape.
+  const thumbnailHeight = viewOrientation === 'poster'
+    ? Math.round(cardWidth * 3 / 2)
+    : Math.round(cardWidth * 9 / 16);
 
   const displayItems = useMemo(
     () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, thumbnails, navigateInto),
