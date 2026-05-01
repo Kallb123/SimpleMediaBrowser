@@ -222,38 +222,48 @@ export class FileScanner {
         }
         logger.log('FileScanner', `Scanning dir (depth=${depth}, ${contents.length} entries): ${decodeURIComponent(directory).split('/').slice(-2).join('/')}`);
 
-        const infoList = await Promise.all(
+        // Resolve URIs in parallel. On Android SAF, getInfoAsync may return
+        // { exists: false, isDirectory: undefined } for document URIs without
+        // throwing, so we cannot rely on the isDirectory field to distinguish
+        // files from directories. We use the file extension instead.
+        const uriList = await Promise.all(
             contents.map(async (c) => {
                 try {
-                    return await getInfoAsync(c);
+                    const info = await getInfoAsync(c);
+                    return info.uri; // may be a normalised URI (e.g. file://)
                 } catch {
-                    // SAF directories sometimes fail getInfoAsync; treat as directory
-                    const info: FileInfo = { uri: c, isDirectory: true, exists: true, size: 0, modificationTime: 0 };
-                    return info;
+                    return c; // fall back to the original SAF document URI
                 }
             }),
         );
 
-        for (const info of infoList) {
-            const uri = decodeURIComponent(info.uri);
+        for (let i = 0; i < contents.length; i++) {
+            const resolvedUri = uriList[i];
+            const uri = decodeURIComponent(resolvedUri);
             const filename = uri.substring(uri.lastIndexOf('/') + 1);
 
             if (filename.charAt(0) === '.') continue; // Skip hidden entries
 
-            if (info.isDirectory) {
-                await this.recursiveCollect(info.uri, [...relativePathParts, filename], result, depth + 1);
-            } else if (this.isMediaFile(filename)) {
+            if (this.isMediaFile(filename)) {
                 result.push({
                     ids: { tvdb: null, imdb: null, tmdb: null },
                     title: '',
                     episodeNumber: 0,
                     filename,
-                    path: info.uri,
+                    path: resolvedUri,
                     parsedPath: uri,
                     isDirectory: false,
                     relativePathParts,
                     poster: '',
                 });
+            } else {
+                // Treat anything that isn't a known media file as a potential
+                // directory and recurse. readDirectoryAsync will throw (and be
+                // caught) if the entry is not actually a directory, so this is
+                // safe for subtitle files, NFOs, etc. This approach avoids
+                // relying on getInfoAsync's isDirectory field, which is
+                // unreliable for Android SAF document URIs.
+                await this.recursiveCollect(resolvedUri, [...relativePathParts, filename], result, depth + 1);
             }
         }
     }
@@ -271,7 +281,15 @@ export class FileScanner {
         return files.map((file) => {
             // Destructure out relativePathParts so it is not included in the stored IMediaObject
             const { relativePathParts, ...mediaObj } = file;
-            const title = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
+            const filenameTitle = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
+            // When the movie file sits inside a folder (common pattern:
+            // "Movie Name (2023)/movie.mkv"), the outermost folder name is
+            // typically the canonical movie title, so prefer it over the
+            // filename. Fall back to the filename when there is no enclosing
+            // folder (file is directly in the root scan directory).
+            const title = relativePathParts.length > 0
+                ? relativePathParts[0].replace(/[\._-]+/g, ' ').trim()
+                : filenameTitle;
             return { ...mediaObj, title };
         });
     }
