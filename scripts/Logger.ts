@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const LOG_FILE_PATH = (FileSystem.documentDirectory ?? '') + 'smb_debug.log';
 /** Maximum number of log lines kept in memory. */

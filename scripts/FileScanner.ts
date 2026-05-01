@@ -1,5 +1,5 @@
-import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system";
-import * as FileSystem from "expo-file-system";
+import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/legacy";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { store } from "@/store/store";
 import { setScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail } from "@/store/libraryReducer";
