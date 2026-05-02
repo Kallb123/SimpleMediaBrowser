@@ -186,6 +186,59 @@ function withFixRNScreensCodegen(config) {
         }
       }
 
+      // --- Fix 4: delete android gamma Kotlin sources that import generated classes ---
+      // The TypeScript specs in src/fabric/gamma/ and src/fabric/tabs/ were deleted in Fix 2,
+      // so the Android codegen never runs for those components and the Java delegate/interface
+      // classes (RNSTabsHostManagerDelegate, RNSStackScreenManagerDelegate, etc.) are never
+      // generated.  The Kotlin source files under android/src/main/java/.../gamma/tabs/,
+      // gamma/stack/, and gamma/helpers/ all import those missing generated classes, which
+      // causes 'compileReleaseKotlin' to fail with a "Compilation error".
+      //
+      // Fix: delete those three Android sub-packages (which the app doesn't use) and patch
+      // RNScreensPackage.kt to remove the four gamma view-manager imports + registrations.
+      // gamma/common/ is intentionally kept because Screen.kt and ScreenContainer.kt import
+      // FragmentProviding from it.
+      const androidGammaRoot = path.join(rnScreensRoot, 'android', 'src', 'main', 'java',
+        'com', 'swmansion', 'rnscreens', 'gamma');
+
+      for (const subDir of ['tabs', 'stack', 'helpers']) {
+        const dirToDelete = path.join(androidGammaRoot, subDir);
+        if (fs.existsSync(dirToDelete)) {
+          fs.rmSync(dirToDelete, { recursive: true, force: true });
+          console.log(`[withFixRNScreensCodegen] Deleted android gamma/${subDir}/ to prevent missing-generated-class Kotlin compile errors.`);
+        } else {
+          console.log(`[withFixRNScreensCodegen] android gamma/${subDir}/ not found — no patch needed.`);
+        }
+      }
+
+      // Patch RNScreensPackage.kt: remove gamma view-manager imports and registrations.
+      const rnScreensPackage = path.join(androidGammaRoot, '..', 'RNScreensPackage.kt');
+      if (fs.existsSync(rnScreensPackage)) {
+        let pkgContents = fs.readFileSync(rnScreensPackage, 'utf-8');
+        const originalPkg = pkgContents;
+
+        // Remove import lines for the four gamma view managers
+        pkgContents = pkgContents.replace(
+          /^[^\n]*import com\.swmansion\.rnscreens\.gamma\.(?:stack|tabs)\.[^\n]*\n/gm,
+          ''
+        );
+
+        // Remove the four view-manager instantiation lines from createViewManagers()
+        pkgContents = pkgContents.replace(
+          /^[ \t]*(?:TabsHostViewManager|TabsScreenViewManager|StackHostViewManager|StackScreenViewManager)\(\),?\n/gm,
+          ''
+        );
+
+        if (pkgContents !== originalPkg) {
+          fs.writeFileSync(rnScreensPackage, pkgContents, 'utf-8');
+          console.log('[withFixRNScreensCodegen] Removed gamma view-manager imports and registrations from RNScreensPackage.kt.');
+        } else {
+          console.log('[withFixRNScreensCodegen] No gamma view-manager entries found in RNScreensPackage.kt — no patch needed.');
+        }
+      } else {
+        console.warn('[withFixRNScreensCodegen] RNScreensPackage.kt not found — skipping gamma view-manager patch.');
+      }
+
       return config;
     },
   ]);
