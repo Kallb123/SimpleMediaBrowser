@@ -68,9 +68,17 @@ jobs:
       - name: Build APK via EAS
         id: eas-build
         run: |
-          OUTPUT=$(eas build --platform android --profile ${{ inputs.profile }} --non-interactive 2>&1 | tee /dev/stderr)
-          BUILD_URL=$(echo "$OUTPUT" | grep -oE 'https://expo\.dev/accounts/[^[:space:]]+' | tail -1)
-          echo "build-url=$BUILD_URL" >> "$GITHUB_OUTPUT"
+          # pipefail ensures the step fails if eas build exits non-zero, even though
+          # its output is piped through tee (without pipefail the step exit code would
+          # be tee's exit code, which is always 0).
+          set -o pipefail
+          eas build \
+            --platform android \
+            --profile ${{ inputs.profile }} \
+            --non-interactive \
+            2>&1 | tee /tmp/eas-output.txt
+          BUILD_URL=$(grep -oE 'https://expo\.dev/accounts/[^[:space:]]+' /tmp/eas-output.txt | tail -1 || true)
+          echo "build-url=${BUILD_URL}" >> "$GITHUB_OUTPUT"
 
       - name: Print APK download URL
         if: steps.eas-build.outputs.build-url != ''
