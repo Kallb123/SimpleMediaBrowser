@@ -45,7 +45,8 @@
       "./plugins/withGradleWrapper",
       "./plugins/withAndroidBuildTools",
       "./plugins/withFixHermesCommand",
-      "./plugins/withFixRNScreensCodegen"
+      "./plugins/withFixRNScreensCodegen",
+      "./plugins/withFixReanimatedLayoutAnimations"
     ],
     "extra": {
       "router": {
