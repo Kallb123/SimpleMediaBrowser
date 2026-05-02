@@ -27,11 +27,12 @@ import {
 import { selectTmdbApiKey } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
 import * as FileSystem from 'expo-file-system';
+import { Directory } from 'expo-file-system';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
 const POSTER_FULL_URL = 'https://image.tmdb.org/t/p/w500';
-const POSTERS_DIR = (FileSystem.documentDirectory ?? '') + 'smb_posters/';
+const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
 
 interface TmdbResult {
   id: number;
@@ -43,9 +44,9 @@ interface TmdbResult {
 }
 
 async function ensurePostersDir(): Promise<void> {
-  const info = await FileSystem.getInfoAsync(POSTERS_DIR);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(POSTERS_DIR, { intermediates: true });
+  const dir = new FileSystem.Directory(POSTERS_DIR);
+  if (!dir.exists) {
+    await dir.create();
   }
 }
 
@@ -53,13 +54,15 @@ async function downloadPoster(tmdbId: string, posterPath: string): Promise<strin
   await ensurePostersDir();
   const safeName = tmdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const localPath = POSTERS_DIR + `${safeName}.jpg`;
-  const existing = await FileSystem.getInfoAsync(localPath);
+  const existing = new FileSystem.File(localPath);
   if (existing.exists) {
     return localPath;
   }
   const remoteUrl = POSTER_FULL_URL + posterPath;
-  const result = await FileSystem.downloadAsync(remoteUrl, localPath);
-  return result.uri;
+  const destination = new FileSystem.Directory(localPath);
+  const output = await FileSystem.File.downloadFileAsync(remoteUrl, destination);
+  await output.rename(safeName);
+  return output.uri;
 }
 
 /**
@@ -71,15 +74,15 @@ async function copyPickedPoster(sourceUri: string, key: string): Promise<string>
   const safeName = key.replace(/[^a-zA-Z0-9_-]/g, '_');
   const localPath = POSTERS_DIR + `${safeName}_custom.jpg`;
   try {
-    await FileSystem.copyAsync({ from: sourceUri, to: localPath });
+    const file = new FileSystem.File(sourceUri);
+    const newFile = new FileSystem.File(localPath);
+    await file.copy(newFile);
   } catch {
     // Fall back to base64 read/write for SAF content:// URIs.
-    const base64 = await FileSystem.StorageAccessFramework.readAsStringAsync(sourceUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    await FileSystem.writeAsStringAsync(localPath, base64, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    const file = new FileSystem.File(sourceUri);
+    const base64 = await file.base64();
+    const copy = new FileSystem.File(localPath);
+    await copy.write(base64, { encoding: "base64" });
   }
   return localPath;
 }

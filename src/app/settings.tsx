@@ -17,7 +17,7 @@ import { AddMediaSource } from '@/components/UI/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 
 export default function SettingsPrompt() {
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const theme = Colors[colorScheme];
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';

@@ -24,7 +24,7 @@ export interface AddMediaSourceProps {
  * and optionally calls `onAdded`.
  */
 export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const theme = Colors[colorScheme];
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';

@@ -5,12 +5,12 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: Colors[colorScheme].tint,
         headerShown: false,
       }}>
       <Tabs.Screen

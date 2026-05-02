@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 
-const LOG_FILE_PATH = (FileSystem.documentDirectory ?? '') + 'smb_debug.log';
+const LOG_FILE_PATH = (FileSystem.Paths.document ?? '') + 'smb_debug.log';
 /** Maximum number of log lines kept in memory. */
 const MAX_MEMORY_LINES = 600;
 /** Rotate (truncate) the on-disk log once it exceeds this size (bytes). */
@@ -26,11 +27,26 @@ type LogLevel = 'LOG' | 'WARN' | 'ERROR';
 class Logger {
     private static _instance: Logger | null = null;
 
+    private _logFile: File | null = null;
+
     private _lines: string[] = [];
     /** Serialise file writes to avoid concurrent access. */
     private _writeQueue: Promise<void> = Promise.resolve();
 
     private constructor() {
+        this._logFile = new File(Paths.document, 'smb_debug.log');
+        try {
+            // Ensure the log file exists
+            this._logFile.create();
+        } catch {
+            this.log('Logger', 'Failed to create log file, logging to disk will be unavailable');
+        }
+        try {
+            // Ensure the log file is writeable
+            this._logFile.write('');
+        } catch {
+            this.log('Logger', 'Failed to write to log file, logging to disk will be unavailable');
+        }
         this._appendToFile(`\n${'='.repeat(60)}\nLogger initialised at ${this._timestamp()}\nLog file: ${LOG_FILE_PATH}\n${'='.repeat(60)}`);
     }
 
@@ -78,7 +94,7 @@ class Logger {
         this._lines = [];
         this._writeQueue = this._writeQueue.then(async () => {
             try {
-                await FileSystem.writeAsStringAsync(LOG_FILE_PATH, '', { encoding: FileSystem.EncodingType.UTF8 });
+                await this._logFile?.write(''); // Clear via File API if possible
             } catch {
                 // Ignore errors during clear
             }
@@ -125,15 +141,12 @@ class Logger {
             try {
                 // Check file size and rotate if too large.
                 try {
-                    const info = await FileSystem.getInfoAsync(LOG_FILE_PATH);
-                    // expo-file-system's FileInfo includes `size` when the file exists;
-                    // the TS type uses a discriminated union so we check exists first.
-                    if (info.exists && 'size' in info && info.size > MAX_FILE_BYTES) {
+                    if (this._logFile?.exists && this._logFile.size > MAX_FILE_BYTES) {
                         // Keep the second half of the file to preserve recent logs.
-                        const existing = await FileSystem.readAsStringAsync(LOG_FILE_PATH, { encoding: FileSystem.EncodingType.UTF8 });
+                        const existing = await this._logFile.text();
                         const halfway = Math.floor(existing.length / 2);
                         const trimmed = `[...log rotated...]\n${existing.slice(halfway)}`;
-                        await FileSystem.writeAsStringAsync(LOG_FILE_PATH, trimmed, { encoding: FileSystem.EncodingType.UTF8 });
+                        await this._logFile.write(trimmed);
                     }
                 } catch {
                     // Rotation failure is non-fatal.
@@ -141,12 +154,8 @@ class Logger {
 
                 // `append` is supported by expo-file-system at runtime but may not be
                 // present in the bundled type declarations for this SDK version.
-                await FileSystem.writeAsStringAsync(
-                    LOG_FILE_PATH,
-                    content + '\n',
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    { encoding: FileSystem.EncodingType.UTF8, append: true } as any,
-                );
+                let log = new File(Paths.document, 'smb_debug.log');
+                await log.write(content + '\n');
             } catch {
                 // File write failure must never crash the app.
             }

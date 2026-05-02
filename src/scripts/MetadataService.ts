@@ -7,7 +7,7 @@ import { logger } from '@/scripts/Logger';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-const POSTERS_DIR = (FileSystem.documentDirectory ?? '') + 'smb_posters/';
+const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
 
 /** Milliseconds to wait between successive TMDB API requests. */
 const REQUEST_DELAY_MS = 150;

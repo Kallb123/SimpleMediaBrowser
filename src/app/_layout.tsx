@@ -4,6 +4,7 @@ import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
+import '@/global.css';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';

@@ -48,7 +48,7 @@ const NON_DIRECTORY_EXTENSIONS = new Set([
 const MAX_SCAN_DEPTH = 8;
 
 /** Local directory where poster images are persisted for offline use. */
-const POSTERS_DIR = (FileSystem.documentDirectory ?? '') + 'smb_posters/';
+const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
 
 /**
  * Well-known filenames that represent a folder/series/movie poster image.
