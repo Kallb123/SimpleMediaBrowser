@@ -8,7 +8,7 @@ const path = require('path');
 // Kotlin 2.2.0 metadata → 30+ "metadata 2.2.0, expected 2.0.0" errors at build time.
 //
 // Gradle 8.13 is what @react-native/gradle-plugin itself uses (its own
-// gradle-wrapper.properties), is compatible with AGP 8.8.x (requires ≥ 8.10.2),
+// gradle-wrapper.properties), is compatible with AGP 8.9.x (requires >= 8.11.1),
 // and its API JARs have Kotlin 1.9.x metadata which Kotlin 2.0.21 can read.
 const GRADLE_VERSION = '8.13';
 
