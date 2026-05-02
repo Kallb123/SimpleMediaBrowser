@@ -34,8 +34,13 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-build-properties",
+      ["expo-build-properties", {
+        "android": {
+          "compileSdkVersion": 36
+        }
+      }],
       "./plugins/withGradleWrapper",
+      "./plugins/withAndroidBuildTools",
       "./plugins/withFixHermesCommand",
       "./plugins/withFixRNScreensCodegen"
     ],
