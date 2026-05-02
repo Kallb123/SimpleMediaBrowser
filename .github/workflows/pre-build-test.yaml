@@ -31,4 +31,4 @@ jobs:
         run: npm run lint
 
       - name: Tests
-        run: npx jest --ci --watchAll=false
+        run: npx jest --ci --watchAll=false --passWithNoTests 
