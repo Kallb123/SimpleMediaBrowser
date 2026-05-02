@@ -3,19 +3,36 @@ const fs = require('fs');
 const path = require('path');
 
 // React Native 0.79's codegen TypeScript parser (componentsUtils.js) throws
-// "Unknown prop type for '<name>': 'undefined'" when a NativeComponent spec
-// contains a prop whose type it cannot resolve. Two known issues in
-// react-native-screens are patched here:
+// "Unknown prop type for '<name>': 'undefined'" whenever a NativeComponent spec
+// file uses a TypeScript qualified name (CT.X, where CT is an imported alias for
+// CodegenTypes) as a prop type.  The parser only recognises bare identifiers such
+// as WithDefault, DirectEventHandler, Int32, Float, Double — not CT.WithDefault,
+// CT.DirectEventHandler, etc. — because it resolves typeName.name which is
+// undefined for a TSQualifiedName node.
 //
-// 1. 'accessibilityContainerViewIsModal' in various spec files — an iOS
-//    UIAccessibilityContainer concept not needed for Android. The prop is
-//    removed from every affected .ts file.
+// react-native-screens 4.24.0 introduced this pattern widely across its fabric
+// spec files.  This plugin applies three categories of fix during prebuild:
 //
-// 2. src/fabric/gamma/ — SplitViewHostNativeComponent.ts and
-//    SplitViewScreenNativeComponent.ts use locally-defined TypeScript union
-//    types wrapped in CT.WithDefault<> which the codegen cannot resolve
-//    (e.g. 'preferredDisplayMode'). The entire gamma directory is deleted
-//    from the codegen source tree so those specs are never processed.
+// Fix 1 – remove accessibilityContainerViewIsModal prop
+//   The prop appears in several spec files (e.g. FullWindowOverlayNativeComponent)
+//   with an unresolvable type.  Removing the prop declaration unblocks codegen.
+//
+// Fix 2 – delete src/fabric/gamma/ and src/fabric/tabs/ directories
+//   These directories contain entire new components (SplitView and Tabs) that were
+//   introduced in 4.24.0.  All their spec files use CT.X patterns that codegen
+//   can't handle.  The app does not use either feature, so deleting the source
+//   directories prevents codegen from ever processing them.
+//
+// Fix 3 – rewrite CT.X → X in remaining fabric spec files
+//   Core navigation spec files (ScreenNativeComponent, ModalScreenNativeComponent,
+//   ScreenStackNativeComponent, ScreenStackHeaderConfigNativeComponent,
+//   ScreenStackHeaderSubviewNativeComponent, SafeAreaViewNativeComponent,
+//   SearchBarNativeComponent) also use the CT.X pattern.  For each such file this
+//   fix replaces every CT.WithDefault / CT.DirectEventHandler / CT.Int32 etc. with
+//   the bare identifier, removes the two CT.UnsafeMixed[] props (iOS-only header
+//   bar button lists) that have no codegen-safe equivalent, and inserts a direct
+//   import of the needed types from react-native/Libraries/Types/CodegenTypes so
+//   the bare identifiers resolve correctly.
 function withFixRNScreensCodegen(config) {
   return withDangerousMod(config, [
     'android',
@@ -65,13 +82,79 @@ function withFixRNScreensCodegen(config) {
         }
       }
 
-      // --- Fix 2: delete src/fabric/gamma/ so codegen never sees it ---
-      const gammaDir = path.join(rnScreensRoot, 'src', 'fabric', 'gamma');
-      if (fs.existsSync(gammaDir)) {
-        fs.rmSync(gammaDir, { recursive: true, force: true });
-        console.log('[withFixRNScreensCodegen] Deleted src/fabric/gamma/ to prevent CT.WithDefault<LocalUnion> codegen errors.');
-      } else {
-        console.log('[withFixRNScreensCodegen] src/fabric/gamma/ not found — no gamma patch needed.');
+      // --- Fix 2: delete src/fabric/gamma/ and src/fabric/tabs/ ---
+      for (const subDir of ['gamma', 'tabs']) {
+        const dirToDelete = path.join(rnScreensRoot, 'src', 'fabric', subDir);
+        if (fs.existsSync(dirToDelete)) {
+          fs.rmSync(dirToDelete, { recursive: true, force: true });
+          console.log(`[withFixRNScreensCodegen] Deleted src/fabric/${subDir}/ to prevent CT.WithDefault<LocalUnion> codegen errors.`);
+        } else {
+          console.log(`[withFixRNScreensCodegen] src/fabric/${subDir}/ not found — no patch needed.`);
+        }
+      }
+
+      // --- Fix 3: rewrite CT.X → X in remaining fabric spec files ---
+      const fabricDir = path.join(rnScreensRoot, 'src', 'fabric');
+      if (fs.existsSync(fabricDir)) {
+        const fabricTsFiles = collectTsFiles(fabricDir);
+        let rewriteCount = 0;
+
+        for (const filePath of fabricTsFiles) {
+          let contents = fs.readFileSync(filePath, 'utf-8');
+
+          // Only touch files that use the qualified CT. alias
+          if (!contents.includes('CodegenTypes as CT')) {
+            continue;
+          }
+
+          let patched = contents;
+
+          // Replace CT.X<...> with bare X
+          patched = patched.replace(/CT\.WithDefault</g, 'WithDefault<');
+          patched = patched.replace(/CT\.DirectEventHandler</g, 'DirectEventHandler<');
+          patched = patched.replace(/CT\.BubblingEventHandler</g, 'BubblingEventHandler<');
+
+          // Replace CT.PrimitiveType (word-boundary safe via negative lookahead on word chars)
+          patched = patched.replace(/CT\.Int32(?=[^a-zA-Z0-9_])/g, 'Int32');
+          patched = patched.replace(/CT\.Float(?=[^a-zA-Z0-9_])/g, 'Float');
+          patched = patched.replace(/CT\.Double(?=[^a-zA-Z0-9_])/g, 'Double');
+
+          // Remove CT.UnsafeMixed[] props — these are iOS-only header button lists
+          // with no codegen-safe TypeScript equivalent.
+          patched = patched.replace(
+            /^[ \t]*\w+\??\s*:\s*CT\.UnsafeMixed\[\];?\n/gm,
+            ''
+          );
+
+          if (patched === contents) {
+            continue;
+          }
+
+          // Insert a direct import of the needed bare type names immediately after
+          // the first import statement so they are in scope.
+          const firstImportIdx = patched.indexOf('import ');
+          const firstImportNewline = firstImportIdx !== -1
+            ? patched.indexOf('\n', firstImportIdx)
+            : -1;
+          if (firstImportNewline !== -1) {
+            const codegenImport =
+              "import type { WithDefault, DirectEventHandler, BubblingEventHandler, Int32, Float, Double } from 'react-native/Libraries/Types/CodegenTypes';\n";
+            patched =
+              patched.slice(0, firstImportNewline + 1) +
+              codegenImport +
+              patched.slice(firstImportNewline + 1);
+          }
+
+          fs.writeFileSync(filePath, patched, 'utf-8');
+          console.log(
+            `[withFixRNScreensCodegen] Rewrote CT.X → X in ${path.relative(rnScreensRoot, filePath)}`
+          );
+          rewriteCount++;
+        }
+
+        if (rewriteCount === 0) {
+          console.log('[withFixRNScreensCodegen] No CT.X patterns found in fabric specs — no rewrite needed.');
+        }
       }
 
       return config;
