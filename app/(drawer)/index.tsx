@@ -351,8 +351,6 @@ const MIN_COLUMNS = 2;
 const MAX_COLUMNS = 5;
 /** Divisor used to map viewScale (1-10) to column count. */
 const SCALE_TO_COLUMNS_DIVISOR = 2.5;
-/** Approximate height of the card label area (paddingTop + paddingBottom + font line-height). */
-const LABEL_HEIGHT = 48;
 
 export default function HomeScreen() {
   const mediaSources = useSelector(selectMediaSources);
@@ -539,7 +537,6 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               );
             }}
-            estimatedItemSize={thumbnailHeight + LABEL_HEIGHT}
             contentContainerStyle={styles.gridContent}
           />
         </ThemedView>
