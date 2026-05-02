@@ -539,7 +539,6 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               );
             }}
-            estimatedItemSize={thumbnailHeight + LABEL_HEIGHT}
             contentContainerStyle={styles.gridContent}
           />
         </ThemedView>

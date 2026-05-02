@@ -7,7 +7,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { selectMediaSources } from '@/store/settingsReducer';
 import { useSelector } from 'react-redux';
-import { AddMediaSource } from '@/components/UI/AddMediaSource';
+import { AddMediaSource } from '@/components/ui/AddMediaSource';
 
 export default function Modal() {
     // If the page was reloaded or navigated to directly, then the modal should be presented as

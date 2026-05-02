@@ -10,7 +10,7 @@ import { useCallback, useState } from 'react';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { useDispatch } from 'react-redux';
 import { setPassword } from '@/store/settingsReducer';
-import { AddMediaSource } from '@/components/UI/AddMediaSource';
+import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 
 export default function FirstTime() {

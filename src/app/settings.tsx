@@ -13,7 +13,7 @@ import Slider from '@react-native-community/slider';
 import { FileScanner } from '@/scripts/FileScanner';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
-import { AddMediaSource } from '@/components/UI/AddMediaSource';
+import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 
 export default function SettingsPrompt() {
