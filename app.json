@@ -8,7 +8,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -36,7 +35,11 @@
       ],
       ["expo-build-properties", {
         "android": {
-          "compileSdkVersion": 36
+          "compileSdkVersion": 36,
+          "newArchEnabled": true
+        },
+        "ios": {
+          "newArchEnabled": true
         }
       }],
       "./plugins/withGradleWrapper",
