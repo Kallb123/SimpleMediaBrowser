@@ -1,6 +1,6 @@
-import { FileInfo, getInfoAsync, StorageAccessFramework } from "expo-file-system";
-import * as FileSystem from "expo-file-system";
-import * as VideoThumbnails from "expo-video-thumbnails";
+import { Directory, File, Paths } from "expo-file-system";
+import { StorageAccessFramework } from "expo-file-system/legacy";
+import { createVideoPlayer } from "expo-video";
 import { store } from "@/store/store";
 import { setScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
@@ -48,7 +48,7 @@ const NON_DIRECTORY_EXTENSIONS = new Set([
 const MAX_SCAN_DEPTH = 8;
 
 /** Local directory where poster images are persisted for offline use. */
-const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
+const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
 
 /**
  * Well-known filenames that represent a folder/series/movie poster image.
@@ -68,28 +68,25 @@ const POSTER_FILENAMES = new Set([
  * If the destination already exists it is returned immediately.
  */
 async function copyLocalPoster(sourceUri: string, key: string): Promise<string> {
-    const dirInfo = await FileSystem.getInfoAsync(POSTERS_DIR);
-    if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(POSTERS_DIR, { intermediates: true });
+    if (!POSTERS_DIR.exists) {
+        POSTERS_DIR.create({ intermediates: true, idempotent: true });
     }
     const safeName = key.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const localPath = POSTERS_DIR + `${safeName}_local.jpg`;
-    const existing = await FileSystem.getInfoAsync(localPath);
-    if (existing.exists) {
-        return localPath;
+    const localFile = new File(POSTERS_DIR, `${safeName}_local.jpg`);
+    if (localFile.exists) {
+        return localFile.uri;
     }
     try {
-        await FileSystem.copyAsync({ from: sourceUri, to: localPath });
+        const sourceFile = new File(sourceUri);
+        sourceFile.copy(localFile);
     } catch {
         // copyAsync may not work with all SAF content:// URIs; fall back to base64 read/write.
         const base64 = await StorageAccessFramework.readAsStringAsync(sourceUri, {
-            encoding: FileSystem.EncodingType.Base64,
+            encoding: 'base64',
         });
-        await FileSystem.writeAsStringAsync(localPath, base64, {
-            encoding: FileSystem.EncodingType.Base64,
-        });
+        localFile.write(base64, { encoding: 'base64' });
     }
-    return localPath;
+    return localFile.uri;
 }
 
 interface ParsedMetadata {
@@ -180,8 +177,11 @@ export class FileScanner {
         await Promise.allSettled(
             uncached.map(async (media) => {
                 try {
-                    const result = await VideoThumbnails.getThumbnailAsync(media.path, { time: 5000 });
-                    store.dispatch(setThumbnail({ path: media.path, uri: result.uri }));
+                    const thumbnailUri = await this.generateThumbnailUri(media.path);
+                    if (!thumbnailUri) {
+                        throw new Error('No thumbnail URI returned by expo-video');
+                    }
+                    store.dispatch(setThumbnail({ path: media.path, uri: thumbnailUri }));
                     thumbSuccess++;
                 } catch (e) {
                     thumbFail++;
@@ -214,32 +214,27 @@ export class FileScanner {
     async scanFolder(directory: string) {
         logger.log('FileScanner', `scanFolder: ${directory}`);
         const contents = await StorageAccessFramework.readDirectoryAsync(directory);
-    
-        const contentInfo = await Promise.all(contents.map(async (c) => {
-            try {
-              const info = await getInfoAsync(c);
-              return info;
-            } catch (e) {
-    
-            }
-            const info: FileInfo = {uri: c, isDirectory: true, exists: true, size: 0, modificationTime: 0};
-            return info;
-        }));
-    
-        const allContents: IMediaObject[] = contentInfo.map((c) => {
-          const uri = decodeURIComponent(c.uri);
-          const filename = uri.substring(uri.lastIndexOf('/') + 1, uri.length)
-          return {
-            ids : {tvdb: null, imdb: null, tmdb: null},
-            title: "",
-            episodeNumber: 0,
-            filename: filename,
-            path: c.uri,
-            parsedPath: uri,
-            isDirectory: c.isDirectory,
-            poster: '',
-          }
-        });
+
+                const allContents: IMediaObject[] = contents.map((entryUri: string) => {
+                        const uri = decodeURIComponent(entryUri);
+                        const filename = uri.substring(uri.lastIndexOf('/') + 1);
+                        const dotIdx = filename.lastIndexOf('.');
+                        const ext = dotIdx !== -1 ? filename.substring(dotIdx).toLowerCase() : '';
+
+                        // SAF entry metadata is unreliable; infer obvious file types by extension.
+                        const isDirectory = !this.isMediaFile(filename) && !NON_DIRECTORY_EXTENSIONS.has(ext);
+
+                        return {
+                                ids: { tvdb: null, imdb: null, tmdb: null },
+                                title: '',
+                                episodeNumber: 0,
+                                filename,
+                                path: entryUri,
+                                parsedPath: uri,
+                                isDirectory,
+                                poster: '',
+                        };
+                });
     
         const filtered = allContents.filter((c) => {
           if (c.filename.charAt(0) === '.') return null;
@@ -289,23 +284,8 @@ export class FileScanner {
         }
         logger.log('FileScanner', `Scanning dir (depth=${depth}, ${contents.length} entries): ${decodeURIComponent(directory).split('/').slice(-2).join('/')}`);
 
-        // Resolve URIs in parallel. On Android SAF, getInfoAsync may return
-        // { exists: false, isDirectory: undefined } for document URIs without
-        // throwing, so we cannot rely on the isDirectory field to distinguish
-        // files from directories. We use the file extension instead.
-        const uriList = await Promise.all(
-            contents.map(async (c) => {
-                try {
-                    const info = await getInfoAsync(c);
-                    return info.uri; // may be a normalised URI (e.g. file://)
-                } catch {
-                    return c; // fall back to the original SAF document URI
-                }
-            }),
-        );
-
         for (let i = 0; i < contents.length; i++) {
-            const resolvedUri = uriList[i];
+            const resolvedUri = contents[i];
             const uri = decodeURIComponent(resolvedUri);
             const filename = uri.substring(uri.lastIndexOf('/') + 1);
 
@@ -364,6 +344,22 @@ export class FileScanner {
         if (dotIndex === -1) return false;
         const ext = filename.substring(dotIndex).toLowerCase();
         return VIDEO_EXTENSIONS.has(ext);
+    }
+
+    private async generateThumbnailUri(videoUri: string): Promise<string | null> {
+        const player = createVideoPlayer(videoUri);
+        try {
+            const thumbnails = await player.generateThumbnailsAsync(5, { maxWidth: 640 });
+            const first = thumbnails[0] as unknown as { uri?: string; nativeUri?: string } | undefined;
+            return first?.uri ?? first?.nativeUri ?? null;
+        } finally {
+            const releasable = player as unknown as {
+                release?: () => void;
+                destroy?: () => void;
+            };
+            releasable.release?.();
+            releasable.destroy?.();
+        }
     }
 
     // ─── Movie list building ─────────────────────────────────────────────────
