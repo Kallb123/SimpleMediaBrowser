@@ -36,7 +36,8 @@
       ],
       "expo-build-properties",
       "./plugins/withGradleWrapper",
-      "./plugins/withFixHermesCommand"
+      "./plugins/withFixHermesCommand",
+      "./plugins/withFixRNScreensCodegen"
     ],
     "extra": {
       "router": {
