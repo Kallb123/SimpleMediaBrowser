@@ -1,6 +1,7 @@
 {
   "expo": {
     "name": "SimpleMediaBrowser",
+    "owner": "kallb123",
     "slug": "SimpleMediaBrowser",
     "version": "1.0.0",
     "orientation": "portrait",
