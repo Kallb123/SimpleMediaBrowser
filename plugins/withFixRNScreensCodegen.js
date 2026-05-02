@@ -82,14 +82,21 @@ function withFixRNScreensCodegen(config) {
         }
       }
 
-      // --- Fix 2: delete src/fabric/gamma/ and src/fabric/tabs/ ---
+      // --- Fix 2: delete src/fabric/gamma/, src/fabric/tabs/, src/components/gamma/,
+      //           and src/components/tabs/ ---
+      // The fabric sub-directories contain CT.X codegen specs that RN 0.79 can't handle.
+      // The matching components sub-directories import from those deleted fabric dirs, so
+      // they must also be removed — otherwise Metro bundling fails with "Unable to resolve
+      // module ../../fabric/tabs/TabsHostNativeComponent" at JS bundle time.
       for (const subDir of ['gamma', 'tabs']) {
-        const dirToDelete = path.join(rnScreensRoot, 'src', 'fabric', subDir);
-        if (fs.existsSync(dirToDelete)) {
-          fs.rmSync(dirToDelete, { recursive: true, force: true });
-          console.log(`[withFixRNScreensCodegen] Deleted src/fabric/${subDir}/ to prevent CT.WithDefault<LocalUnion> codegen errors.`);
-        } else {
-          console.log(`[withFixRNScreensCodegen] src/fabric/${subDir}/ not found — no patch needed.`);
+        for (const topDir of ['fabric', 'components']) {
+          const dirToDelete = path.join(rnScreensRoot, 'src', topDir, subDir);
+          if (fs.existsSync(dirToDelete)) {
+            fs.rmSync(dirToDelete, { recursive: true, force: true });
+            console.log(`[withFixRNScreensCodegen] Deleted src/${topDir}/${subDir}/ to prevent CT.WithDefault<LocalUnion> codegen / bundling errors.`);
+          } else {
+            console.log(`[withFixRNScreensCodegen] src/${topDir}/${subDir}/ not found — no patch needed.`);
+          }
         }
       }
 

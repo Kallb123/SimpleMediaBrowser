@@ -68,8 +68,10 @@ jobs:
       - name: Build APK via EAS
         id: eas-build
         run: |
-          # Run directly (not inside $(...)) so errexit triggers on non-zero exit code.
-          # tee duplicates output to the log file while still showing it in the step output.
+          # pipefail ensures the step fails if eas build exits non-zero, even though
+          # its output is piped through tee (without pipefail the step exit code would
+          # be tee's exit code, which is always 0).
+          set -o pipefail
           eas build \
             --platform android \
             --profile ${{ inputs.profile }} \
