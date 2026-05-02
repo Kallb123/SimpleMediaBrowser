@@ -100,6 +100,28 @@ function withFixRNScreensCodegen(config) {
         }
       }
 
+      // --- Fix 2b: remove export lines for deleted components from src/index.tsx ---
+      // After deleting src/components/tabs/ and src/components/gamma/, src/index.tsx
+      // still re-exports from those paths.  Metro will fail to resolve them at bundle
+      // time even though codegen never sees them.  Strip any export line that references
+      // './components/tabs' or './components/gamma'.
+      const indexTsx = path.join(rnScreensRoot, 'src', 'index.tsx');
+      if (fs.existsSync(indexTsx)) {
+        let indexContents = fs.readFileSync(indexTsx, 'utf-8');
+        const originalIndex = indexContents;
+        // Remove any export { ... } from './components/tabs' or './components/gamma'
+        indexContents = indexContents.replace(
+          /^[^\n]*from\s+['"]\.\/components\/(?:tabs|gamma)['"]\s*;?\s*\n/gm,
+          ''
+        );
+        if (indexContents !== originalIndex) {
+          fs.writeFileSync(indexTsx, indexContents, 'utf-8');
+          console.log('[withFixRNScreensCodegen] Removed tabs/gamma re-exports from src/index.tsx.');
+        } else {
+          console.log('[withFixRNScreensCodegen] No tabs/gamma re-exports found in src/index.tsx — no patch needed.');
+        }
+      }
+
       // --- Fix 3: rewrite CT.X → X in remaining fabric spec files ---
       const fabricDir = path.join(rnScreensRoot, 'src', 'fabric');
       if (fs.existsSync(fabricDir)) {
