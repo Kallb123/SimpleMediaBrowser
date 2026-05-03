@@ -25,32 +25,25 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
-## Get a fresh project
+## Building
 
-When you're ready, run:
+### Prequisites
 
-```bash
-npm run reset-project
-```
+Follow guide: https://docs.expo.dev/get-started/set-up-your-environment/?platform=android&device=physical&mode=development-build&buildEnv=local#set-up-an-android-device-with-a-development-build
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Windows steps:
 
-### Other setup steps
+1. Install NodeJS
+1. Install `npm i -g eas-cli` (maybe optional if using gradlew)
+1. Install Java JDK `choco install -y microsoft-openjdk17`
+1. Install Android Studio and install specific components
+1. Set up environment variable `ANDROID_HOME` and add the platform tools to PATH
+1. Check `adb --version`
+1. `eas build:configure`
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+### Build
 
-## Learn more
+1. `npx expo prebuild`
+1. `cd android`
+1. `.\gradlew assembleRelease`
 
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
