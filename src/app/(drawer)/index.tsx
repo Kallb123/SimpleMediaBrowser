@@ -2,13 +2,14 @@ import { BackHandler, Dimensions, Linking, StyleSheet, TouchableOpacity, View } 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Image } from 'expo-image';
+import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
-import { selectMediaLibrary, selectMovies, selectIsScanning, selectThumbnails, selectMediaOverrides } from '@/store/libraryReducer';
+import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
-import { FileScanner, IMediaObject } from '@/scripts/FileScanner';
+import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
 import type { IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes } from '@/store/settingsReducer';
@@ -23,22 +24,24 @@ type NavLevel = {
   seasonKey?: string;
 };
 
-type DisplayItem =
-  | { kind: 'folder'; label: string; key: string; thumbnailUri?: string; onPress: () => void; mediaType: 'show' | 'season' }
-  | { kind: 'file'; label: string; key: string; thumbnailUri?: string; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
+type ThumbnailSource = VideoThumbnail | string;
 
-// ── Helper: pick a representative thumbnail URI for a show folder ─────────────
+type DisplayItem =
+  | { kind: 'folder'; label: string; key: string; thumbnailUri?: ThumbnailSource; onPress: () => void; mediaType: 'show' | 'season' }
+  | { kind: 'file'; label: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
+
+// ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
 function pickShowThumbnail(
   library: IMediaLibrary,
   showName: string,
-  thumbnails: { [path: string]: string },
-): string | undefined {
+): ThumbnailSource | undefined {
   const show = library[showName];
   if (!show) return undefined;
   for (const season of Object.values(show.seasons)) {
     for (const ep of Object.values(season.episodes)) {
-      if (thumbnails[ep.path]) return thumbnails[ep.path];
+      const thumb = thumbnailCache.get(ep.path);
+      if (thumb) return thumb;
     }
   }
   return undefined;
@@ -108,7 +111,6 @@ function buildDisplayItems(
   movies: IMediaObject[],
   viewType: viewTypes,
   navStack: NavLevel[],
-  thumbnails: { [path: string]: string },
   overrides: { [key: string]: IMediaOverride },
   navigateInto: (entry: NavLevel) => void,
 ): DisplayItem[] {
@@ -128,7 +130,7 @@ function buildDisplayItems(
               kind: 'file',
               label: episodeDisplayLabel(ep, overrides, prefix),
               key: ep.path,
-              thumbnailUri: thumbnails[ep.path],
+              thumbnailUri: thumbnailCache.get(ep.path),
               mediaObject: ep,
               mediaType: 'episode',
             });
@@ -143,7 +145,7 @@ function buildDisplayItems(
           kind: 'file',
           label: movieDisplayLabel(movie, overrides),
           key: movie.path,
-          thumbnailUri: thumbnails[movie.path],
+          thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie',
@@ -162,7 +164,7 @@ function buildDisplayItems(
             kind: 'folder' as const,
             label: showDisplayLabel(showName, overrides),
             key: showName,
-            thumbnailUri: overrides[`show:${showName}`]?.poster || library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
+            thumbnailUri: overrides[`show:${showName}`]?.poster || library[showName].poster || pickShowThumbnail(library, showName),
             onPress: () => navigateInto({ label: showName, showName }),
             mediaType: 'show' as const,
           }));
@@ -173,7 +175,7 @@ function buildDisplayItems(
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
           key: movie.path,
-          thumbnailUri: thumbnails[movie.path],
+          thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
@@ -195,7 +197,7 @@ function buildDisplayItems(
             kind: 'file',
             label: episodeDisplayLabel(ep, overrides, prefix),
             key: ep.path,
-            thumbnailUri: thumbnails[ep.path],
+            thumbnailUri: thumbnailCache.get(ep.path),
             mediaObject: ep,
             mediaType: 'episode',
           });
@@ -216,7 +218,7 @@ function buildDisplayItems(
             const sortKey = `${showSortKey(showName, overrides)} – Season ${String(season.seasonNumber).padStart(4, '0')}`;
             // Prefer the override poster, then the show's API poster, then first episode thumbnail
             const firstEpThumb = Object.values(season.episodes)
-              .map((ep) => thumbnails[ep.path])
+              .map((ep) => thumbnailCache.get(ep.path))
               .find(Boolean);
             showSeasonEntries.push({
               sortKey,
@@ -239,7 +241,7 @@ function buildDisplayItems(
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
           key: movie.path,
-          thumbnailUri: thumbnails[movie.path],
+          thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
@@ -258,7 +260,7 @@ function buildDisplayItems(
             kind: 'file' as const,
             label: episodeDisplayLabel(ep, overrides, eNum),
             key: ep.path,
-            thumbnailUri: thumbnails[ep.path],
+            thumbnailUri: thumbnailCache.get(ep.path),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };
@@ -275,7 +277,7 @@ function buildDisplayItems(
             kind: 'folder' as const,
             label: showDisplayLabel(showName, overrides),
             key: showName,
-            thumbnailUri: overrides[`show:${showName}`]?.poster || library[showName].poster || pickShowThumbnail(library, showName, thumbnails),
+            thumbnailUri: overrides[`show:${showName}`]?.poster || library[showName].poster || pickShowThumbnail(library, showName),
             onPress: () => navigateInto({ label: showName, showName }),
             mediaType: 'show' as const,
           }));
@@ -286,7 +288,7 @@ function buildDisplayItems(
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
           key: movie.path,
-          thumbnailUri: thumbnails[movie.path],
+          thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
@@ -303,7 +305,7 @@ function buildDisplayItems(
             const label = `Season ${season.seasonNumber}`;
             // Prefer the override poster, then the show's API poster, then first episode thumbnail
             const firstEpThumb = Object.values(season.episodes)
-              .map((ep) => thumbnails[ep.path])
+              .map((ep) => thumbnailCache.get(ep.path))
               .find(Boolean);
             return {
               kind: 'folder' as const,
@@ -332,7 +334,7 @@ function buildDisplayItems(
             kind: 'file' as const,
             label: episodeDisplayLabel(ep, overrides, eNum),
             key: ep.path,
-            thumbnailUri: thumbnails[ep.path],
+            thumbnailUri: thumbnailCache.get(ep.path),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };
@@ -362,7 +364,6 @@ export default function HomeScreen() {
   const viewOrientation = useSelector(selectViewOrientation);
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
-  const thumbnails = useSelector(selectThumbnails);
   const mediaOverrides = useSelector(selectMediaOverrides);
 
   const { editMode } = useEditMode();
@@ -416,8 +417,8 @@ export default function HomeScreen() {
     : Math.round(cardWidth * 9 / 16);
 
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, thumbnails, mediaOverrides, navigateInto),
-    [mediaLibrary, movies, viewType, navStack, thumbnails, mediaOverrides, navigateInto],
+    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto),
+    [mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
@@ -476,7 +477,11 @@ export default function HomeScreen() {
               const hasBothImages = hasPoster && !!item.thumbnailUri;
               const isRevealed = pressedKey === item.key;
               // Files with a poster show the poster by default; long-press reveals the video thumbnail (unless in edit mode).
-              const displayUri = hasPoster && !isRevealed ? item.posterUri : item.thumbnailUri;
+              const displaySource = hasPoster && !isRevealed
+                ? { uri: item.posterUri }
+                : typeof item.thumbnailUri === 'string'
+                  ? { uri: item.thumbnailUri }
+                  : item.thumbnailUri; // VideoThumbnail (SharedRef) passed directly to expo-image
 
               const handlePress = isFolder
                 ? item.onPress
@@ -513,9 +518,9 @@ export default function HomeScreen() {
                   style={[styles.card, { width: cardWidth }]}
                 >
                   <View style={[styles.thumbnailBox, { height: thumbnailHeight }]}>
-                    {displayUri ? (
+                    {displaySource ? (
                       <Image
-                        source={{ uri: displayUri }}
+                        source={displaySource}
                         style={styles.thumbnailImage}
                         contentFit="cover"
                       />

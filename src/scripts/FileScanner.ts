@@ -1,8 +1,9 @@
 import { Directory, File, Paths } from "expo-file-system";
 import { StorageAccessFramework } from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
+import type { VideoThumbnail } from "expo-video";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail } from "@/store/libraryReducer";
+import { setScanList, setMediaLibrary, setMovies, setIsScanning } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
@@ -25,6 +26,14 @@ export interface IMediaObject {
 
 // Re-export library types so other modules can import them from here
 export type { IMediaLibrary, IMediaShow, IMediaSeason };
+
+/**
+ * In-memory cache of VideoThumbnail SharedRef objects keyed by media file path.
+ * VideoThumbnail cannot be stored in Redux (non-serializable), so this module-level
+ * cache holds them for the lifetime of the JS runtime (i.e., the current app session).
+ * Thumbnails are regenerated on each new scan if the cache is empty.
+ */
+export const thumbnailCache = new Map<string, VideoThumbnail>();
 
 const VIDEO_EXTENSIONS = new Set([
     '.mkv', '.mp4', '.avi', '.mov', '.m4v', '.wmv', '.flv',
@@ -165,23 +174,22 @@ export class FileScanner {
         logger.log('FileScanner', `Scan complete. Total media files dispatched: ${allScanUris.length}`);
 
         // Generate thumbnails for all scanned media files concurrently (skip already-cached paths)
-        const existingThumbnails = store.getState().libraryReducer.thumbnails;
         const allMediaFiles: IMediaObject[] = [
             ...allTvFiles.map(({ relativePathParts, ...obj }) => obj),
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
         ];
-        const uncached = allMediaFiles.filter((m) => !existingThumbnails[m.path]);
+        const uncached = allMediaFiles.filter((m) => !thumbnailCache.has(m.path));
         logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
         let thumbSuccess = 0;
         let thumbFail = 0;
         await Promise.allSettled(
             uncached.map(async (media) => {
                 try {
-                    const thumbnailUri = await this.generateThumbnailUri(media.path);
-                    if (!thumbnailUri) {
-                        throw new Error('No thumbnail URI returned by expo-video');
+                    const thumbnail = await this.generateThumbnail(media.path);
+                    if (!thumbnail) {
+                        throw new Error('No thumbnail returned by expo-video');
                     }
-                    store.dispatch(setThumbnail({ path: media.path, uri: thumbnailUri }));
+                    thumbnailCache.set(media.path, thumbnail);
                     thumbSuccess++;
                 } catch (e) {
                     thumbFail++;
@@ -346,12 +354,11 @@ export class FileScanner {
         return VIDEO_EXTENSIONS.has(ext);
     }
 
-    private async generateThumbnailUri(videoUri: string): Promise<string | null> {
+    private async generateThumbnail(videoUri: string): Promise<VideoThumbnail | null> {
         const player = createVideoPlayer(videoUri);
         try {
             const thumbnails = await player.generateThumbnailsAsync(5, { maxWidth: 640 });
-            const first = thumbnails[0] as unknown as { uri?: string; nativeUri?: string } | undefined;
-            return first?.uri ?? first?.nativeUri ?? null;
+            return thumbnails[0] ?? null;
         } finally {
             const releasable = player as unknown as {
                 release?: () => void;

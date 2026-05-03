@@ -7,12 +7,15 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 
 const REFRESH_INTERVAL_MS = 2000;
 
+type LogFilter = 'ALL' | 'LOG' | 'WARN' | 'ERROR';
+
 export default function LogsScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isDark = colorScheme === 'dark';
 
     const [lines, setLines] = useState<readonly string[]>([]);
     const [autoScroll, setAutoScroll] = useState(true);
+    const [filter, setFilter] = useState<LogFilter>('ALL');
     const scrollRef = useRef<ScrollView>(null);
 
     const refresh = useCallback(() => {
@@ -57,6 +60,22 @@ export default function LogsScreen() {
         return isDark ? '#ECEDEE' : '#11181C';
     };
 
+    const filteredLines = filter === 'ALL'
+        ? lines
+        : lines.filter((line) => {
+            if (filter === 'ERROR') return line.includes('[ERROR]');
+            if (filter === 'WARN') return line.includes('[WARN ]');
+            if (filter === 'LOG') return line.includes('[LOG  ]');
+            return true;
+        });
+
+    const filterButtons: { label: string; value: LogFilter }[] = [
+        { label: 'All', value: 'ALL' },
+        { label: 'Info', value: 'LOG' },
+        { label: 'Warn', value: 'WARN' },
+        { label: 'Error', value: 'ERROR' },
+    ];
+
     return (
         <ThemedView style={styles.container}>
             {/* Toolbar */}
@@ -80,6 +99,21 @@ export default function LogsScreen() {
                 </TouchableOpacity>
             </View>
 
+            {/* Level filter */}
+            <View style={[styles.filterBar, { backgroundColor: isDark ? '#1E1E1E' : '#F0F0F0' }]}>
+                {filterButtons.map(({ label, value }) => (
+                    <TouchableOpacity
+                        key={value}
+                        onPress={() => setFilter(value)}
+                        style={[styles.filterButton, filter === value && styles.filterButtonActive]}
+                    >
+                        <ThemedText style={[styles.filterButtonText, filter === value && styles.filterButtonTextActive]}>
+                            {label}
+                        </ThemedText>
+                    </TouchableOpacity>
+                ))}
+            </View>
+
             {/* File path hint */}
             <ThemedText style={styles.pathHint} numberOfLines={2}>
                 File: {logger.getLogFilePath()}
@@ -92,10 +126,10 @@ export default function LogsScreen() {
                 contentContainerStyle={styles.scrollContent}
                 onScrollBeginDrag={() => setAutoScroll(false)}
             >
-                {lines.length === 0 ? (
+                {filteredLines.length === 0 ? (
                     <ThemedText style={styles.emptyText}>No log entries yet.</ThemedText>
                 ) : (
-                    lines.map((line: string, i: number) => (
+                    filteredLines.map((line: string, i: number) => (
                         <ThemedText
                             key={`${i}-${line.substring(0, 20)}`}
                             style={[styles.logLine, { color: lineColor(line) }]}
@@ -120,6 +154,30 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         gap: 6,
         flexWrap: 'wrap',
+    },
+    filterBar: {
+        flexDirection: 'row',
+        paddingHorizontal: 8,
+        paddingBottom: 6,
+        gap: 6,
+    },
+    filterButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: '#4A90D9',
+    },
+    filterButtonActive: {
+        backgroundColor: '#4A90D9',
+    },
+    filterButtonText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#4A90D9',
+    },
+    filterButtonTextActive: {
+        color: '#FFFFFF',
     },
     toolbarButton: {
         paddingHorizontal: 12,
