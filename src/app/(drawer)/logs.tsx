@@ -127,7 +127,11 @@ export default function LogsScreen() {
                 onScrollBeginDrag={() => setAutoScroll(false)}
             >
                 {filteredLines.length === 0 ? (
-                    <ThemedText style={styles.emptyText}>No log entries yet.</ThemedText>
+                    <ThemedText style={styles.emptyText}>
+                        {lines.length === 0
+                            ? 'No log entries yet.'
+                            : 'No log entries match the current filter.'}
+                    </ThemedText>
                 ) : (
                     filteredLines.map((line: string, i: number) => (
                         <ThemedText
