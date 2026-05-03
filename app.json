@@ -26,6 +26,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/withScopedStorageFix",
       "expo-router",
       [
         "expo-splash-screen",
