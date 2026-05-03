@@ -14,7 +14,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedView } from '@/components/ThemedView';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   selectMediaLibrary,
@@ -132,6 +132,15 @@ export default function EditItemScreen() {
   const [browsingLocally, setBrowsingLocally] = useState(false);
 
   const canRematch = (itemType === 'show' || itemType === 'movie') && !!tmdbApiKey;
+
+  useEffect(() => {
+    const overridesSummary = Object.keys(existingOverride).length > 0
+      ? JSON.stringify(existingOverride)
+      : 'none';
+    logger.log('EditItem', `Screen opened – type=${itemType} key="${itemKey}" title="${currentTitle}" existingOverrides=${overridesSummary}`);
+  // Log only once on mount; params come from navigation and do not change during the screen's lifetime.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSave = () => {
     logger.log('EditItem', `Saving overrides for ${itemKey}: title="${titleInput}" sortTitle="${sortTitleInput}"`);
