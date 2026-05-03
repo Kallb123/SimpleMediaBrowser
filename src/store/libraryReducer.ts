@@ -50,13 +50,17 @@ export type IRawScanList = string[];
 /** Progress information for an in-progress scan. */
 export interface ScanProgress {
   /** Current phase of the scan. */
-  phase: 'idle' | 'collecting' | 'thumbnails';
+  phase: 'idle' | 'collecting' | 'thumbnails' | 'enriching';
   /** Number of media files found so far during the collecting phase. */
   filesFound: number;
   /** Number of thumbnails successfully generated or failed so far. */
   thumbnailsDone: number;
   /** Total number of thumbnails to generate (set when the thumbnail phase begins). */
   thumbnailsTotal: number;
+  /** Number of metadata items (shows + movies) processed so far during enrichment. */
+  metadataDone: number;
+  /** Total number of metadata items to process during enrichment. */
+  metadataTotal: number;
 }
 
 export type contentTypes = 'tv' | 'movie';
@@ -87,6 +91,8 @@ const INITIAL_SCAN_PROGRESS: ScanProgress = {
   filesFound: 0,
   thumbnailsDone: 0,
   thumbnailsTotal: 0,
+  metadataDone: 0,
+  metadataTotal: 0,
 };
 
 // Define the initial state using that type

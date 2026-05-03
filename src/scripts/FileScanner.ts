@@ -181,7 +181,7 @@ export class FileScanner {
         logger.log('FileScanner', `scanAllSources called with ${sources.length} source(s)`);
         sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
         store.dispatch(setIsScanning(true));
-        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0 }));
+        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
         try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
@@ -230,7 +230,7 @@ export class FileScanner {
         ];
         // Dispatch a final "collecting done" progress update with the exact total before
         // dispatching the library data, so the UI can show the correct file count.
-        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0 }));
+        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
         store.dispatch(setScanList(allScanUris));
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
@@ -253,7 +253,7 @@ export class FileScanner {
                 // Announce the thumbnail phase so the UI can show a progress bar.
                 // Only entered when there is at least one thumbnail to generate,
                 // so thumbnailsTotal is always > 0 here.
-                store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal }));
+                store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal, metadataDone: 0, metadataTotal: 0 }));
                 await Promise.allSettled(
                     uncached.map(async (media) => {
                         // Throttle concurrency so weaker devices are not overwhelmed.
@@ -276,6 +276,8 @@ export class FileScanner {
                                 filesFound: allMediaFiles.length,
                                 thumbnailsDone: thumbCompleted,
                                 thumbnailsTotal: thumbTotal,
+                                metadataDone: 0,
+                                metadataTotal: 0,
                             }));
                         }
                     }),
@@ -288,15 +290,19 @@ export class FileScanner {
             logger.log('FileScanner', 'Thumbnail generation disabled in settings – skipping thumbnail generation step');
         }
 
-        // Enrich library with TMDB posters if an API key is configured
+        // Enrich library with TMDB posters if an API key is configured.
+        // Awaited so that isScanning stays true (and progress is visible) for the
+        // full duration of enrichment; setIsScanning(false) fires in the finally block.
         const tmdbApiKey = store.getState().settingsReducer.tmdbApiKey;
         if (tmdbApiKey) {
-            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment in background');
+            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment');
             const currentLibrary = store.getState().libraryReducer.mediaLibrary;
             const currentMovies = store.getState().libraryReducer.movies;
-            MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey).catch((e) => {
+            try {
+                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey);
+            } catch (e) {
                 logger.error('FileScanner', 'Metadata enrichment failed', e);
-            });
+            }
         } else {
             logger.log('FileScanner', 'No TMDB API key configured – skipping metadata enrichment');
         }
@@ -422,7 +428,7 @@ export class FileScanner {
                 // scanAllSources once all sources have been collected.
                 progress.filesFound++;
                 if (progress.filesFound % PROGRESS_DISPATCH_INTERVAL === 0) {
-                    store.dispatch(setScanProgress({ phase: 'collecting', filesFound: progress.filesFound, thumbnailsDone: 0, thumbnailsTotal: 0 }));
+                    store.dispatch(setScanProgress({ phase: 'collecting', filesFound: progress.filesFound, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
                 }
             } else {
                 const dotIdx = filename.lastIndexOf('.');

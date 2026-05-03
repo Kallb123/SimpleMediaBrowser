@@ -470,6 +470,27 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     <View style={styles.container}>
       {mediaSources.length > 0 && hasLibraryContent ? (
         <ThemedView style={styles.listContainer}>
+          {/* Metadata enrichment progress banner – shown while library grid is visible */}
+          {isScanning && scanProgress.phase === 'enriching' && (
+            <View style={styles.enrichBanner}>
+              <ThemedText style={styles.enrichBannerText}>
+                {`Fetching metadata… (${scanProgress.metadataDone} / ${scanProgress.metadataTotal})`}
+              </ThemedText>
+              <View style={styles.enrichProgressTrack}>
+                <View
+                  style={[
+                    styles.enrichProgressFill,
+                    {
+                      width: `${Math.round(
+                        (scanProgress.metadataDone / Math.max(1, scanProgress.metadataTotal)) * 100,
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
           {/* Breadcrumb / back navigation */}
           <ThemedView style={styles.breadcrumbRow}>
             {navStack.length > 0 && (
@@ -566,7 +587,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       ) : isScanning ? (
         <ThemedView style={styles.stepContainer}>
           <ThemedText type="subtitle">
-            {scanProgress.phase === 'thumbnails' ? 'Generating Thumbnails…' : 'Scanning…'}
+            {scanProgress.phase === 'thumbnails'
+              ? 'Generating Thumbnails…'
+              : scanProgress.phase === 'enriching'
+                ? 'Fetching Metadata…'
+                : 'Scanning…'}
           </ThemedText>
           {scanProgress.phase === 'thumbnails' ? (
             <>
@@ -580,6 +605,24 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                     {
                       width: `${Math.round(
                         (scanProgress.thumbnailsDone / Math.max(1, scanProgress.thumbnailsTotal)) * 100,
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </>
+          ) : scanProgress.phase === 'enriching' ? (
+            <>
+              <ThemedText>
+                {`Fetching metadata ${scanProgress.metadataDone} of ${scanProgress.metadataTotal}`}
+              </ThemedText>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${Math.round(
+                        (scanProgress.metadataDone / Math.max(1, scanProgress.metadataTotal)) * 100,
                       )}%`,
                     },
                   ]}
@@ -708,5 +751,27 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#4CAF50',
     borderRadius: 4,
+  },
+  enrichBanner: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 4,
+    gap: 4,
+  },
+  enrichBannerText: {
+    fontSize: 12,
+    opacity: 0.75,
+  },
+  enrichProgressTrack: {
+    width: '100%',
+    height: 4,
+    backgroundColor: '#444',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  enrichProgressFill: {
+    height: '100%',
+    backgroundColor: '#2196F3',
+    borderRadius: 2,
   },
 });
