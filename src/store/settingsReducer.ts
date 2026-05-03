@@ -5,6 +5,7 @@ export type contentTypes = 'tv' | 'movie';
 export type dataSources = 'tmdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
+export type defaultPages = 'home' | 'tv' | 'movies';
 
 export interface IMediaSource {
   uri: string;
@@ -20,6 +21,7 @@ interface SettingsState {
   viewScale: number
   viewOrientation: viewOrientations
   tmdbApiKey: string | null
+  defaultPage: defaultPages
 }
 
 // Define the initial state using that type
@@ -31,6 +33,7 @@ const initialState: SettingsState = {
   viewScale: 5,
   viewOrientation: 'poster',
   tmdbApiKey: null,
+  defaultPage: 'home',
 }
 
 export const settingsSlice = createSlice({
@@ -45,7 +48,7 @@ export const settingsSlice = createSlice({
     removeMediaSource: (state, action: PayloadAction<string>) => {
       state.mediaSources = state.mediaSources.filter((s) => s.uri !== action.payload);
     },
-    setPassword: (state, action: PayloadAction<string>) => {
+    setPassword: (state, action: PayloadAction<string | null>) => {
       state.settingsPassword = action.payload;
     },
     setDataSource: (state, action: PayloadAction<dataSources>) => {
@@ -63,10 +66,13 @@ export const settingsSlice = createSlice({
     setTmdbApiKey: (state, action: PayloadAction<string | null>) => {
       state.tmdbApiKey = action.payload;
     },
+    setDefaultPage: (state, action: PayloadAction<defaultPages>) => {
+      state.defaultPage = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources;
@@ -76,5 +82,6 @@ export const selectMediaStructure = (state: RootState) => state.settingsReducer.
 export const selectViewOrientation = (state: RootState) => state.settingsReducer.viewOrientation;
 export const selectViewScale = (state: RootState) => state.settingsReducer.viewScale;
 export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdbApiKey;
+export const selectDefaultPage = (state: RootState) => state.settingsReducer.defaultPage ?? 'home';
 
 export default settingsSlice.reducer

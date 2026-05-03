@@ -7,7 +7,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey } from '@/store/settingsReducer';
+import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { FileScanner } from '@/scripts/FileScanner';
@@ -30,6 +30,7 @@ export default function SettingsPrompt() {
   const [structureDescription, setStructureDescription] = useState("");
   const [viewOrientation, setLocalViewOrientation] = useState("" as viewOrientations);
   const [viewScale, setLocalViewScale] = useState(2);
+  const [defaultPage, setLocalDefaultPage] = useState("home" as defaultPages);
 
   const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
@@ -39,10 +40,12 @@ export default function SettingsPrompt() {
   const settingsMediaStructure = useSelector(selectMediaStructure);
   const settingsViewOrientation = useSelector(selectViewOrientation);
   const settingsViewScale = useSelector(selectViewScale);
+  const settingsDefaultPage = useSelector(selectDefaultPage);
   
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
   const viewOrientationRef = useRef(null);
+  const defaultPageRef = useRef(null);
 
   const dataSourceOptions = [
     {id: 'tmdb', label: 'TMDB'},
@@ -60,26 +63,34 @@ export default function SettingsPrompt() {
     {id: 'banner', label: 'Banner'},
   ];
 
+  const defaultPageOptions = [
+    {id: 'home', label: 'Home (TV + Movies)'},
+    {id: 'tv', label: 'TV'},
+    {id: 'movies', label: 'Movies'},
+  ];
+
   useEffect(() => {
     logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${mediaSources.length}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    setLocalPassword(settingsPassword as string);
+    setLocalPassword(settingsPassword);
     setLocalTmdbApiKey(settingsTmdbApiKey);
     if (dataSourceRef.current) (dataSourceRef.current as any).selectIndex(dataSourceOptions.findIndex(o => o.id === settingsDataSource));
     if (mediaStructureRef.current) (mediaStructureRef.current as any).selectIndex(viewTypeOptions.findIndex(o => o.id === settingsMediaStructure));
     if (viewOrientationRef.current) (viewOrientationRef.current as any).selectIndex(uiTypeOptions.findIndex(o => o.id === settingsViewOrientation));
+    if (defaultPageRef.current) (defaultPageRef.current as any).selectIndex(defaultPageOptions.findIndex(o => o.id === settingsDefaultPage));
     setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
-  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage]);
 
   const save = () => {
     logger.log('Settings', 'Save pressed – evaluating changes');
     let changeCount = 0;
-    if (password && password !== settingsPassword) {
+    const passwordToSave = password || null;
+    if (password !== null && passwordToSave !== settingsPassword) {
       logger.log('Settings', 'Persisting: password changed');
-      dispatch(setPassword(password));
+      dispatch(setPassword(passwordToSave));
       changeCount++;
     }
     if (dataSource && dataSource !== settingsDataSource) {
@@ -105,6 +116,11 @@ export default function SettingsPrompt() {
     if (tmdbApiKey !== settingsTmdbApiKey) {
       logger.log('Settings', 'Persisting: tmdbApiKey changed');
       dispatch(setTmdbApiKey(tmdbApiKey || null));
+      changeCount++;
+    }
+    if (defaultPage && defaultPage !== settingsDefaultPage) {
+      logger.log('Settings', `Persisting: defaultPage changed ${settingsDefaultPage} → ${defaultPage}`);
+      dispatch(setDefaultPage(defaultPage));
       changeCount++;
     }
     logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
@@ -287,6 +303,34 @@ export default function SettingsPrompt() {
           onSlidingComplete={handleUIScaleChange}
           minimumTrackTintColor={colorScheme === 'dark' ? '#ECEDEE' : '#11181C'}
           maximumTrackTintColor={colorScheme === 'dark' ? '#687076' : '#9BA1A6'}
+        />
+      </ThemedView>
+
+      {/* Default page */}
+      <ThemedView style={styles.titleContainer}>
+        <ThemedText>Default page:</ThemedText>
+        <SelectDropdown
+          ref={defaultPageRef}
+          data={defaultPageOptions}
+          defaultValue={defaultPageOptions.find(o => o.id === settingsDefaultPage)}
+          onSelect={(selectedItem) => {
+            setLocalDefaultPage(selectedItem.id as defaultPages);
+          }}
+          renderButton={(selectedItem, isOpened) => (
+            <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+              <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                {(selectedItem && selectedItem.label) || 'Please select...'}
+              </Text>
+              <Text>{isOpened ? "🔼" : "🔽"}</Text>
+            </View>
+          )}
+          renderItem={(item, index, isSelected) => (
+            <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+              <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+            </View>
+          )}
+          showsVerticalScrollIndicator={false}
+          dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
       </ThemedView>
 
