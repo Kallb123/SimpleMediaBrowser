@@ -23,7 +23,7 @@ export default function RootLayout() {
   const [loaded, setLoaded] = useState(false);
   
   const [fontsLoaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    SpaceMono: require('../../assets/fonts/SpaceMono-Regular.ttf'),
   });
 
   useEffect(() => {
