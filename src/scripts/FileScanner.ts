@@ -245,39 +245,45 @@ export class FileScanner {
         if (enableThumbnailGeneration) {
             const uncached = allMediaFiles.filter((m) => !thumbnailCache.has(m.path));
             logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
-            let thumbSuccess = 0;
-            let thumbFail = 0;
-            let thumbCompleted = 0;
-            const thumbTotal = uncached.length;
-            // Announce the thumbnail phase so the UI can show a progress bar.
-            store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal }));
-            await Promise.allSettled(
-                uncached.map(async (media) => {
-                    // Throttle concurrency so weaker devices are not overwhelmed.
-                    await thumbSemaphore.acquire();
-                    try {
-                        const thumbnail = await this.generateThumbnail(media.path);
-                        if (!thumbnail) {
-                            throw new Error('No thumbnail returned by expo-video');
+            if (uncached.length > 0) {
+                let thumbSuccess = 0;
+                let thumbFail = 0;
+                let thumbCompleted = 0;
+                const thumbTotal = uncached.length;
+                // Announce the thumbnail phase so the UI can show a progress bar.
+                // Only entered when there is at least one thumbnail to generate,
+                // so thumbnailsTotal is always > 0 here.
+                store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal }));
+                await Promise.allSettled(
+                    uncached.map(async (media) => {
+                        // Throttle concurrency so weaker devices are not overwhelmed.
+                        await thumbSemaphore.acquire();
+                        try {
+                            const thumbnail = await this.generateThumbnail(media.path);
+                            if (!thumbnail) {
+                                throw new Error('No thumbnail returned by expo-video');
+                            }
+                            thumbnailCache.set(media.path, thumbnail);
+                            thumbSuccess++;
+                        } catch (e) {
+                            thumbFail++;
+                            logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
+                        } finally {
+                            thumbSemaphore.release();
+                            thumbCompleted++;
+                            store.dispatch(setScanProgress({
+                                phase: 'thumbnails',
+                                filesFound: allMediaFiles.length,
+                                thumbnailsDone: thumbCompleted,
+                                thumbnailsTotal: thumbTotal,
+                            }));
                         }
-                        thumbnailCache.set(media.path, thumbnail);
-                        thumbSuccess++;
-                    } catch (e) {
-                        thumbFail++;
-                        logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
-                    } finally {
-                        thumbSemaphore.release();
-                        thumbCompleted++;
-                        store.dispatch(setScanProgress({
-                            phase: 'thumbnails',
-                            filesFound: allMediaFiles.length,
-                            thumbnailsDone: thumbCompleted,
-                            thumbnailsTotal: thumbTotal,
-                        }));
-                    }
-                }),
-            );
-            logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+                    }),
+                );
+                logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+            } else {
+                logger.log('FileScanner', 'All thumbnails already cached – skipping thumbnail generation');
+            }
         } else {
             logger.log('FileScanner', 'Thumbnail generation disabled in settings – skipping thumbnail generation step');
         }
@@ -411,10 +417,9 @@ export class FileScanner {
                     poster: '',
                 });
                 // Dispatch throttled progress update so the UI reflects files discovered
-                // so far.  JavaScript's single-threaded event model guarantees that the
-                // increment and modulo check below are never interleaved with updates from
-                // other concurrent recursiveCollect coroutines (they only run at `await`
-                // suspension points, none of which appear between these lines).
+                // so far.  Updates are batched every PROGRESS_DISPATCH_INTERVAL files to
+                // avoid excessive Redux churn; the final precise total is dispatched in
+                // scanAllSources once all sources have been collected.
                 progress.filesFound++;
                 if (progress.filesFound % PROGRESS_DISPATCH_INTERVAL === 0) {
                     store.dispatch(setScanProgress({ phase: 'collecting', filesFound: progress.filesFound, thumbnailsDone: 0, thumbnailsTotal: 0 }));
