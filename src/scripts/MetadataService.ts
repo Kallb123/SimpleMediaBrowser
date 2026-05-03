@@ -68,15 +68,20 @@ export class MetadataService {
         // Shared counter threaded through both enrichment tasks so TV + movie
         // completions both contribute to the same running total.
         const progress = { done: 0 };
+        // Dispatch progress every N items to avoid flooding Redux for large libraries,
+        // and always on the final item so the counter reaches 100%.
+        const METADATA_PROGRESS_INTERVAL = 5;
         const dispatchProgress = () => {
-            store.dispatch(setScanProgress({
-                phase: 'enriching',
-                filesFound: 0,
-                thumbnailsDone: 0,
-                thumbnailsTotal: 0,
-                metadataDone: progress.done,
-                metadataTotal,
-            }));
+            if (progress.done % METADATA_PROGRESS_INTERVAL === 0 || progress.done === metadataTotal) {
+                store.dispatch(setScanProgress({
+                    phase: 'enriching',
+                    filesFound: 0,
+                    thumbnailsDone: 0,
+                    thumbnailsTotal: 0,
+                    metadataDone: progress.done,
+                    metadataTotal,
+                }));
+            }
         };
         const results = await Promise.allSettled([
             this.enrichLibrary(library, apiKey, progress, dispatchProgress),
