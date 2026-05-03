@@ -47,6 +47,18 @@ export interface IMediaSeason {
 
 export type IRawScanList = string[];
 
+/** Progress information for an in-progress scan. */
+export interface ScanProgress {
+  /** Current phase of the scan. */
+  phase: 'idle' | 'collecting' | 'thumbnails';
+  /** Number of media files found so far during the collecting phase. */
+  filesFound: number;
+  /** Number of thumbnails successfully generated or failed so far. */
+  thumbnailsDone: number;
+  /** Total number of thumbnails to generate (set when the thumbnail phase begins). */
+  thumbnailsTotal: number;
+}
+
 export type contentTypes = 'tv' | 'movie';
 export type dataSources = 'tmdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
@@ -66,7 +78,16 @@ interface LibraryState {
    *   "episode:<path>"       – for an episode file
    */
   mediaOverrides: { [key: string]: IMediaOverride };
+  /** Live progress information updated during an active scan. */
+  scanProgress: ScanProgress;
 }
+
+const INITIAL_SCAN_PROGRESS: ScanProgress = {
+  phase: 'idle',
+  filesFound: 0,
+  thumbnailsDone: 0,
+  thumbnailsTotal: 0,
+};
 
 // Define the initial state using that type
 const initialState: LibraryState = {
@@ -76,6 +97,7 @@ const initialState: LibraryState = {
   isScanning: false,
   thumbnails: {},
   mediaOverrides: {},
+  scanProgress: INITIAL_SCAN_PROGRESS,
 }
 
 export const settingsSlice = createSlice({
@@ -101,6 +123,14 @@ export const settingsSlice = createSlice({
     },
     setIsScanning: (state, action: PayloadAction<boolean>) => {
       state.isScanning = action.payload;
+      // Reset progress to idle when scanning stops so stale values are not shown
+      // on the next scan's initial render.
+      if (!action.payload) {
+        state.scanProgress = INITIAL_SCAN_PROGRESS;
+      }
+    },
+    setScanProgress: (state, action: PayloadAction<ScanProgress>) => {
+      state.scanProgress = action.payload;
     },
     setThumbnail: (state, action: PayloadAction<{ path: string; uri: string }>) => {
       state.thumbnails[action.payload.path] = action.payload.uri;
@@ -136,7 +166,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
@@ -145,5 +175,6 @@ export const selectMovies = (state: RootState) => state.libraryReducer.movies;
 export const selectIsScanning = (state: RootState) => state.libraryReducer.isScanning;
 export const selectThumbnails = (state: RootState) => state.libraryReducer.thumbnails;
 export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;
+export const selectScanProgress = (state: RootState) => state.libraryReducer.scanProgress;
 
 export default settingsSlice.reducer

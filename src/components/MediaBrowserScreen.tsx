@@ -7,7 +7,7 @@ import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
-import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides } from '@/store/libraryReducer';
+import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
@@ -373,6 +373,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const { width: screenWidth } = useWindowDimensions();
 
   const isScanning = useSelector(selectIsScanning);
+  const scanProgress = useSelector(selectScanProgress);
 
   // Apply filter
   const mediaLibrary: IMediaLibrary = mediaFilter === 'movies' ? {} : allLibrary;
@@ -564,8 +565,34 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
         </ThemedView>
       ) : isScanning ? (
         <ThemedView style={styles.stepContainer}>
-          <ThemedText type="subtitle">Scanning…</ThemedText>
-          <ThemedText>Scanning your library, please wait.</ThemedText>
+          <ThemedText type="subtitle">
+            {scanProgress.phase === 'thumbnails' ? 'Generating Thumbnails…' : 'Scanning…'}
+          </ThemedText>
+          {scanProgress.phase === 'thumbnails' ? (
+            <>
+              <ThemedText>
+                {`Thumbnail ${scanProgress.thumbnailsDone} of ${scanProgress.thumbnailsTotal}`}
+              </ThemedText>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${Math.round(
+                        (scanProgress.thumbnailsDone / Math.max(1, scanProgress.thumbnailsTotal)) * 100,
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </>
+          ) : (
+            <ThemedText>
+              {scanProgress.filesFound > 0
+                ? `Found ${scanProgress.filesFound} file${scanProgress.filesFound === 1 ? '' : 's'} so far…`
+                : 'Scanning your library, please wait.'}
+            </ThemedText>
+          )}
         </ThemedView>
       ) : (
         <ThemedView style={styles.stepContainer}>
@@ -668,5 +695,18 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
     padding: 16,
+  },
+  progressBarTrack: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#444',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+    borderRadius: 4,
   },
 });

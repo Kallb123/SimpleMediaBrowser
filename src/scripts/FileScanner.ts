@@ -3,7 +3,7 @@ import { StorageAccessFramework } from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary, setMovies, setIsScanning } from "@/store/libraryReducer";
+import { setScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
@@ -58,6 +58,61 @@ const MAX_SCAN_DEPTH = 8;
 
 /** Local directory where poster images are persisted for offline use. */
 const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
+
+// ─── Concurrency helpers ─────────────────────────────────────────────────────
+
+/**
+ * Maximum number of SAF readDirectoryAsync calls that may be in-flight
+ * simultaneously.  Limiting this prevents overwhelming slower storage
+ * (e.g. USB OTG drives) while still providing meaningful parallelism.
+ */
+const MAX_CONCURRENT_DIR_READS = 8;
+
+/**
+ * Maximum number of thumbnail generation tasks that run concurrently.
+ * Thumbnail decoding is CPU-intensive; capping it keeps weaker devices
+ * responsive during a scan.
+ */
+const MAX_CONCURRENT_THUMBNAILS = 3;
+
+/**
+ * Dispatch a scan-progress update to Redux after this many media files have
+ * been discovered, to avoid flooding the Redux store with single-file events.
+ */
+const PROGRESS_DISPATCH_INTERVAL = 10;
+
+/** Lightweight promise-based semaphore used to cap concurrency. */
+class Semaphore {
+    private available: number;
+    private readonly queue: Array<() => void> = [];
+
+    constructor(limit: number) {
+        this.available = limit;
+    }
+
+    acquire(): Promise<void> {
+        if (this.available > 0) {
+            this.available--;
+            return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+
+    release(): void {
+        const next = this.queue.shift();
+        if (next) {
+            next();
+        } else {
+            this.available++;
+        }
+    }
+}
+
+/** Semaphore shared across all concurrent directory reads within one scan. */
+const dirReadSemaphore = new Semaphore(MAX_CONCURRENT_DIR_READS);
+
+/** Semaphore shared across all concurrent thumbnail generation tasks. */
+const thumbSemaphore = new Semaphore(MAX_CONCURRENT_THUMBNAILS);
 
 /**
  * Well-known filenames that represent a folder/series/movie poster image.
@@ -132,6 +187,7 @@ export class FileScanner {
         logger.log('FileScanner', `scanAllSources called with ${sources.length} source(s)`);
         sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
         store.dispatch(setIsScanning(true));
+        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0 }));
         try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
@@ -168,6 +224,9 @@ export class FileScanner {
             ...allTvFiles.map((f) => f.path),
             ...allMovieFiles.map((f) => f.path),
         ];
+        // Dispatch a final "collecting done" progress update with the exact total before
+        // dispatching the library data, so the UI can show the correct file count.
+        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0 }));
         store.dispatch(setScanList(allScanUris));
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
@@ -184,8 +243,14 @@ export class FileScanner {
             logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
             let thumbSuccess = 0;
             let thumbFail = 0;
+            let thumbCompleted = 0;
+            const thumbTotal = uncached.length;
+            // Announce the thumbnail phase so the UI can show a progress bar.
+            store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal }));
             await Promise.allSettled(
                 uncached.map(async (media) => {
+                    // Throttle concurrency so weaker devices are not overwhelmed.
+                    await thumbSemaphore.acquire();
                     try {
                         const thumbnail = await this.generateThumbnail(media.path);
                         if (!thumbnail) {
@@ -196,6 +261,15 @@ export class FileScanner {
                     } catch (e) {
                         thumbFail++;
                         logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
+                    } finally {
+                        thumbSemaphore.release();
+                        thumbCompleted++;
+                        store.dispatch(setScanProgress({
+                            phase: 'thumbnails',
+                            filesFound: allMediaFiles.length,
+                            thumbnailsDone: thumbCompleted,
+                            thumbnailsTotal: thumbTotal,
+                        }));
                     }
                 }),
             );
@@ -289,13 +363,21 @@ export class FileScanner {
         }
 
         let contents: string[];
+        await dirReadSemaphore.acquire();
         try {
             contents = await StorageAccessFramework.readDirectoryAsync(directory);
         } catch (e) {
             logger.warn('FileScanner', `Cannot read directory (depth=${depth}): ${directory}`, e);
             return; // Directory not accessible
+        } finally {
+            dirReadSemaphore.release();
         }
         logger.log('FileScanner', `Scanning dir (depth=${depth}, ${contents.length} entries): ${decodeURIComponent(directory).split('/').slice(-2).join('/')}`);
+
+        // Subdirectories to recurse into, collected during the synchronous pass
+        // over this directory's entries so that we can fan them out in parallel
+        // after processing all files at the current level.
+        const subdirs: Array<{ uri: string; pathParts: string[] }> = [];
 
         for (let i = 0; i < contents.length; i++) {
             const resolvedUri = contents[i];
@@ -316,6 +398,11 @@ export class FileScanner {
                     relativePathParts,
                     poster: '',
                 });
+                // Dispatch throttled progress update so the UI reflects files discovered so far.
+                const found = result.length;
+                if (found % PROGRESS_DISPATCH_INTERVAL === 0) {
+                    store.dispatch(setScanProgress({ phase: 'collecting', filesFound: found, thumbnailsDone: 0, thumbnailsTotal: 0 }));
+                }
             } else {
                 const dotIdx = filename.lastIndexOf('.');
                 const ext = dotIdx !== -1 ? filename.substring(dotIdx).toLowerCase() : '';
@@ -342,14 +429,20 @@ export class FileScanner {
                 // an always-failing readDirectoryAsync call for each one.
                 if (NON_DIRECTORY_EXTENSIONS.has(ext)) continue;
 
-                // Treat anything else as a potential directory and recurse.
-                // readDirectoryAsync will throw (and be caught) if the entry
-                // is not actually a directory, so this is safe. This avoids
-                // relying on getInfoAsync's isDirectory field, which is
-                // unreliable for Android SAF document URIs.
-                await this.recursiveCollect(resolvedUri, [...relativePathParts, filename], result, posterMap, depth + 1);
+                // Collect as a potential subdirectory to recurse into in parallel.
+                subdirs.push({ uri: resolvedUri, pathParts: [...relativePathParts, filename] });
             }
         }
+
+        // Fan out all subdirectory reads in parallel.  This is the primary
+        // performance optimisation: instead of recursing serially (O(dirs) sequential
+        // awaits) we recurse into all siblings simultaneously, bounded by
+        // dirReadSemaphore so we never overwhelm slower storage.
+        await Promise.allSettled(
+            subdirs.map(({ uri, pathParts }) =>
+                this.recursiveCollect(uri, pathParts, result, posterMap, depth + 1),
+            ),
+        );
     }
 
     private isMediaFile(filename: string): boolean {
