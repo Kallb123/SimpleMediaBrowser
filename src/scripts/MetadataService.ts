@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import { File, Directory, Paths } from 'expo-file-system';
 import { store } from '@/store/store';
 import { updateShowMetadata, updateMovieMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary } from '@/store/libraryReducer';
@@ -7,7 +7,7 @@ import { logger } from '@/scripts/Logger';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
+const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
 
 /** Milliseconds to wait between successive TMDB API requests. */
 const REQUEST_DELAY_MS = 150;
@@ -17,9 +17,8 @@ function delay(ms: number): Promise<void> {
 }
 
 async function ensurePostersDir(): Promise<void> {
-    const info = await FileSystem.getInfoAsync(POSTERS_DIR);
-    if (!info.exists) {
-        await FileSystem.makeDirectoryAsync(POSTERS_DIR, { intermediates: true });
+    if (!POSTERS_DIR.exists) {
+        POSTERS_DIR.create({ intermediates: true, idempotent: true });
     }
 }
 
@@ -32,16 +31,15 @@ async function downloadPoster(tmdbId: string, posterPath: string): Promise<strin
     await ensurePostersDir();
     // Sanitize the TMDB ID so it cannot contain path-traversal characters.
     const safeName = tmdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const localPath = POSTERS_DIR + `${safeName}.jpg`;
-    const existing = await FileSystem.getInfoAsync(localPath);
-    if (existing.exists) {
+    const localFile = new File(POSTERS_DIR, `${safeName}.jpg`);
+    if (localFile.exists) {
         logger.log('MetadataService', `Poster already cached locally for TMDB ID ${tmdbId}`);
-        return localPath;
+        return localFile.uri;
     }
     const remoteUrl = POSTER_BASE_URL + posterPath;
-    logger.log('MetadataService', `Downloading poster: ${remoteUrl} → ${localPath}`);
-    const result = await FileSystem.downloadAsync(remoteUrl, localPath);
-    return result.uri;
+    logger.log('MetadataService', `Downloading poster: ${remoteUrl} → ${localFile.uri}`);
+    await File.downloadFileAsync(remoteUrl, localFile);
+    return localFile.uri;
 }
 
 export class MetadataService {
@@ -80,8 +78,7 @@ export class MetadataService {
             // Honour a user-set poster override (from manual TMDB rematch or local browse).
             const overridePoster = overrides[`show:${showName}`]?.poster;
             if (overridePoster) {
-                const overrideInfo = await FileSystem.getInfoAsync(overridePoster);
-                if (overrideInfo.exists) {
+                if (new File(overridePoster).exists) {
                     store.dispatch(updateShowMetadata({ showName, tmdbId: show.ids.tmdb ?? '', poster: overridePoster }));
                     logger.log('MetadataService', `Applying poster override for "${showName}"`);
                     continue;
@@ -90,8 +87,7 @@ export class MetadataService {
 
             // Skip if we already have a locally cached poster for this show.
             if (show.poster) {
-                const info = await FileSystem.getInfoAsync(show.poster);
-                if (info.exists) {
+                if (new File(show.poster).exists) {
                     logger.log('MetadataService', `Skipping "${showName}" – poster already cached`);
                     continue;
                 }
@@ -144,8 +140,7 @@ export class MetadataService {
             // Honour a user-set poster override (from manual TMDB rematch or local browse).
             const overridePoster = overrides[`movie:${movie.path}`]?.poster;
             if (overridePoster) {
-                const overrideInfo = await FileSystem.getInfoAsync(overridePoster);
-                if (overrideInfo.exists) {
+                if (new File(overridePoster).exists) {
                     store.dispatch(updateMovieMetadata({ path: movie.path, tmdbId: movie.ids.tmdb ?? '', poster: overridePoster }));
                     logger.log('MetadataService', `Applying poster override for movie "${movie.title}"`);
                     continue;
@@ -154,8 +149,7 @@ export class MetadataService {
 
             // Skip if we already have a locally cached poster for this movie.
             if (movie.poster) {
-                const info = await FileSystem.getInfoAsync(movie.poster);
-                if (info.exists) {
+                if (new File(movie.poster).exists) {
                     logger.log('MetadataService', `Skipping movie "${movie.title}" – poster already cached`);
                     continue;
                 }
