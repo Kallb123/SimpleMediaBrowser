@@ -1,4 +1,4 @@
-import { BackHandler, Dimensions, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { BackHandler, Linking, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Image } from 'expo-image';
@@ -345,7 +345,6 @@ function buildDisplayItems(
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_GAP = 8;
 /** Minimum number of grid columns shown at the lowest viewScale. */
 const MIN_COLUMNS = 2;
@@ -371,6 +370,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const mediaOverrides = useSelector(selectMediaOverrides);
 
   const { editMode } = useEditMode();
+  const { width: screenWidth } = useWindowDimensions();
 
   const isScanning = useSelector(selectIsScanning);
 
@@ -418,7 +418,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   // Map viewScale (1-10) to number of grid columns (MIN_COLUMNS-MAX_COLUMNS)
   const numColumns = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, Math.round(viewScale / SCALE_TO_COLUMNS_DIVISOR)));
-  const cardWidth = (SCREEN_WIDTH - CARD_GAP * (numColumns + 1)) / numColumns;
+  const cardWidth = (screenWidth - CARD_GAP * (numColumns + 1)) / numColumns;
   // Poster orientation uses a 2:3 portrait ratio; banner/thumbnail orientation uses 16:9 landscape.
   const thumbnailHeight = viewOrientation === 'poster'
     ? Math.round(cardWidth * 3 / 2)
