@@ -50,7 +50,8 @@ export default function RootLayout() {
       logger.log('RootLayout', 'First-time setup not complete – redirecting to /firsttime');
       router.replace("/firsttime");
     } else {
-      logger.log('RootLayout', 'First-time setup already complete – proceeding to main app');
+      logger.log('RootLayout', 'First-time setup already complete – redirecting to home');
+      router.replace("/(drawer)");
     }
     setLoaded(true);
   }
