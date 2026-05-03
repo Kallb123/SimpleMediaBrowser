@@ -1,4 +1,4 @@
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, Stack } from 'expo-router';
 import {
   ActivityIndicator,
   Button,
@@ -268,6 +268,7 @@ export default function EditItemScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
       <ThemedView style={styles.header}>
         <ThemedText type="subtitle">Edit {itemTypeLabel}</ThemedText>
         <ThemedText style={styles.subtitle} numberOfLines={2}>{currentTitle}</ThemedText>
@@ -421,11 +422,6 @@ export default function EditItemScreen() {
           </ThemedText>
         </ThemedView>
       )}
-
-      {/* Save */}
-      <ThemedView style={styles.saveRow}>
-        <Button title="Save" onPress={handleSave} />
-      </ThemedView>
     </ScrollView>
   );
 }
@@ -568,8 +564,5 @@ const styles = StyleSheet.create({
     color: '#0a7ea4',
     fontSize: 12,
     fontWeight: '600',
-  },
-  saveRow: {
-    paddingVertical: 8,
   },
 });
