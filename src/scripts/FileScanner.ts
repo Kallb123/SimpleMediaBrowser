@@ -3,8 +3,8 @@ import { StorageAccessFramework } from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary, setMovies, setIsScanning } from "@/store/libraryReducer";
-import type { IMediaLibrary, IMediaShow, IMediaSeason } from "@/store/libraryReducer";
+import { setScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
+import type { IMediaLibrary, IMediaShow, IMediaSeason, MergeEpisodePayload } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
@@ -59,6 +59,55 @@ const MAX_SCAN_DEPTH = 8;
 /** Local directory where poster images are persisted for offline use. */
 const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
 
+// ─── Concurrency helpers ─────────────────────────────────────────────────────
+
+/**
+ * Maximum number of SAF readDirectoryAsync calls that may be in-flight
+ * simultaneously.  Limiting this prevents overwhelming slower storage
+ * (e.g. USB OTG drives) while still providing meaningful parallelism.
+ */
+const MAX_CONCURRENT_DIR_READS = 8;
+
+/**
+ * Maximum number of thumbnail generation tasks that run concurrently.
+ * Thumbnail decoding is CPU-intensive; capping it keeps weaker devices
+ * responsive during a scan.
+ */
+const MAX_CONCURRENT_THUMBNAILS = 3;
+
+/**
+ * Dispatch a scan-progress update to Redux after this many media files have
+ * been discovered, to avoid flooding the Redux store with single-file events.
+ */
+const PROGRESS_DISPATCH_INTERVAL = 10;
+
+/** Lightweight promise-based semaphore used to cap concurrency. */
+class Semaphore {
+    private available: number;
+    private readonly queue: Array<() => void> = [];
+
+    constructor(limit: number) {
+        this.available = limit;
+    }
+
+    acquire(): Promise<void> {
+        if (this.available > 0) {
+            this.available--;
+            return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+
+    release(): void {
+        const next = this.queue.shift();
+        if (next) {
+            next();
+        } else {
+            this.available++;
+        }
+    }
+}
+
 /**
  * Well-known filenames that represent a folder/series/movie poster image.
  * Checked case-insensitively during directory scanning.
@@ -111,6 +160,26 @@ interface IScannedFile extends IMediaObject {
     relativePathParts: string[];
 }
 
+/**
+ * Mutable state shared across all concurrent `recursiveCollect` calls for a
+ * single `collectAllMediaFiles` invocation.  Holds the stream batch buffers and
+ * auxiliary tracking maps needed to dispatch progressive Redux updates.
+ */
+interface StreamState {
+    /** Whether this source scans TV shows or movies. */
+    sourceType: 'tv' | 'movie';
+    /** Buffered TV episode payloads waiting to be dispatched as a batch. */
+    episodeBatch: MergeEpisodePayload[];
+    /** Buffered movie objects (with their folder key) waiting to be dispatched. */
+    movieBatch: Array<{ movie: IMediaObject; folderKey: string }>;
+    /**
+     * Tracks which movie paths have already been flushed to Redux, keyed by
+     * folder key.  Used to dispatch `setMoviePoster` updates when a poster
+     * image is discovered after its movie files have already been dispatched.
+     */
+    moviePathsByFolder: Map<string, string[]>;
+}
+
 export class FileScanner {
     static myInstance: FileScanner | null = null;
 
@@ -132,17 +201,31 @@ export class FileScanner {
         logger.log('FileScanner', `scanAllSources called with ${sources.length} source(s)`);
         sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
         store.dispatch(setIsScanning(true));
+        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
+        // Clear stale data so the UI transitions to the scanning view and items
+        // appear progressively as they are discovered rather than all at once.
+        store.dispatch(clearLibraryAndMovies());
         try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
         logger.log('FileScanner', `TV sources: ${tvSources.length}, Movie sources: ${movieSources.length}`);
+
+        // Create per-scan semaphores so that two overlapping scans (e.g. triggered
+        // by a settings change while a previous scan is still running) each have
+        // their own independent concurrency budget rather than sharing a single
+        // module-level pool.
+        const dirSemaphore = new Semaphore(MAX_CONCURRENT_DIR_READS);
+        const thumbSemaphore = new Semaphore(MAX_CONCURRENT_THUMBNAILS);
+        // Shared progress counter threaded through all collectAllMediaFiles calls
+        // so that TV and movie sources contribute to the same running total.
+        const collectProgress = { filesFound: 0 };
 
         // Collect TV files from all TV sources and merge into one library
         const allTvFiles: IScannedFile[] = [];
         const tvPosterMap = new Map<string, string>();
         for (const src of tvSources) {
             logger.log('FileScanner', `Scanning TV source: ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri);
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv');
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
             allTvFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!tvPosterMap.has(key)) tvPosterMap.set(key, uri); });
@@ -155,7 +238,7 @@ export class FileScanner {
         const moviePosterMap = new Map<string, string>();
         for (const src of movieSources) {
             logger.log('FileScanner', `Scanning Movie source: ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri);
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie');
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
             allMovieFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!moviePosterMap.has(key)) moviePosterMap.set(key, uri); });
@@ -168,6 +251,9 @@ export class FileScanner {
             ...allTvFiles.map((f) => f.path),
             ...allMovieFiles.map((f) => f.path),
         ];
+        // Dispatch a final "collecting done" progress update with the exact total before
+        // dispatching the library data, so the UI can show the correct file count.
+        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
         store.dispatch(setScanList(allScanUris));
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
@@ -182,37 +268,64 @@ export class FileScanner {
         if (enableThumbnailGeneration) {
             const uncached = allMediaFiles.filter((m) => !thumbnailCache.has(m.path));
             logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
-            let thumbSuccess = 0;
-            let thumbFail = 0;
-            await Promise.allSettled(
-                uncached.map(async (media) => {
-                    try {
-                        const thumbnail = await this.generateThumbnail(media.path);
-                        if (!thumbnail) {
-                            throw new Error('No thumbnail returned by expo-video');
+            if (uncached.length > 0) {
+                let thumbSuccess = 0;
+                let thumbFail = 0;
+                let thumbCompleted = 0;
+                const thumbTotal = uncached.length;
+                // Announce the thumbnail phase so the UI can show a progress bar.
+                // Only entered when there is at least one thumbnail to generate,
+                // so thumbnailsTotal is always > 0 here.
+                store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal, metadataDone: 0, metadataTotal: 0 }));
+                await Promise.allSettled(
+                    uncached.map(async (media) => {
+                        // Throttle concurrency so weaker devices are not overwhelmed.
+                        await thumbSemaphore.acquire();
+                        try {
+                            const thumbnail = await this.generateThumbnail(media.path);
+                            if (!thumbnail) {
+                                throw new Error('No thumbnail returned by expo-video');
+                            }
+                            thumbnailCache.set(media.path, thumbnail);
+                            thumbSuccess++;
+                        } catch (e) {
+                            thumbFail++;
+                            logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
+                        } finally {
+                            thumbSemaphore.release();
+                            thumbCompleted++;
+                            store.dispatch(setScanProgress({
+                                phase: 'thumbnails',
+                                filesFound: allMediaFiles.length,
+                                thumbnailsDone: thumbCompleted,
+                                thumbnailsTotal: thumbTotal,
+                                metadataDone: 0,
+                                metadataTotal: 0,
+                            }));
                         }
-                        thumbnailCache.set(media.path, thumbnail);
-                        thumbSuccess++;
-                    } catch (e) {
-                        thumbFail++;
-                        logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
-                    }
-                }),
-            );
-            logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+                    }),
+                );
+                logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+            } else {
+                logger.log('FileScanner', 'All thumbnails already cached – skipping thumbnail generation');
+            }
         } else {
             logger.log('FileScanner', 'Thumbnail generation disabled in settings – skipping thumbnail generation step');
         }
 
-        // Enrich library with TMDB posters if an API key is configured
+        // Enrich library with TMDB posters if an API key is configured.
+        // Awaited so that isScanning stays true (and progress is visible) for the
+        // full duration of enrichment; setIsScanning(false) fires in the finally block.
         const tmdbApiKey = store.getState().settingsReducer.tmdbApiKey;
         if (tmdbApiKey) {
-            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment in background');
+            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment');
             const currentLibrary = store.getState().libraryReducer.mediaLibrary;
             const currentMovies = store.getState().libraryReducer.movies;
-            MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey).catch((e) => {
+            try {
+                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey);
+            } catch (e) {
                 logger.error('FileScanner', 'Metadata enrichment failed', e);
-            });
+            }
         } else {
             logger.log('FileScanner', 'No TMDB API key configured – skipping metadata enrichment');
         }
@@ -258,7 +371,12 @@ export class FileScanner {
         logger.log('FileScanner', `scanFolder filtered to ${filtered.length} item(s)`);
 
         // Recursively collect all media files and build the library
-        const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(directory);
+        const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(
+            directory,
+            new Semaphore(MAX_CONCURRENT_DIR_READS),
+            { filesFound: 0 },
+            'tv',
+        );
         const library = this.buildLibrary(allMediaFiles, posterMap);
         store.dispatch(setMediaLibrary(library));
 
@@ -269,10 +387,21 @@ export class FileScanner {
 
     private async collectAllMediaFiles(
         rootDirectory: string,
+        dirSemaphore: Semaphore,
+        progress: { filesFound: number },
+        sourceType: 'tv' | 'movie' = 'tv',
     ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string> }> {
         const result: IScannedFile[] = [];
         const posterMap = new Map<string, string>();
-        await this.recursiveCollect(rootDirectory, [], result, posterMap, 0);
+        const streamState: StreamState = {
+            sourceType,
+            episodeBatch: [],
+            movieBatch: [],
+            moviePathsByFolder: new Map(),
+        };
+        await this.recursiveCollect(rootDirectory, [], result, posterMap, 0, dirSemaphore, progress, streamState);
+        // Flush any remaining buffered items that did not reach the batch threshold
+        this.flushStreamBatch(streamState, posterMap);
         return { files: result, posterMap };
     }
 
@@ -282,6 +411,9 @@ export class FileScanner {
         result: IScannedFile[],
         posterMap: Map<string, string>,
         depth: number,
+        dirSemaphore: Semaphore,
+        progress: { filesFound: number },
+        streamState: StreamState,
     ): Promise<void> {
         if (depth > MAX_SCAN_DEPTH) {
             logger.warn('FileScanner', `Max scan depth (${MAX_SCAN_DEPTH}) reached at: ${directory}`);
@@ -289,13 +421,21 @@ export class FileScanner {
         }
 
         let contents: string[];
+        await dirSemaphore.acquire();
         try {
             contents = await StorageAccessFramework.readDirectoryAsync(directory);
         } catch (e) {
             logger.warn('FileScanner', `Cannot read directory (depth=${depth}): ${directory}`, e);
             return; // Directory not accessible
+        } finally {
+            dirSemaphore.release();
         }
         logger.log('FileScanner', `Scanning dir (depth=${depth}, ${contents.length} entries): ${decodeURIComponent(directory).split('/').slice(-2).join('/')}`);
+
+        // Subdirectories to recurse into, collected during the synchronous pass
+        // over this directory's entries so that we can fan them out in parallel
+        // after processing all files at the current level.
+        const subdirs: Array<{ uri: string; pathParts: string[] }> = [];
 
         for (let i = 0; i < contents.length; i++) {
             const resolvedUri = contents[i];
@@ -305,7 +445,7 @@ export class FileScanner {
             if (filename.charAt(0) === '.') continue; // Skip hidden entries
 
             if (this.isMediaFile(filename)) {
-                result.push({
+                const file: IScannedFile = {
                     ids: { tvdb: null, imdb: null, tmdb: null },
                     title: '',
                     episodeNumber: 0,
@@ -315,7 +455,21 @@ export class FileScanner {
                     isDirectory: false,
                     relativePathParts,
                     poster: '',
-                });
+                };
+                result.push(file);
+                // Add to the streaming batch so the UI can show this item
+                // before the full collection pass completes.
+                this.addToStreamBatch(file, posterMap, streamState);
+                // Dispatch throttled progress update so the UI reflects files discovered
+                // so far.  Updates are batched every PROGRESS_DISPATCH_INTERVAL files to
+                // avoid excessive Redux churn; the final precise total is dispatched in
+                // scanAllSources once all sources have been collected.
+                progress.filesFound++;
+                if (progress.filesFound % PROGRESS_DISPATCH_INTERVAL === 0) {
+                    store.dispatch(setScanProgress({ phase: 'collecting', filesFound: progress.filesFound, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
+                    // Flush the stream batch so the UI shows newly discovered items.
+                    this.flushStreamBatch(streamState, posterMap);
+                }
             } else {
                 const dotIdx = filename.lastIndexOf('.');
                 const ext = dotIdx !== -1 ? filename.substring(dotIdx).toLowerCase() : '';
@@ -329,6 +483,25 @@ export class FileScanner {
                         try {
                             const localUri = await copyLocalPoster(resolvedUri, folderKey);
                             posterMap.set(folderKey, localUri);
+                            // Immediately update already-dispatched Redux entries with the poster.
+                            if (streamState.sourceType === 'tv') {
+                                // Show may already be in Redux from a previous batch flush.
+                                store.dispatch(updateShowPoster({ showName: folderKey, poster: localUri }));
+                            } else {
+                                // Update any movies already flushed to Redux for this folder.
+                                for (const path of streamState.moviePathsByFolder.get(folderKey) ?? []) {
+                                    store.dispatch(setMoviePoster({ path, poster: localUri }));
+                                }
+                                // Back-fill the poster for buffered movies not yet dispatched.
+                                for (let i = 0; i < streamState.movieBatch.length; i++) {
+                                    if (streamState.movieBatch[i].folderKey === folderKey) {
+                                        streamState.movieBatch[i] = {
+                                            ...streamState.movieBatch[i],
+                                            movie: { ...streamState.movieBatch[i].movie, poster: localUri },
+                                        };
+                                    }
+                                }
+                            }
                             logger.log('FileScanner', `Local poster found for "${folderKey}": ${filename}`);
                         } catch (e) {
                             logger.warn('FileScanner', `Failed to copy local poster for "${folderKey}"`, e);
@@ -342,14 +515,20 @@ export class FileScanner {
                 // an always-failing readDirectoryAsync call for each one.
                 if (NON_DIRECTORY_EXTENSIONS.has(ext)) continue;
 
-                // Treat anything else as a potential directory and recurse.
-                // readDirectoryAsync will throw (and be caught) if the entry
-                // is not actually a directory, so this is safe. This avoids
-                // relying on getInfoAsync's isDirectory field, which is
-                // unreliable for Android SAF document URIs.
-                await this.recursiveCollect(resolvedUri, [...relativePathParts, filename], result, posterMap, depth + 1);
+                // Collect as a potential subdirectory to recurse into in parallel.
+                subdirs.push({ uri: resolvedUri, pathParts: [...relativePathParts, filename] });
             }
         }
+
+        // Fan out all subdirectory reads in parallel.  This is the primary
+        // performance optimisation: instead of recursing serially (O(dirs) sequential
+        // awaits) we recurse into all siblings simultaneously, bounded by
+        // dirSemaphore so we never overwhelm slower storage.
+        await Promise.allSettled(
+            subdirs.map(({ uri, pathParts }) =>
+                this.recursiveCollect(uri, pathParts, result, posterMap, depth + 1, dirSemaphore, progress, streamState),
+            ),
+        );
     }
 
     private isMediaFile(filename: string): boolean {
@@ -357,6 +536,80 @@ export class FileScanner {
         if (dotIndex === -1) return false;
         const ext = filename.substring(dotIndex).toLowerCase();
         return VIDEO_EXTENSIONS.has(ext);
+    }
+
+    /**
+     * Parses a scanned file and adds it to the appropriate streaming batch
+     * (episode or movie) based on the current source type.
+     */
+    private addToStreamBatch(file: IScannedFile, posterMap: Map<string, string>, streamState: StreamState): void {
+        const { relativePathParts } = file;
+        const folderKey = relativePathParts[0] ?? '';
+
+        if (streamState.sourceType === 'tv') {
+            const metadata = this.parseMediaFile(file);
+            if (!metadata) return;
+            const { showName, season, episode, title } = metadata;
+            const folderPoster = folderKey ? (posterMap.get(folderKey) ?? '') : '';
+            const seasonKey = `s${String(season).padStart(2, '0')}`;
+            const episodeKey = `e${String(episode).padStart(2, '0')}`;
+            const { relativePathParts: _, ...mediaObj } = file;
+            streamState.episodeBatch.push({
+                showName,
+                folderPoster,
+                seasonKey,
+                seasonNumber: season,
+                episodeKey,
+                episode: { ...mediaObj, title: title || file.filename, episodeNumber: episode },
+            });
+        } else {
+            // Movie: derive title the same way buildMovieList does
+            const filenameTitle = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
+            const title = relativePathParts.length === 1
+                ? relativePathParts[0].replace(/[\._-]+/g, ' ').trim()
+                : filenameTitle;
+            const folderPoster = folderKey ? (posterMap.get(folderKey) ?? '') : '';
+            const { relativePathParts: _, ...mediaObj } = file;
+            streamState.movieBatch.push({
+                movie: { ...mediaObj, title, poster: folderPoster },
+                folderKey,
+            });
+        }
+    }
+
+    /**
+     * Dispatches all buffered episodes and movies to Redux, then clears the
+     * batch arrays.  Also updates `moviePathsByFolder` with newly dispatched
+     * movie paths so future poster updates can find them.
+     *
+     * Uses the latest `posterMap` when building movie objects so that a poster
+     * discovered in the same directory but listed after the movie file is
+     * included in the dispatched payload.
+     */
+    private flushStreamBatch(streamState: StreamState, posterMap: Map<string, string>): void {
+        if (streamState.episodeBatch.length > 0) {
+            store.dispatch(mergeEpisodeBatch([...streamState.episodeBatch]));
+            streamState.episodeBatch.length = 0;
+        }
+        if (streamState.movieBatch.length > 0) {
+            // Apply latest poster from posterMap in case the poster file was
+            // discovered in the same for-loop pass but after the movie file.
+            const movies = streamState.movieBatch.map(({ movie, folderKey }) => {
+                const latestPoster = posterMap.get(folderKey);
+                return latestPoster ? { ...movie, poster: latestPoster } : movie;
+            });
+            store.dispatch(appendMovieBatch(movies));
+            // Register these paths so future poster-copy events can update them.
+            for (const { movie, folderKey } of streamState.movieBatch) {
+                const paths = streamState.moviePathsByFolder.get(folderKey);
+                if (paths) {
+                    paths.push(movie.path);
+                } else {
+                    streamState.moviePathsByFolder.set(folderKey, [movie.path]);
+                }
+            }
+            streamState.movieBatch.length = 0;
+        }
     }
 
     private async generateThumbnail(videoUri: string): Promise<VideoThumbnail | null> {

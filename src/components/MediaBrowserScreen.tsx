@@ -7,7 +7,7 @@ import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
-import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides } from '@/store/libraryReducer';
+import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
@@ -353,6 +353,11 @@ const MAX_COLUMNS = 5;
 /** Divisor used to map viewScale (1-10) to column count. */
 const SCALE_TO_COLUMNS_DIVISOR = 2.5;
 
+/** Progress bar colour used during the thumbnail generation phase. */
+const PROGRESS_COLOR_THUMBNAILS = '#4CAF50';
+/** Progress bar colour used during the TMDB metadata enrichment phase. */
+const PROGRESS_COLOR_ENRICHING = '#2196F3';
+
 export type MediaFilter = 'all' | 'tv' | 'movies';
 
 interface MediaBrowserScreenProps {
@@ -373,6 +378,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const { width: screenWidth } = useWindowDimensions();
 
   const isScanning = useSelector(selectIsScanning);
+  const scanProgress = useSelector(selectScanProgress);
 
   // Apply filter
   const mediaLibrary: IMediaLibrary = mediaFilter === 'movies' ? {} : allLibrary;
@@ -426,7 +432,10 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   const displayItems = useMemo(
     () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto),
-    [mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto],
+    // scanProgress.thumbnailsDone is included so the memo re-runs each time a
+    // thumbnail is added to thumbnailCache during the thumbnail generation phase.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
@@ -469,6 +478,49 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     <View style={styles.container}>
       {mediaSources.length > 0 && hasLibraryContent ? (
         <ThemedView style={styles.listContainer}>
+          {/* Scan progress banner – shown at the top of the grid while any scan phase is active */}
+          {isScanning && scanProgress.phase !== 'idle' && (
+            <View style={styles.scanBanner}>
+              <ThemedText style={styles.scanBannerText}>
+                {scanProgress.phase === 'collecting'
+                  ? `Scanning… found ${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''}`
+                  : scanProgress.phase === 'thumbnails'
+                    ? `Generating thumbnails (${scanProgress.thumbnailsDone} / ${scanProgress.thumbnailsTotal})`
+                    : `Fetching metadata… (${scanProgress.metadataDone} / ${scanProgress.metadataTotal})`}
+              </ThemedText>
+              {scanProgress.phase === 'thumbnails' && (
+                <View style={styles.scanProgressTrack}>
+                  <View
+                    style={[
+                      styles.scanProgressFill,
+                      {
+                        width: `${Math.round(
+                          (scanProgress.thumbnailsDone / Math.max(1, scanProgress.thumbnailsTotal)) * 100,
+                        )}%`,
+                        backgroundColor: PROGRESS_COLOR_THUMBNAILS,
+                      },
+                    ]}
+                  />
+                </View>
+              )}
+              {scanProgress.phase === 'enriching' && (
+                <View style={styles.scanProgressTrack}>
+                  <View
+                    style={[
+                      styles.scanProgressFill,
+                      {
+                        width: `${Math.round(
+                          (scanProgress.metadataDone / Math.max(1, scanProgress.metadataTotal)) * 100,
+                        )}%`,
+                        backgroundColor: PROGRESS_COLOR_ENRICHING,
+                      },
+                    ]}
+                  />
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Breadcrumb / back navigation */}
           <ThemedView style={styles.breadcrumbRow}>
             {navStack.length > 0 && (
@@ -564,8 +616,56 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
         </ThemedView>
       ) : isScanning ? (
         <ThemedView style={styles.stepContainer}>
-          <ThemedText type="subtitle">Scanning…</ThemedText>
-          <ThemedText>Scanning your library, please wait.</ThemedText>
+          <ThemedText type="subtitle">
+            {scanProgress.phase === 'thumbnails'
+              ? 'Generating Thumbnails…'
+              : scanProgress.phase === 'enriching'
+                ? 'Fetching Metadata…'
+                : 'Scanning…'}
+          </ThemedText>
+          {scanProgress.phase === 'thumbnails' ? (
+            <>
+              <ThemedText>
+                {`Thumbnail ${scanProgress.thumbnailsDone} of ${scanProgress.thumbnailsTotal}`}
+              </ThemedText>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${Math.round(
+                        (scanProgress.thumbnailsDone / Math.max(1, scanProgress.thumbnailsTotal)) * 100,
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </>
+          ) : scanProgress.phase === 'enriching' ? (
+            <>
+              <ThemedText>
+                {`Fetching metadata ${scanProgress.metadataDone} of ${scanProgress.metadataTotal}`}
+              </ThemedText>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${Math.round(
+                        (scanProgress.metadataDone / Math.max(1, scanProgress.metadataTotal)) * 100,
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </>
+          ) : (
+            <ThemedText>
+              {scanProgress.filesFound > 0
+                ? `Found ${scanProgress.filesFound} file${scanProgress.filesFound === 1 ? '' : 's'} so far…`
+                : 'Scanning your library, please wait.'}
+            </ThemedText>
+          )}
         </ThemedView>
       ) : (
         <ThemedView style={styles.stepContainer}>
@@ -668,5 +768,39 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
     padding: 16,
+  },
+  progressBarTrack: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#444',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: PROGRESS_COLOR_THUMBNAILS,
+    borderRadius: 4,
+  },
+  scanBanner: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 4,
+    gap: 4,
+  },
+  scanBannerText: {
+    fontSize: 12,
+    opacity: 0.75,
+  },
+  scanProgressTrack: {
+    width: '100%',
+    height: 4,
+    backgroundColor: '#444',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  scanProgressFill: {
+    height: '100%',
+    borderRadius: 2,
   },
 });

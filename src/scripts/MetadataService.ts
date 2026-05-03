@@ -1,6 +1,6 @@
 import { File, Directory, Paths } from 'expo-file-system';
 import { store } from '@/store/store';
-import { updateShowMetadata, updateMovieMetadata } from '@/store/libraryReducer';
+import { updateShowMetadata, updateMovieMetadata, setScanProgress } from '@/store/libraryReducer';
 import type { IMediaLibrary } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { logger } from '@/scripts/Logger';
@@ -54,9 +54,38 @@ export class MetadataService {
 
     /** Enrich both the TV library and the movie list concurrently. */
     async enrichAll(library: IMediaLibrary, movies: IMediaObject[], apiKey: string): Promise<void> {
+        const showNames = Object.keys(library);
+        const metadataTotal = showNames.length + movies.length;
+        // Announce the enriching phase so the UI can show a progress banner.
+        store.dispatch(setScanProgress({
+            phase: 'enriching',
+            filesFound: 0,
+            thumbnailsDone: 0,
+            thumbnailsTotal: 0,
+            metadataDone: 0,
+            metadataTotal,
+        }));
+        // Shared counter threaded through both enrichment tasks so TV + movie
+        // completions both contribute to the same running total.
+        const progress = { done: 0 };
+        // Dispatch progress every N items to avoid flooding Redux for large libraries,
+        // and always on the final item so the counter reaches 100%.
+        const METADATA_PROGRESS_INTERVAL = 5;
+        const dispatchProgress = () => {
+            if (progress.done % METADATA_PROGRESS_INTERVAL === 0 || progress.done === metadataTotal) {
+                store.dispatch(setScanProgress({
+                    phase: 'enriching',
+                    filesFound: 0,
+                    thumbnailsDone: 0,
+                    thumbnailsTotal: 0,
+                    metadataDone: progress.done,
+                    metadataTotal,
+                }));
+            }
+        };
         const results = await Promise.allSettled([
-            this.enrichLibrary(library, apiKey),
-            this.enrichMovies(movies, apiKey),
+            this.enrichLibrary(library, apiKey, progress, dispatchProgress),
+            this.enrichMovies(movies, apiKey, progress, dispatchProgress),
         ]);
         for (const result of results) {
             if (result.status === 'rejected') {
@@ -66,7 +95,12 @@ export class MetadataService {
     }
 
     /** Fetch TMDB posters for every show in the library that does not yet have one cached. */
-    async enrichLibrary(library: IMediaLibrary, apiKey: string): Promise<void> {
+    async enrichLibrary(
+        library: IMediaLibrary,
+        apiKey: string,
+        progress: { done: number },
+        dispatchProgress: () => void,
+    ): Promise<void> {
         const showNames = Object.keys(library);
         logger.log('MetadataService', `enrichLibrary: ${showNames.length} show(s) to process`);
 
@@ -75,25 +109,25 @@ export class MetadataService {
         for (const showName of showNames) {
             const show = library[showName];
 
-            // Honour a user-set poster override (from manual TMDB rematch or local browse).
-            const overridePoster = overrides[`show:${showName}`]?.poster;
-            if (overridePoster) {
-                if (new File(overridePoster).exists) {
-                    store.dispatch(updateShowMetadata({ showName, tmdbId: show.ids.tmdb ?? '', poster: overridePoster }));
-                    logger.log('MetadataService', `Applying poster override for "${showName}"`);
-                    continue;
-                }
-            }
-
-            // Skip if we already have a locally cached poster for this show.
-            if (show.poster) {
-                if (new File(show.poster).exists) {
-                    logger.log('MetadataService', `Skipping "${showName}" – poster already cached`);
-                    continue;
-                }
-            }
-
             try {
+                // Honour a user-set poster override (from manual TMDB rematch or local browse).
+                const overridePoster = overrides[`show:${showName}`]?.poster;
+                if (overridePoster) {
+                    if (new File(overridePoster).exists) {
+                        store.dispatch(updateShowMetadata({ showName, tmdbId: show.ids.tmdb ?? '', poster: overridePoster }));
+                        logger.log('MetadataService', `Applying poster override for "${showName}"`);
+                        continue;
+                    }
+                }
+
+                // Skip if we already have a locally cached poster for this show.
+                if (show.poster) {
+                    if (new File(show.poster).exists) {
+                        logger.log('MetadataService', `Skipping "${showName}" – poster already cached`);
+                        continue;
+                    }
+                }
+
                 const url =
                     `${TMDB_BASE_URL}/search/tv` +
                     `?api_key=${encodeURIComponent(apiKey)}` +
@@ -120,44 +154,50 @@ export class MetadataService {
                 const localUri = await downloadPoster(tmdbId, results[0].poster_path);
                 store.dispatch(updateShowMetadata({ showName, tmdbId, poster: localUri }));
                 logger.log('MetadataService', `Show "${showName}" → TMDB ID ${tmdbId}, poster cached at ${localUri}`);
+                await delay(REQUEST_DELAY_MS);
             } catch (e) {
                 logger.warn('MetadataService', `Error enriching show "${showName}"`, e);
+            } finally {
+                progress.done++;
+                dispatchProgress();
             }
-
-            await delay(REQUEST_DELAY_MS);
         }
 
         logger.log('MetadataService', 'enrichLibrary complete');
     }
 
     /** Fetch TMDB posters for every movie that does not yet have one cached. */
-    async enrichMovies(movies: IMediaObject[], apiKey: string): Promise<void> {
+    async enrichMovies(
+        movies: IMediaObject[],
+        apiKey: string,
+        progress: { done: number },
+        dispatchProgress: () => void,
+    ): Promise<void> {
         logger.log('MetadataService', `enrichMovies: ${movies.length} movie(s) to process`);
 
         const overrides = store.getState().libraryReducer.mediaOverrides;
 
         for (const movie of movies) {
-            // Honour a user-set poster override (from manual TMDB rematch or local browse).
-            const overridePoster = overrides[`movie:${movie.path}`]?.poster;
-            if (overridePoster) {
-                if (new File(overridePoster).exists) {
-                    store.dispatch(updateMovieMetadata({ path: movie.path, tmdbId: movie.ids.tmdb ?? '', poster: overridePoster }));
-                    logger.log('MetadataService', `Applying poster override for movie "${movie.title}"`);
-                    continue;
-                }
-            }
-
-            // Skip if we already have a locally cached poster for this movie.
-            if (movie.poster) {
-                if (new File(movie.poster).exists) {
-                    logger.log('MetadataService', `Skipping movie "${movie.title}" – poster already cached`);
-                    continue;
-                }
-            }
-
             const searchTitle = movie.title || movie.filename.replace(/\.[^.]+$/, '');
-
             try {
+                // Honour a user-set poster override (from manual TMDB rematch or local browse).
+                const overridePoster = overrides[`movie:${movie.path}`]?.poster;
+                if (overridePoster) {
+                    if (new File(overridePoster).exists) {
+                        store.dispatch(updateMovieMetadata({ path: movie.path, tmdbId: movie.ids.tmdb ?? '', poster: overridePoster }));
+                        logger.log('MetadataService', `Applying poster override for movie "${movie.title}"`);
+                        continue;
+                    }
+                }
+
+                // Skip if we already have a locally cached poster for this movie.
+                if (movie.poster) {
+                    if (new File(movie.poster).exists) {
+                        logger.log('MetadataService', `Skipping movie "${movie.title}" – poster already cached`);
+                        continue;
+                    }
+                }
+
                 const url =
                     `${TMDB_BASE_URL}/search/movie` +
                     `?api_key=${encodeURIComponent(apiKey)}` +
@@ -184,11 +224,13 @@ export class MetadataService {
                 const localUri = await downloadPoster(tmdbId, results[0].poster_path);
                 store.dispatch(updateMovieMetadata({ path: movie.path, tmdbId, poster: localUri }));
                 logger.log('MetadataService', `Movie "${searchTitle}" → TMDB ID ${tmdbId}, poster cached at ${localUri}`);
+                await delay(REQUEST_DELAY_MS);
             } catch (e) {
                 logger.warn('MetadataService', `Error enriching movie "${searchTitle}"`, e);
+            } finally {
+                progress.done++;
+                dispatchProgress();
             }
-
-            await delay(REQUEST_DELAY_MS);
         }
 
         logger.log('MetadataService', 'enrichMovies complete');
