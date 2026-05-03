@@ -9,7 +9,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { Provider } from 'react-redux';
-import { store } from '@/store/store';
+import { store, persistor } from '@/store/store';
 import { logger } from '@/scripts/Logger';
 import { EditModeProvider } from '@/contexts/EditModeContext';
 
@@ -43,6 +43,19 @@ export default function RootLayout() {
 
   const firstTimeSetupCheck = async () => {
     logger.log('RootLayout', 'Checking first-time setup key');
+    // Wait for redux-persist to finish rehydrating so defaultPage is available
+    await new Promise<void>((resolve) => {
+      if (persistor.getState().bootstrapCompleted) {
+        resolve();
+        return;
+      }
+      const unsubscribe = persistor.subscribe(() => {
+        if (persistor.getState().bootstrapCompleted) {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
     const firstTimeLookup = await AsyncStorage.getItem(StorageKeys.FIRST_TIME_SETUP_KEY);
     console.log("First Time result:", firstTimeLookup);
     logger.log('RootLayout', `First-time setup key value: ${firstTimeLookup}`);
@@ -50,8 +63,15 @@ export default function RootLayout() {
       logger.log('RootLayout', 'First-time setup not complete – redirecting to /firsttime');
       router.replace("/firsttime");
     } else {
-      logger.log('RootLayout', 'First-time setup already complete – redirecting to home');
-      router.replace("/(drawer)");
+      const storeState = store.getState() as { settingsReducer?: { defaultPage?: string } };
+      const defaultPage = storeState.settingsReducer?.defaultPage ?? 'home';
+      const route = defaultPage === 'tv'
+        ? '/(drawer)/tv'
+        : defaultPage === 'movies'
+          ? '/(drawer)/movies'
+          : '/(drawer)';
+      logger.log('RootLayout', `First-time setup already complete – redirecting to ${route}`);
+      router.replace(route);
     }
     setLoaded(true);
   }

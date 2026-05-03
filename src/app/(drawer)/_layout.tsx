@@ -122,6 +122,20 @@ export default function DrawerLayout() {
             }}
             />
             <Drawer.Screen
+            name="tv"
+            options={{
+                drawerLabel: '📺 TV',
+                title: "",
+            }}
+            />
+            <Drawer.Screen
+            name="movies"
+            options={{
+                drawerLabel: '🎬 Movies',
+                title: "",
+            }}
+            />
+            <Drawer.Screen
             name="settingsprompt"
             options={{
                 drawerLabel: 'Settings',
