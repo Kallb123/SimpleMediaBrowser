@@ -66,7 +66,7 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Link EAS project
-        run: eas init --non-interactive
+        run: eas init --non-interactive --force 
 
       - name: Build APK via EAS
         id: eas-build
