@@ -45,12 +45,12 @@ export default function RootLayout() {
     logger.log('RootLayout', 'Checking first-time setup key');
     // Wait for redux-persist to finish rehydrating so defaultPage is available
     await new Promise<void>((resolve) => {
-      if (persistor.getState().bootstrapCompleted) {
+      if (persistor.getState().bootstrapped) {
         resolve();
         return;
       }
       const unsubscribe = persistor.subscribe(() => {
-        if (persistor.getState().bootstrapCompleted) {
+        if (persistor.getState().bootstrapped) {
           unsubscribe();
           resolve();
         }
