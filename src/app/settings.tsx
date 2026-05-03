@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Button, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { Button, StyleSheet, Text, View, TouchableOpacity, Switch } from 'react-native';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
@@ -7,7 +7,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage } from '@/store/settingsReducer';
+import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { FileScanner } from '@/scripts/FileScanner';
@@ -31,6 +31,7 @@ export default function SettingsPrompt() {
   const [viewOrientation, setLocalViewOrientation] = useState("" as viewOrientations);
   const [viewScale, setLocalViewScale] = useState(2);
   const [defaultPage, setLocalDefaultPage] = useState("home" as defaultPages);
+  const [enableThumbnailGeneration, setLocalEnableThumbnailGeneration] = useState(false);
 
   const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
@@ -41,6 +42,7 @@ export default function SettingsPrompt() {
   const settingsViewOrientation = useSelector(selectViewOrientation);
   const settingsViewScale = useSelector(selectViewScale);
   const settingsDefaultPage = useSelector(selectDefaultPage);
+  const settingsEnableThumbnailGeneration = useSelector(selectEnableThumbnailGeneration);
   
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
@@ -70,7 +72,7 @@ export default function SettingsPrompt() {
   ];
 
   useEffect(() => {
-    logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${mediaSources.length}`);
+    logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${mediaSources.length}, thumbnails=${settingsEnableThumbnailGeneration}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -81,8 +83,9 @@ export default function SettingsPrompt() {
     if (mediaStructureRef.current) (mediaStructureRef.current as any).selectIndex(viewTypeOptions.findIndex(o => o.id === settingsMediaStructure));
     if (viewOrientationRef.current) (viewOrientationRef.current as any).selectIndex(uiTypeOptions.findIndex(o => o.id === settingsViewOrientation));
     if (defaultPageRef.current) (defaultPageRef.current as any).selectIndex(defaultPageOptions.findIndex(o => o.id === settingsDefaultPage));
+    setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
     setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
-  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnableThumbnailGeneration]);
 
   const save = () => {
     logger.log('Settings', 'Save pressed – evaluating changes');
@@ -121,6 +124,11 @@ export default function SettingsPrompt() {
     if (defaultPage && defaultPage !== settingsDefaultPage) {
       logger.log('Settings', `Persisting: defaultPage changed ${settingsDefaultPage} → ${defaultPage}`);
       dispatch(setDefaultPage(defaultPage));
+      changeCount++;
+    }
+    if (enableThumbnailGeneration !== settingsEnableThumbnailGeneration) {
+      logger.log('Settings', `Persisting: enableThumbnailGeneration changed ${settingsEnableThumbnailGeneration} → ${enableThumbnailGeneration}`);
+      dispatch(setEnableThumbnailGeneration(enableThumbnailGeneration));
       changeCount++;
     }
     logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
@@ -229,6 +237,20 @@ export default function SettingsPrompt() {
       {/* Rescan */}
       <ThemedView style={styles.titleContainer}>
         <Button title="Rescan now" onPress={scanNow} />
+      </ThemedView>
+
+      {/* Thumbnail generation */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedView style={styles.titleContainer}>
+          <ThemedText>Generate video thumbnails:</ThemedText>
+          <Switch
+            value={enableThumbnailGeneration}
+            onValueChange={setLocalEnableThumbnailGeneration}
+          />
+        </ThemedView>
+        <ThemedText style={styles.emptyText}>
+          Disabled by default. When off, scans skip thumbnail generation.
+        </ThemedText>
       </ThemedView>
 
       {/* Media structure */}

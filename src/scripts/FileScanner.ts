@@ -178,26 +178,31 @@ export class FileScanner {
             ...allTvFiles.map(({ relativePathParts, ...obj }) => obj),
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
         ];
-        const uncached = allMediaFiles.filter((m) => !thumbnailCache.has(m.path));
-        logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
-        let thumbSuccess = 0;
-        let thumbFail = 0;
-        await Promise.allSettled(
-            uncached.map(async (media) => {
-                try {
-                    const thumbnail = await this.generateThumbnail(media.path);
-                    if (!thumbnail) {
-                        throw new Error('No thumbnail returned by expo-video');
+        const enableThumbnailGeneration = store.getState().settingsReducer.enableThumbnailGeneration ?? false;
+        if (enableThumbnailGeneration) {
+            const uncached = allMediaFiles.filter((m) => !thumbnailCache.has(m.path));
+            logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
+            let thumbSuccess = 0;
+            let thumbFail = 0;
+            await Promise.allSettled(
+                uncached.map(async (media) => {
+                    try {
+                        const thumbnail = await this.generateThumbnail(media.path);
+                        if (!thumbnail) {
+                            throw new Error('No thumbnail returned by expo-video');
+                        }
+                        thumbnailCache.set(media.path, thumbnail);
+                        thumbSuccess++;
+                    } catch (e) {
+                        thumbFail++;
+                        logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
                     }
-                    thumbnailCache.set(media.path, thumbnail);
-                    thumbSuccess++;
-                } catch (e) {
-                    thumbFail++;
-                    logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
-                }
-            }),
-        );
-        logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+                }),
+            );
+            logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+        } else {
+            logger.log('FileScanner', 'Thumbnail generation disabled in settings – skipping thumbnail generation step');
+        }
 
         // Enrich library with TMDB posters if an API key is configured
         const tmdbApiKey = store.getState().settingsReducer.tmdbApiKey;
