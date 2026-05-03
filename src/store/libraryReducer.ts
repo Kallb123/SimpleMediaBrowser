@@ -47,6 +47,21 @@ export interface IMediaSeason {
 
 export type IRawScanList = string[];
 
+/**
+ * Payload for a single episode entry streamed to Redux during scanning.
+ * Exported so FileScanner can build typed batch arrays without importing
+ * a separate type module.
+ */
+export interface MergeEpisodePayload {
+  showName: string;
+  /** Local poster URI for the show folder (empty string when not yet found). */
+  folderPoster: string;
+  seasonKey: string;
+  seasonNumber: number;
+  episodeKey: string;
+  episode: IMediaObject;
+}
+
 /** Progress information for an in-progress scan. */
 export interface ScanProgress {
   /** Current phase of the scan. */
@@ -169,10 +184,72 @@ export const settingsSlice = createSlice({
     clearMediaOverride: (state, action: PayloadAction<string>) => {
       delete state.mediaOverrides[action.payload];
     },
+    /**
+     * Clears both the TV library and the movie list.  Dispatched at the start
+     * of each scan so stale data is not shown before streaming results arrive.
+     */
+    clearLibraryAndMovies: (state) => {
+      state.mediaLibrary = {};
+      state.movies = [];
+    },
+    /**
+     * Incrementally upserts a batch of TV episodes into the library.
+     * Creates show and season scaffolding as needed; skips duplicate episode keys.
+     * Used to stream discovered episodes to the UI during scanning.
+     */
+    mergeEpisodeBatch: (state, action: PayloadAction<MergeEpisodePayload[]>) => {
+      for (const { showName, folderPoster, seasonKey, seasonNumber, episodeKey, episode } of action.payload) {
+        if (!state.mediaLibrary[showName]) {
+          state.mediaLibrary[showName] = {
+            ids: { tvdb: null, imdb: null, tmdb: null },
+            title: showName,
+            year: 0,
+            poster: folderPoster,
+            seasons: {},
+          };
+        } else if (folderPoster && !state.mediaLibrary[showName].poster) {
+          // Back-fill poster for a show that was created without one
+          state.mediaLibrary[showName].poster = folderPoster;
+        }
+        if (!state.mediaLibrary[showName].seasons[seasonKey]) {
+          state.mediaLibrary[showName].seasons[seasonKey] = {
+            ids: { tvdb: null, imdb: null, tmdb: null },
+            seasonNumber,
+            episodes: {},
+          };
+        }
+        if (!state.mediaLibrary[showName].seasons[seasonKey].episodes[episodeKey]) {
+          state.mediaLibrary[showName].seasons[seasonKey].episodes[episodeKey] = episode;
+        }
+      }
+    },
+    /**
+     * Appends a batch of movies to the movie list.
+     * Deduplicates by path so re-scanning a source that overlaps another is safe.
+     */
+    appendMovieBatch: (state, action: PayloadAction<IMediaObject[]>) => {
+      const existingPaths = new Set(state.movies.map((m) => m.path));
+      for (const movie of action.payload) {
+        if (!existingPaths.has(movie.path)) {
+          state.movies.push(movie);
+          existingPaths.add(movie.path);
+        }
+      }
+    },
+    /** Updates the poster URI for a show (e.g. when a local poster file is found during scanning). */
+    updateShowPoster: (state, action: PayloadAction<{ showName: string; poster: string }>) => {
+      const show = state.mediaLibrary[action.payload.showName];
+      if (show) show.poster = action.payload.poster;
+    },
+    /** Updates the poster URI for a single movie by its file path. */
+    setMoviePoster: (state, action: PayloadAction<{ path: string; poster: string }>) => {
+      const movie = state.movies.find((m) => m.path === action.payload.path);
+      if (movie) movie.poster = action.payload.poster;
+    },
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;

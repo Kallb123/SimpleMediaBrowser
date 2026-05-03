@@ -353,6 +353,11 @@ const MAX_COLUMNS = 5;
 /** Divisor used to map viewScale (1-10) to column count. */
 const SCALE_TO_COLUMNS_DIVISOR = 2.5;
 
+/** Progress bar colour used during the thumbnail generation phase. */
+const PROGRESS_COLOR_THUMBNAILS = '#4CAF50';
+/** Progress bar colour used during the TMDB metadata enrichment phase. */
+const PROGRESS_COLOR_ENRICHING = '#2196F3';
+
 export type MediaFilter = 'all' | 'tv' | 'movies';
 
 interface MediaBrowserScreenProps {
@@ -427,7 +432,10 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   const displayItems = useMemo(
     () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto),
-    [mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto],
+    // scanProgress.thumbnailsDone is included so the memo re-runs each time a
+    // thumbnail is added to thumbnailCache during the thumbnail generation phase.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
@@ -470,24 +478,46 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     <View style={styles.container}>
       {mediaSources.length > 0 && hasLibraryContent ? (
         <ThemedView style={styles.listContainer}>
-          {/* Metadata enrichment progress banner – shown while library grid is visible */}
-          {isScanning && scanProgress.phase === 'enriching' && (
-            <View style={styles.enrichBanner}>
-              <ThemedText style={styles.enrichBannerText}>
-                {`Fetching metadata… (${scanProgress.metadataDone} / ${scanProgress.metadataTotal})`}
+          {/* Scan progress banner – shown at the top of the grid while any scan phase is active */}
+          {isScanning && scanProgress.phase !== 'idle' && (
+            <View style={styles.scanBanner}>
+              <ThemedText style={styles.scanBannerText}>
+                {scanProgress.phase === 'collecting'
+                  ? `Scanning… found ${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''}`
+                  : scanProgress.phase === 'thumbnails'
+                    ? `Generating thumbnails (${scanProgress.thumbnailsDone} / ${scanProgress.thumbnailsTotal})`
+                    : `Fetching metadata… (${scanProgress.metadataDone} / ${scanProgress.metadataTotal})`}
               </ThemedText>
-              <View style={styles.enrichProgressTrack}>
-                <View
-                  style={[
-                    styles.enrichProgressFill,
-                    {
-                      width: `${Math.round(
-                        (scanProgress.metadataDone / Math.max(1, scanProgress.metadataTotal)) * 100,
-                      )}%`,
-                    },
-                  ]}
-                />
-              </View>
+              {scanProgress.phase === 'thumbnails' && (
+                <View style={styles.scanProgressTrack}>
+                  <View
+                    style={[
+                      styles.scanProgressFill,
+                      {
+                        width: `${Math.round(
+                          (scanProgress.thumbnailsDone / Math.max(1, scanProgress.thumbnailsTotal)) * 100,
+                        )}%`,
+                        backgroundColor: PROGRESS_COLOR_THUMBNAILS,
+                      },
+                    ]}
+                  />
+                </View>
+              )}
+              {scanProgress.phase === 'enriching' && (
+                <View style={styles.scanProgressTrack}>
+                  <View
+                    style={[
+                      styles.scanProgressFill,
+                      {
+                        width: `${Math.round(
+                          (scanProgress.metadataDone / Math.max(1, scanProgress.metadataTotal)) * 100,
+                        )}%`,
+                        backgroundColor: PROGRESS_COLOR_ENRICHING,
+                      },
+                    ]}
+                  />
+                </View>
+              )}
             </View>
           )}
 
@@ -749,29 +779,28 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#4CAF50',
+    backgroundColor: PROGRESS_COLOR_THUMBNAILS,
     borderRadius: 4,
   },
-  enrichBanner: {
+  scanBanner: {
     paddingHorizontal: 12,
     paddingTop: 6,
     paddingBottom: 4,
     gap: 4,
   },
-  enrichBannerText: {
+  scanBannerText: {
     fontSize: 12,
     opacity: 0.75,
   },
-  enrichProgressTrack: {
+  scanProgressTrack: {
     width: '100%',
     height: 4,
     backgroundColor: '#444',
     borderRadius: 2,
     overflow: 'hidden',
   },
-  enrichProgressFill: {
+  scanProgressFill: {
     height: '100%',
-    backgroundColor: '#2196F3',
     borderRadius: 2,
   },
 });
