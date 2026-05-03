@@ -22,6 +22,7 @@ interface SettingsState {
   viewOrientation: viewOrientations
   tmdbApiKey: string | null
   defaultPage: defaultPages
+  enableThumbnailGeneration: boolean
 }
 
 // Define the initial state using that type
@@ -34,6 +35,7 @@ const initialState: SettingsState = {
   viewOrientation: 'poster',
   tmdbApiKey: null,
   defaultPage: 'home',
+  enableThumbnailGeneration: false,
 }
 
 export const settingsSlice = createSlice({
@@ -69,10 +71,13 @@ export const settingsSlice = createSlice({
     setDefaultPage: (state, action: PayloadAction<defaultPages>) => {
       state.defaultPage = action.payload;
     },
+    setEnableThumbnailGeneration: (state, action: PayloadAction<boolean>) => {
+      state.enableThumbnailGeneration = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnableThumbnailGeneration } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources;
@@ -83,5 +88,6 @@ export const selectViewOrientation = (state: RootState) => state.settingsReducer
 export const selectViewScale = (state: RootState) => state.settingsReducer.viewScale;
 export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdbApiKey;
 export const selectDefaultPage = (state: RootState) => state.settingsReducer.defaultPage ?? 'home';
+export const selectEnableThumbnailGeneration = (state: RootState) => state.settingsReducer.enableThumbnailGeneration ?? false;
 
 export default settingsSlice.reducer

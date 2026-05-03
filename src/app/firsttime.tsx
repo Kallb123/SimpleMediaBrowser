@@ -1,4 +1,4 @@
-import { Image, StyleSheet, Button } from 'react-native';
+import { Image, StyleSheet, Button, Switch } from 'react-native';
 import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
@@ -9,13 +9,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { useDispatch } from 'react-redux';
-import { setPassword } from '@/store/settingsReducer';
+import { setPassword, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 
 export default function FirstTime() {
   const [password, onChangePassword] = useState(null as string | null);
   const [sourceAdded, setSourceAdded] = useState(false);
+  const [enableThumbnailGeneration, setEnableThumbnailGenerationLocal] = useState(false);
   const dispatch = useDispatch();
 
   logger.log('FirstTime', 'FirstTime screen rendered');
@@ -25,10 +26,11 @@ export default function FirstTime() {
     if (password) {
       dispatch(setPassword(password));
     }
+    dispatch(setEnableThumbnailGeneration(enableThumbnailGeneration));
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
     logger.log('FirstTime', 'First-time setup key written to AsyncStorage. Navigating to home.');
     router.replace('/(drawer)');
-  }, [password, dispatch]);
+  }, [password, enableThumbnailGeneration, dispatch]);
 
   return (
     <ParallaxScrollView
@@ -65,6 +67,16 @@ export default function FirstTime() {
           secureTextEntry={true}
         />
       </ThemedView>
+      <ThemedView style={styles.titleContainer}>
+        <ThemedText>Generate video thumbnails:</ThemedText>
+        <Switch
+          value={enableThumbnailGeneration}
+          onValueChange={setEnableThumbnailGenerationLocal}
+        />
+      </ThemedView>
+      <ThemedText style={styles.addedNote}>
+        Off by default. You can change this later in Settings.
+      </ThemedText>
       <ThemedView style={styles.titleContainer}>
         <Button
             title="Finished, Go Home"
