@@ -138,6 +138,7 @@ export default function EditItemScreen() {
       ? JSON.stringify(existingOverride)
       : 'none';
     logger.log('EditItem', `Screen opened – type=${itemType} key="${itemKey}" title="${currentTitle}" existingOverrides=${overridesSummary}`);
+  // Log only once on mount; params come from navigation and do not change during the screen's lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
