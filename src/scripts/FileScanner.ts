@@ -108,12 +108,6 @@ class Semaphore {
     }
 }
 
-/** Semaphore shared across all concurrent directory reads within one scan. */
-const dirReadSemaphore = new Semaphore(MAX_CONCURRENT_DIR_READS);
-
-/** Semaphore shared across all concurrent thumbnail generation tasks. */
-const thumbSemaphore = new Semaphore(MAX_CONCURRENT_THUMBNAILS);
-
 /**
  * Well-known filenames that represent a folder/series/movie poster image.
  * Checked case-insensitively during directory scanning.
@@ -193,12 +187,22 @@ export class FileScanner {
         const movieSources = sources.filter((s) => s.contentType === 'movie');
         logger.log('FileScanner', `TV sources: ${tvSources.length}, Movie sources: ${movieSources.length}`);
 
+        // Create per-scan semaphores so that two overlapping scans (e.g. triggered
+        // by a settings change while a previous scan is still running) each have
+        // their own independent concurrency budget rather than sharing a single
+        // module-level pool.
+        const dirSemaphore = new Semaphore(MAX_CONCURRENT_DIR_READS);
+        const thumbSemaphore = new Semaphore(MAX_CONCURRENT_THUMBNAILS);
+        // Shared progress counter threaded through all collectAllMediaFiles calls
+        // so that TV and movie sources contribute to the same running total.
+        const collectProgress = { filesFound: 0 };
+
         // Collect TV files from all TV sources and merge into one library
         const allTvFiles: IScannedFile[] = [];
         const tvPosterMap = new Map<string, string>();
         for (const src of tvSources) {
             logger.log('FileScanner', `Scanning TV source: ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri);
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress);
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
             allTvFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!tvPosterMap.has(key)) tvPosterMap.set(key, uri); });
@@ -211,7 +215,7 @@ export class FileScanner {
         const moviePosterMap = new Map<string, string>();
         for (const src of movieSources) {
             logger.log('FileScanner', `Scanning Movie source: ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri);
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress);
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
             allMovieFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!moviePosterMap.has(key)) moviePosterMap.set(key, uri); });
@@ -332,7 +336,11 @@ export class FileScanner {
         logger.log('FileScanner', `scanFolder filtered to ${filtered.length} item(s)`);
 
         // Recursively collect all media files and build the library
-        const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(directory);
+        const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(
+            directory,
+            new Semaphore(MAX_CONCURRENT_DIR_READS),
+            { filesFound: 0 },
+        );
         const library = this.buildLibrary(allMediaFiles, posterMap);
         store.dispatch(setMediaLibrary(library));
 
@@ -343,10 +351,12 @@ export class FileScanner {
 
     private async collectAllMediaFiles(
         rootDirectory: string,
+        dirSemaphore: Semaphore,
+        progress: { filesFound: number },
     ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string> }> {
         const result: IScannedFile[] = [];
         const posterMap = new Map<string, string>();
-        await this.recursiveCollect(rootDirectory, [], result, posterMap, 0);
+        await this.recursiveCollect(rootDirectory, [], result, posterMap, 0, dirSemaphore, progress);
         return { files: result, posterMap };
     }
 
@@ -356,6 +366,8 @@ export class FileScanner {
         result: IScannedFile[],
         posterMap: Map<string, string>,
         depth: number,
+        dirSemaphore: Semaphore,
+        progress: { filesFound: number },
     ): Promise<void> {
         if (depth > MAX_SCAN_DEPTH) {
             logger.warn('FileScanner', `Max scan depth (${MAX_SCAN_DEPTH}) reached at: ${directory}`);
@@ -363,14 +375,14 @@ export class FileScanner {
         }
 
         let contents: string[];
-        await dirReadSemaphore.acquire();
+        await dirSemaphore.acquire();
         try {
             contents = await StorageAccessFramework.readDirectoryAsync(directory);
         } catch (e) {
             logger.warn('FileScanner', `Cannot read directory (depth=${depth}): ${directory}`, e);
             return; // Directory not accessible
         } finally {
-            dirReadSemaphore.release();
+            dirSemaphore.release();
         }
         logger.log('FileScanner', `Scanning dir (depth=${depth}, ${contents.length} entries): ${decodeURIComponent(directory).split('/').slice(-2).join('/')}`);
 
@@ -398,10 +410,14 @@ export class FileScanner {
                     relativePathParts,
                     poster: '',
                 });
-                // Dispatch throttled progress update so the UI reflects files discovered so far.
-                const found = result.length;
-                if (found % PROGRESS_DISPATCH_INTERVAL === 0) {
-                    store.dispatch(setScanProgress({ phase: 'collecting', filesFound: found, thumbnailsDone: 0, thumbnailsTotal: 0 }));
+                // Dispatch throttled progress update so the UI reflects files discovered
+                // so far.  JavaScript's single-threaded event model guarantees that the
+                // increment and modulo check below are never interleaved with updates from
+                // other concurrent recursiveCollect coroutines (they only run at `await`
+                // suspension points, none of which appear between these lines).
+                progress.filesFound++;
+                if (progress.filesFound % PROGRESS_DISPATCH_INTERVAL === 0) {
+                    store.dispatch(setScanProgress({ phase: 'collecting', filesFound: progress.filesFound, thumbnailsDone: 0, thumbnailsTotal: 0 }));
                 }
             } else {
                 const dotIdx = filename.lastIndexOf('.');
@@ -437,10 +453,10 @@ export class FileScanner {
         // Fan out all subdirectory reads in parallel.  This is the primary
         // performance optimisation: instead of recursing serially (O(dirs) sequential
         // awaits) we recurse into all siblings simultaneously, bounded by
-        // dirReadSemaphore so we never overwhelm slower storage.
+        // dirSemaphore so we never overwhelm slower storage.
         await Promise.allSettled(
             subdirs.map(({ uri, pathParts }) =>
-                this.recursiveCollect(uri, pathParts, result, posterMap, depth + 1),
+                this.recursiveCollect(uri, pathParts, result, posterMap, depth + 1, dirSemaphore, progress),
             ),
         );
     }
