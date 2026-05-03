@@ -32,6 +32,8 @@ export default function SettingsPrompt() {
   const [viewScale, setLocalViewScale] = useState(2);
   const [defaultPage, setLocalDefaultPage] = useState("home" as defaultPages);
   const [enableThumbnailGeneration, setLocalEnableThumbnailGeneration] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanComplete, setScanComplete] = useState(false);
 
   const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
@@ -143,7 +145,15 @@ export default function SettingsPrompt() {
 
   const scanNow = useCallback(async () => {
     logger.log('Settings', `Manual rescan triggered for ${mediaSources.length} source(s)`);
-    await FileScanner.getInstance().scanAllSources(mediaSources);
+    setScanning(true);
+    setScanComplete(false);
+    try {
+      await FileScanner.getInstance().scanAllSources(mediaSources);
+      setScanComplete(true);
+      setTimeout(() => setScanComplete(false), 4000);
+    } finally {
+      setScanning(false);
+    }
   }, [mediaSources]);
 
   const handleUIScaleChange = (value: number) => {
@@ -237,7 +247,8 @@ export default function SettingsPrompt() {
 
       {/* Rescan */}
       <ThemedView style={styles.titleContainer}>
-        <Button title="Rescan now" onPress={scanNow} />
+        <Button title={scanning ? 'Scanning…' : 'Rescan now'} onPress={scanNow} disabled={scanning} />
+        {!scanning && scanComplete && <ThemedText style={styles.scanStatus}>✓ Scan complete</ThemedText>}
       </ThemedView>
 
       {/* Thumbnail generation */}
@@ -383,6 +394,11 @@ const styles = StyleSheet.create({
   emptyText: {
     opacity: 0.5,
     fontStyle: 'italic',
+  },
+  scanStatus: {
+    opacity: 0.7,
+    fontStyle: 'italic',
+    fontSize: 13,
   },
   sourceRow: {
     flexDirection: 'row',
