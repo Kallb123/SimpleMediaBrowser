@@ -83,6 +83,7 @@ export default function SettingsPrompt() {
     if (mediaStructureRef.current) (mediaStructureRef.current as any).selectIndex(viewTypeOptions.findIndex(o => o.id === settingsMediaStructure));
     if (viewOrientationRef.current) (viewOrientationRef.current as any).selectIndex(uiTypeOptions.findIndex(o => o.id === settingsViewOrientation));
     if (defaultPageRef.current) (defaultPageRef.current as any).selectIndex(defaultPageOptions.findIndex(o => o.id === settingsDefaultPage));
+    setLocalViewScale(settingsViewScale);
     setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
     setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
   }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnableThumbnailGeneration]);
