@@ -259,7 +259,25 @@ export class FileScanner {
         store.dispatch(setMovies(movies));
         logger.log('FileScanner', `Scan complete. Total media files dispatched: ${allScanUris.length}`);
 
-        // Generate thumbnails for all scanned media files concurrently (skip already-cached paths)
+        // Enrich library with TMDB posters if an API key is configured.
+        // Awaited so that isScanning stays true (and progress is visible) for the
+        // full duration of enrichment; setIsScanning(false) fires in the finally block.
+        const tmdbApiKey = store.getState().settingsReducer.tmdbApiKey;
+        if (tmdbApiKey) {
+            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment');
+            const currentLibrary = store.getState().libraryReducer.mediaLibrary;
+            const currentMovies = store.getState().libraryReducer.movies;
+            try {
+                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey);
+            } catch (e) {
+                logger.error('FileScanner', 'Metadata enrichment failed', e);
+            }
+        } else {
+            logger.log('FileScanner', 'No TMDB API key configured – skipping metadata enrichment');
+        }
+
+        // Generate thumbnails for all scanned media files concurrently (skip already-cached paths).
+        // This now runs after the poster/metadata stage so poster updates are applied first.
         const allMediaFiles: IMediaObject[] = [
             ...allTvFiles.map(({ relativePathParts, ...obj }) => obj),
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
@@ -311,23 +329,6 @@ export class FileScanner {
             }
         } else {
             logger.log('FileScanner', 'Thumbnail generation disabled in settings – skipping thumbnail generation step');
-        }
-
-        // Enrich library with TMDB posters if an API key is configured.
-        // Awaited so that isScanning stays true (and progress is visible) for the
-        // full duration of enrichment; setIsScanning(false) fires in the finally block.
-        const tmdbApiKey = store.getState().settingsReducer.tmdbApiKey;
-        if (tmdbApiKey) {
-            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment');
-            const currentLibrary = store.getState().libraryReducer.mediaLibrary;
-            const currentMovies = store.getState().libraryReducer.movies;
-            try {
-                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey);
-            } catch (e) {
-                logger.error('FileScanner', 'Metadata enrichment failed', e);
-            }
-        } else {
-            logger.log('FileScanner', 'No TMDB API key configured – skipping metadata enrichment');
         }
         } catch (e) {
             logger.error('FileScanner', `scanAllSources threw an error`, e);
