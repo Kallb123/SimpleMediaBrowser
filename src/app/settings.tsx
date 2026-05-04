@@ -15,6 +15,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
+import Constants from 'expo-constants';
 
 class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {
@@ -48,6 +49,7 @@ class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode 
 export default function SettingsPrompt() {
   const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const theme = Colors[colorScheme];
+  const appVersion = Constants.expoConfig?.version ?? 'unknown';
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
@@ -496,6 +498,9 @@ export default function SettingsPrompt() {
       <ThemedView style={styles.titleContainer}>
         <Button title="Save" onPress={save} />
       </ThemedView>
+      <ThemedView style={styles.footerContainer}>
+        <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
+      </ThemedView>
     </ParallaxScrollView>
     </SettingsErrorBoundary>
   );
@@ -593,5 +598,14 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '500',
+  },
+  footerContainer: {
+    marginTop: 24,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 12,
+    opacity: 0.6,
   },
 });

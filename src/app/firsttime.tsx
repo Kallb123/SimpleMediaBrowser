@@ -12,12 +12,14 @@ import { useDispatch } from 'react-redux';
 import { setPassword, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
+import Constants from 'expo-constants';
 
 export default function FirstTime() {
   const [password, onChangePassword] = useState(null as string | null);
   const [sourceAdded, setSourceAdded] = useState(false);
   const [enableThumbnailGeneration, setEnableThumbnailGenerationLocal] = useState(false);
   const dispatch = useDispatch();
+  const appVersion = Constants.expoConfig?.version ?? 'unknown';
 
   logger.log('FirstTime', 'FirstTime screen rendered');
 
@@ -83,6 +85,9 @@ export default function FirstTime() {
             onPress={finishedGoHome}
         />
       </ThemedView>
+      <ThemedView style={styles.footerContainer}>
+        <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
+      </ThemedView>
     </ParallaxScrollView>
   );
 }
@@ -100,6 +105,15 @@ const styles = StyleSheet.create({
   addedNote: {
     fontSize: 13,
     opacity: 0.7,
+  },
+  footerContainer: {
+    marginTop: 24,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 12,
+    opacity: 0.6,
   },
   reactLogo: {
     height: 178,
