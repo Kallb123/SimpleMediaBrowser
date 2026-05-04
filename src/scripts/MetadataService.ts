@@ -16,6 +16,15 @@ function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Remove common year suffixes so TMDB can find titles like "Breaking Bad (2008)"
+ * or "Movie Title 2008". Strips patterns like "(2008)", "[2008]", or " 2008" at
+ * the end of the string.
+ */
+function stripYearSuffix(title: string): string {
+    return title.replace(/\s*[\[(]?\d{4}[\])]?\s*$/, '').trim();
+}
+
 async function ensurePostersDir(): Promise<void> {
     if (!POSTERS_DIR.exists) {
         POSTERS_DIR.create({ intermediates: true, idempotent: true });
@@ -131,7 +140,7 @@ export class MetadataService {
                 const url =
                     `${TMDB_BASE_URL}/search/tv` +
                     `?api_key=${encodeURIComponent(apiKey)}` +
-                    `&query=${encodeURIComponent(showName)}` +
+                    `&query=${encodeURIComponent(stripYearSuffix(showName))}` +
                     `&language=en-US&page=1`;
 
                 const response = await fetch(url);
@@ -201,7 +210,7 @@ export class MetadataService {
                 const url =
                     `${TMDB_BASE_URL}/search/movie` +
                     `?api_key=${encodeURIComponent(apiKey)}` +
-                    `&query=${encodeURIComponent(searchTitle)}` +
+                    `&query=${encodeURIComponent(stripYearSuffix(searchTitle))}` +
                     `&language=en-US&page=1`;
 
                 const response = await fetch(url);
