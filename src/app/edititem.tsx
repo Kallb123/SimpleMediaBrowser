@@ -34,6 +34,15 @@ const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
 const POSTER_FULL_URL = 'https://image.tmdb.org/t/p/w500';
 const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
 
+/**
+ * Remove common year suffixes so TMDB can find titles like "Breaking Bad (2008)"
+ * or "Movie Title 2008". Strips patterns like "(2008)", "[2008]", or " 2008" at
+ * the end of the string.
+ */
+function stripYearSuffix(title: string): string {
+  return title.replace(/\s*[\[(]?\d{4}[\])]?\s*$/, '').trim();
+}
+
 interface TmdbResult {
   id: number;
   title?: string;
@@ -54,15 +63,13 @@ async function downloadPoster(tmdbId: string, posterPath: string): Promise<strin
   await ensurePostersDir();
   const safeName = tmdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const localPath = POSTERS_DIR + `${safeName}.jpg`;
-  const existing = new FileSystem.File(localPath);
-  if (existing.exists) {
-    return localPath;
+  const localFile = new FileSystem.File(localPath);
+  if (localFile.exists) {
+    return localFile.uri;
   }
   const remoteUrl = POSTER_FULL_URL + posterPath;
-  const destination = new FileSystem.Directory(localPath);
-  const output = await FileSystem.File.downloadFileAsync(remoteUrl, destination);
-  await output.rename(safeName);
-  return output.uri;
+  await FileSystem.File.downloadFileAsync(remoteUrl, localFile);
+  return localFile.uri;
 }
 
 /**
@@ -176,12 +183,13 @@ export default function EditItemScreen() {
     setSearchResults([]);
     try {
       const endpoint = itemType === 'movie' ? 'movie' : 'tv';
+      const tmdbQuery = stripYearSuffix(searchQuery.trim());
       const url =
         `${TMDB_BASE_URL}/search/${endpoint}` +
         `?api_key=${encodeURIComponent(tmdbApiKey)}` +
-        `&query=${encodeURIComponent(searchQuery.trim())}` +
+        `&query=${encodeURIComponent(tmdbQuery)}` +
         `&language=en-US&page=1`;
-      logger.log('EditItem', `TMDB search: ${endpoint} query="${searchQuery.trim()}"`);
+      logger.log('EditItem', `TMDB search: ${endpoint} query="${tmdbQuery}"`);
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
