@@ -5,7 +5,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
 
 /** Maps known video file extensions to their MIME types. */
-const VIDEO_MIME_TYPES: Record<string, string> = {
+const MEDIA_MIME_TYPES: Record<string, string> = {
     '.mkv':  'video/x-matroska',
     '.mp4':  'video/mp4',
     '.m4v':  'video/x-m4v',
@@ -19,17 +19,23 @@ const VIDEO_MIME_TYPES: Record<string, string> = {
     '.mpg':  'video/mpeg',
     '.mpeg': 'video/mpeg',
     '.3gp':  'video/3gpp',
+    '.mp3':  'audio/mpeg',
+    '.aac':  'audio/aac',
+    '.flac': 'audio/flac',
+    '.ogg':  'audio/ogg',
+    '.wav':  'audio/wav',
+    '.m4a':  'audio/mp4',
 };
 
 /**
  * Returns the MIME type for a given filename based on its extension,
- * or 'video/*' as a fallback for unrecognised extensions.
+ * or 'video/*' as a fallback for unrecognized extensions.
  */
 function getMimeType(filename: string): string {
     const dotIndex = filename.lastIndexOf('.');
     if (dotIndex === -1) return 'video/*';
     const ext = filename.substring(dotIndex).toLowerCase();
-    return VIDEO_MIME_TYPES[ext] ?? 'video/*';
+    return MEDIA_MIME_TYPES[ext] ?? 'video/*';
 }
 
 /**
