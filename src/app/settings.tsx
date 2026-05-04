@@ -400,7 +400,9 @@ export default function SettingsPrompt() {
 
       {/* Media structure */}
       <ThemedView style={styles.titleContainer}>
-        <ThemedText type="subtitle">Appearance and Layout</ThemedText><br />
+        <ThemedView style={styles.titleContainer}>
+          <ThemedText type="subtitle">Appearance and Layout</ThemedText>
+        </ThemedView>
         <ThemedText>TV Show Navigation Structure:</ThemedText>
         <SelectDropdown
           ref={mediaStructureRef}
