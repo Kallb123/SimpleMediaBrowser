@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, Share, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Share, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { logger } from '@/scripts/Logger';
@@ -16,6 +16,7 @@ export default function LogsScreen() {
     const [lines, setLines] = useState<readonly string[]>([]);
     const [autoScroll, setAutoScroll] = useState(true);
     const [filter, setFilter] = useState<LogFilter>('ALL');
+    const [searchText, setSearchText] = useState('');
     const scrollRef = useRef<ScrollView>(null);
 
     const refresh = useCallback(() => {
@@ -60,14 +61,15 @@ export default function LogsScreen() {
         return isDark ? '#ECEDEE' : '#11181C';
     };
 
-    const filteredLines = filter === 'ALL'
-        ? lines
-        : lines.filter((line) => {
+    const searchLower = searchText.toLowerCase();
+    const filteredLines = lines
+        .filter((line) => {
             if (filter === 'ERROR') return line.includes('[ERROR]');
             if (filter === 'WARN') return line.includes('[WARN ]');
             if (filter === 'LOG') return line.includes('[LOG  ]');
             return true;
-        });
+        })
+        .filter((line) => searchLower === '' || line.toLowerCase().includes(searchLower));
 
     const filterButtons: { label: string; value: LogFilter }[] = [
         { label: 'All', value: 'ALL' },
@@ -112,6 +114,24 @@ export default function LogsScreen() {
                         </ThemedText>
                     </TouchableOpacity>
                 ))}
+            </View>
+
+            {/* String search filter */}
+            <View style={[styles.searchBar, { backgroundColor: isDark ? '#1E1E1E' : '#F0F0F0' }]}>
+                <TextInput
+                    style={[styles.searchInput, {
+                        backgroundColor: isDark ? '#2C2C2C' : '#FFFFFF',
+                        color: isDark ? '#ECEDEE' : '#11181C',
+                        borderColor: isDark ? '#444' : '#CCC',
+                    }]}
+                    placeholder="Filter by text…"
+                    placeholderTextColor={isDark ? '#888' : '#999'}
+                    value={searchText}
+                    onChangeText={setSearchText}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    clearButtonMode="while-editing"
+                />
             </View>
 
             {/* File path hint */}
@@ -164,6 +184,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingBottom: 6,
         gap: 6,
+    },
+    searchBar: {
+        paddingHorizontal: 8,
+        paddingBottom: 6,
+    },
+    searchInput: {
+        height: 32,
+        borderRadius: 6,
+        borderWidth: 1,
+        paddingHorizontal: 10,
+        fontSize: 12,
+        fontFamily: 'SpaceMono',
     },
     filterButton: {
         paddingHorizontal: 12,
