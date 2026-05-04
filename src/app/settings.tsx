@@ -399,12 +399,11 @@ export default function SettingsPrompt() {
       </ThemedView>
 
       {/* Media structure */}
-      <ThemedView style={styles.titleContainer}>
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText type="subtitle">Appearance and Layout</ThemedText>
         <ThemedView style={styles.titleContainer}>
-          <ThemedText type="subtitle">Appearance and Layout</ThemedText>
-        </ThemedView>
-        <ThemedText>TV Show Navigation Structure:</ThemedText>
-        <SelectDropdown
+          <ThemedText>TV Show Navigation Structure:</ThemedText>
+          <SelectDropdown
           ref={mediaStructureRef}
           data={viewTypeOptions}
           defaultValue={viewTypeOptions.find(o => o.id === settingsMediaStructure)}
@@ -432,6 +431,7 @@ export default function SettingsPrompt() {
           showsVerticalScrollIndicator={false}
           dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
         />
+        </ThemedView>
       </ThemedView>
       <ThemedView>
         <ThemedText>{structureDescription}</ThemedText>
