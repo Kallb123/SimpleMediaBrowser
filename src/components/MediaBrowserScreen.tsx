@@ -551,6 +551,10 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                   ? { uri: item.thumbnailUri }
                   : item.thumbnailUri; // VideoThumbnail (SharedRef) passed directly to expo-image
 
+              // True when the item is displaying a raw video thumbnail (not a poster image).
+              // In poster layout, thumbnails are 16:9 and would be cropped by "cover"; use "contain" instead.
+              const isShowingVideoThumbnail = !hasPoster || isRevealed;
+
               const handlePress = isFolder
                 ? item.onPress
                 : () => {
@@ -590,7 +594,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                       <Image
                         source={displaySource}
                         style={styles.thumbnailImage}
-                        contentFit="cover"
+                        contentFit={viewOrientation === 'poster' && isShowingVideoThumbnail ? 'contain' : 'cover'}
                       />
                     ) : (
                       <View style={styles.thumbnailPlaceholder}>
@@ -735,6 +739,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#222',
     borderRadius: 8,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   thumbnailImage: {
     width: '100%',
