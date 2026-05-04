@@ -22,6 +22,7 @@ interface SettingsState {
   viewOrientation: viewOrientations
   tmdbApiKey: string | null
   defaultPage: defaultPages
+  enablePosterFetching: boolean
   enableThumbnailGeneration: boolean
 }
 
@@ -35,6 +36,7 @@ const initialState: SettingsState = {
   viewOrientation: 'poster',
   tmdbApiKey: null,
   defaultPage: 'home',
+  enablePosterFetching: true,
   enableThumbnailGeneration: false,
 }
 
@@ -71,23 +73,27 @@ export const settingsSlice = createSlice({
     setDefaultPage: (state, action: PayloadAction<defaultPages>) => {
       state.defaultPage = action.payload;
     },
+    setEnablePosterFetching: (state, action: PayloadAction<boolean>) => {
+      state.enablePosterFetching = action.payload;
+    },
     setEnableThumbnailGeneration: (state, action: PayloadAction<boolean>) => {
       state.enableThumbnailGeneration = action.payload;
     },
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnableThumbnailGeneration } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
-export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources;
-export const selectPassword = (state: RootState) => state.settingsReducer.settingsPassword;
-export const selectDataSource = (state: RootState) => state.settingsReducer.dataSource;
-export const selectMediaStructure = (state: RootState) => state.settingsReducer.viewType;
-export const selectViewOrientation = (state: RootState) => state.settingsReducer.viewOrientation;
-export const selectViewScale = (state: RootState) => state.settingsReducer.viewScale;
-export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdbApiKey;
+export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
+export const selectPassword = (state: RootState) => state.settingsReducer.settingsPassword ?? null;
+export const selectDataSource = (state: RootState) => state.settingsReducer.dataSource ?? 'tmdb';
+export const selectMediaStructure = (state: RootState) => state.settingsReducer.viewType ?? 'show/season';
+export const selectViewOrientation = (state: RootState) => state.settingsReducer.viewOrientation ?? 'poster';
+export const selectViewScale = (state: RootState) => state.settingsReducer.viewScale ?? 5;
+export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdbApiKey ?? null;
 export const selectDefaultPage = (state: RootState) => state.settingsReducer.defaultPage ?? 'home';
+export const selectEnablePosterFetching = (state: RootState) => state.settingsReducer.enablePosterFetching ?? true;
 export const selectEnableThumbnailGeneration = (state: RootState) => state.settingsReducer.enableThumbnailGeneration ?? false;
 
 export default settingsSlice.reducer

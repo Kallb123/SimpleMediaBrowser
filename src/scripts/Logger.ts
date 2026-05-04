@@ -1,13 +1,26 @@
-import * as FileSystem from 'expo-file-system';
-import { File, Paths } from 'expo-file-system';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 
-const LOG_FILE_PATH = (FileSystem.Paths.document ?? '') + 'smb_debug.log';
+const getBaseLogDirectory = () => {
+    const fromLegacy = ((LegacyFileSystem as any).documentDirectory as string | null | undefined) ?? '';
+    return fromLegacy.endsWith('/') ? fromLegacy : `${fromLegacy}/`;
+};
+
+const LOG_FILE_PATH = `${getBaseLogDirectory()}smb_debug.log`;
 /** Maximum number of log lines kept in memory. */
 const MAX_MEMORY_LINES = 600;
 /** Rotate (truncate) the on-disk log once it exceeds this size (bytes). */
 const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB
 
 type LogLevel = 'LOG' | 'WARN' | 'ERROR';
+
+export interface LoggerDiagnostics {
+    path: string;
+    fileExists: boolean;
+    fileSizeBytes: number;
+    hydratedLineCount: number;
+    hadPreviousLogFile: boolean;
+    lastHydrateError: string | null;
+}
 
 /**
  * Lightweight file-and-memory logger intended for debugging standalone EAS
@@ -27,26 +40,21 @@ type LogLevel = 'LOG' | 'WARN' | 'ERROR';
 class Logger {
     private static _instance: Logger | null = null;
 
-    private _logFile: File | null = null;
-
     private _lines: string[] = [];
+    private _diagnostics: LoggerDiagnostics = {
+        path: LOG_FILE_PATH,
+        fileExists: false,
+        fileSizeBytes: 0,
+        hydratedLineCount: 0,
+        hadPreviousLogFile: false,
+        lastHydrateError: null,
+    };
     /** Serialise file writes to avoid concurrent access. */
     private _writeQueue: Promise<void> = Promise.resolve();
 
     private constructor() {
-        this._logFile = new File(Paths.document, 'smb_debug.log');
-        try {
-            // Ensure the log file exists
-            this._logFile.create();
-        } catch {
-            this.log('Logger', 'Failed to create log file, logging to disk will be unavailable');
-        }
-        try {
-            // Ensure the log file is writeable
-            this._logFile.write('');
-        } catch {
-            this.log('Logger', 'Failed to write to log file, logging to disk will be unavailable');
-        }
+        // Load persisted logs into memory first so the Logs screen can show previous runs.
+        this._writeQueue = this._writeQueue.then(() => this._hydrateFromDisk());
         this._appendToFile(`\n${'='.repeat(60)}\nLogger initialised at ${this._timestamp()}\nLog file: ${LOG_FILE_PATH}\n${'='.repeat(60)}`);
     }
 
@@ -89,12 +97,17 @@ class Logger {
         return LOG_FILE_PATH;
     }
 
+    /** Returns logger file/hydration diagnostics for debugging persistence issues. */
+    getDiagnostics(): LoggerDiagnostics {
+        return { ...this._diagnostics };
+    }
+
     /** Clears both the in-memory buffer and the on-disk log file. */
     async clearLogs(): Promise<void> {
         this._lines = [];
         this._writeQueue = this._writeQueue.then(async () => {
             try {
-                await this._logFile?.write(''); // Clear via File API if possible
+                await this._fsWrite('', false);
             } catch {
                 // Ignore errors during clear
             }
@@ -119,6 +132,54 @@ class Logger {
         }).join(' ');
     }
 
+    private async _fsGetInfo(): Promise<{ exists: boolean; size: number }> {
+        const info = await LegacyFileSystem.getInfoAsync(LOG_FILE_PATH);
+        const infoAny = info as any;
+        const size = typeof infoAny?.size === 'number' ? infoAny.size : 0;
+        return {
+            exists: Boolean(infoAny?.exists),
+            size,
+        };
+    }
+
+    private async _fsRead(): Promise<string> {
+        return LegacyFileSystem.readAsStringAsync(LOG_FILE_PATH);
+    }
+
+    private async _fsWrite(content: string, append = false): Promise<void> {
+        await LegacyFileSystem.writeAsStringAsync(LOG_FILE_PATH, content, append ? { append: true } : undefined);
+    }
+
+    private async _hydrateFromDisk(): Promise<void> {
+        try {
+            const info = await this._fsGetInfo();
+            this._diagnostics.fileExists = info.exists;
+            this._diagnostics.fileSizeBytes = info.size;
+            this._diagnostics.hadPreviousLogFile = info.exists && info.size > 0;
+
+            if (!info.exists) {
+                await this._fsWrite('', false);
+                this._diagnostics.fileExists = true;
+                this._diagnostics.fileSizeBytes = 0;
+                this._lines = [];
+                this._diagnostics.hydratedLineCount = 0;
+                return;
+            }
+
+            const existing = await this._fsRead();
+            const persistedLines = existing
+                .split(/\r?\n/)
+                .filter((line: string) => line.trim() !== '');
+            this._lines = persistedLines.slice(-MAX_MEMORY_LINES);
+            this._diagnostics.hydratedLineCount = this._lines.length;
+            this._diagnostics.lastHydrateError = null;
+        } catch (e) {
+            const message = e instanceof Error ? `${e.message}` : String(e);
+            this._diagnostics.lastHydrateError = message;
+            console.warn('[Logger] Failed to hydrate log file', e);
+        }
+    }
+
     private _record(level: LogLevel, tag: string, message: string, extra: unknown[]): void {
         const line = `[${this._timestamp()}] [${level.padEnd(5)}] [${tag}] ${message}${this._formatExtra(extra)}`;
 
@@ -141,21 +202,20 @@ class Logger {
             try {
                 // Check file size and rotate if too large.
                 try {
-                    if (this._logFile?.exists && this._logFile.size > MAX_FILE_BYTES) {
+                    const info = await this._fsGetInfo();
+                    if (info.exists && info.size > MAX_FILE_BYTES) {
                         // Keep the second half of the file to preserve recent logs.
-                        const existing = await this._logFile.text();
+                        const existing = await this._fsRead();
                         const halfway = Math.floor(existing.length / 2);
                         const trimmed = `[...log rotated...]\n${existing.slice(halfway)}`;
-                        await this._logFile.write(trimmed);
+                        await this._fsWrite(trimmed, false);
                     }
                 } catch {
                     // Rotation failure is non-fatal.
                 }
 
-                // `append` is supported by expo-file-system at runtime but may not be
-                // present in the bundled type declarations for this SDK version.
-                let log = new File(Paths.document, 'smb_debug.log');
-                await log.write(content + '\n');
+                const appendLine = content + '\n';
+                await this._fsWrite(appendLine, true);
             } catch {
                 // File write failure must never crash the app.
             }

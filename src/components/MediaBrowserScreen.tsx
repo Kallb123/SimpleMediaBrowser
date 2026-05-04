@@ -347,12 +347,27 @@ function buildDisplayItems(
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 const CARD_GAP = 8;
-/** Minimum number of grid columns shown at the lowest viewScale. */
-const MIN_COLUMNS = 2;
-/** Maximum number of grid columns shown at the highest viewScale. */
-const MAX_COLUMNS = 5;
-/** Divisor used to map viewScale (1-10) to column count. */
-const SCALE_TO_COLUMNS_DIVISOR = 2.5;
+/** Portrait mode: minimum number of grid columns shown at the lowest viewScale. */
+const PORTRAIT_MIN_COLUMNS = 2;
+/** Portrait mode: maximum number of grid columns shown at the highest viewScale. */
+const PORTRAIT_MAX_COLUMNS = 5;
+/** Landscape mode: minimum number of grid columns shown at the lowest viewScale. */
+const LANDSCAPE_MIN_COLUMNS = 4;
+/** Landscape mode: maximum number of grid columns shown at the highest viewScale. */
+const LANDSCAPE_MAX_COLUMNS = 10;
+/** Valid range for persisted UI scale setting. */
+const VIEW_SCALE_MIN = 1;
+const VIEW_SCALE_MAX = 10;
+
+function mapScaleToColumns(
+  viewScale: number,
+  minColumns: number,
+  maxColumns: number,
+): number {
+  const clampedScale = Math.max(VIEW_SCALE_MIN, Math.min(VIEW_SCALE_MAX, viewScale));
+  const t = (clampedScale - VIEW_SCALE_MIN) / (VIEW_SCALE_MAX - VIEW_SCALE_MIN);
+  return Math.round(minColumns + t * (maxColumns - minColumns));
+}
 
 /** Progress bar colour used during the thumbnail generation phase. */
 const PROGRESS_COLOR_THUMBNAILS = '#4CAF50';
@@ -376,7 +391,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const mediaOverrides = useSelector(selectMediaOverrides);
 
   const { editMode } = useEditMode();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
   const isScanning = useSelector(selectIsScanning);
   const scanProgress = useSelector(selectScanProgress);
@@ -423,8 +438,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     return () => subscription.remove();
   }, [navStack, navigateBack]);
 
-  // Map viewScale (1-10) to number of grid columns (MIN_COLUMNS-MAX_COLUMNS)
-  const numColumns = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, Math.round(viewScale / SCALE_TO_COLUMNS_DIVISOR)));
+  // Map viewScale (1-10) to number of grid columns based on current orientation.
+  const isLandscape = screenWidth > screenHeight;
+  const minColumns = isLandscape ? LANDSCAPE_MIN_COLUMNS : PORTRAIT_MIN_COLUMNS;
+  const maxColumns = isLandscape ? LANDSCAPE_MAX_COLUMNS : PORTRAIT_MAX_COLUMNS;
+  const numColumns = mapScaleToColumns(viewScale, minColumns, maxColumns);
   const cardWidth = (screenWidth - CARD_GAP * (numColumns + 1)) / numColumns;
   // Poster orientation uses a 2:3 portrait ratio; banner/thumbnail orientation uses 16:9 landscape.
   const thumbnailHeight = viewOrientation === 'poster'
