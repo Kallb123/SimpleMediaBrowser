@@ -262,8 +262,10 @@ export class FileScanner {
         // Enrich library with TMDB posters if an API key is configured.
         // Awaited so that isScanning stays true (and progress is visible) for the
         // full duration of enrichment; setIsScanning(false) fires in the finally block.
-        const tmdbApiKey = store.getState().settingsReducer.tmdbApiKey;
-        if (tmdbApiKey) {
+        const settings = store.getState().settingsReducer;
+        const tmdbApiKey = settings.tmdbApiKey;
+        const enablePosterFetching = settings.enablePosterFetching ?? true;
+        if (enablePosterFetching && tmdbApiKey) {
             logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment');
             const currentLibrary = store.getState().libraryReducer.mediaLibrary;
             const currentMovies = store.getState().libraryReducer.movies;
@@ -272,6 +274,8 @@ export class FileScanner {
             } catch (e) {
                 logger.error('FileScanner', 'Metadata enrichment failed', e);
             }
+        } else if (!enablePosterFetching) {
+            logger.log('FileScanner', 'Poster fetching disabled in settings – skipping metadata enrichment');
         } else {
             logger.log('FileScanner', 'No TMDB API key configured – skipping metadata enrichment');
         }

@@ -6,7 +6,7 @@ import React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router, Stack } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -60,6 +60,7 @@ export default function SettingsPrompt() {
   const [viewOrientation, setLocalViewOrientation] = useState("" as viewOrientations);
   const [viewScale, setLocalViewScale] = useState(2);
   const [defaultPage, setLocalDefaultPage] = useState("home" as defaultPages);
+  const [enablePosterFetching, setLocalEnablePosterFetching] = useState(true);
   const [enableThumbnailGeneration, setLocalEnableThumbnailGeneration] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
@@ -73,6 +74,7 @@ export default function SettingsPrompt() {
   const settingsViewOrientation = useSelector(selectViewOrientation);
   const settingsViewScale = useSelector(selectViewScale);
   const settingsDefaultPage = useSelector(selectDefaultPage);
+  const settingsEnablePosterFetching = useSelector(selectEnablePosterFetching);
   const settingsEnableThumbnailGeneration = useSelector(selectEnableThumbnailGeneration);
 
   const dataSourceRef = useRef(null);
@@ -137,7 +139,7 @@ export default function SettingsPrompt() {
 
   useEffect(() => {
     try {
-      logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${safeMediaSources.length}, thumbnails=${settingsEnableThumbnailGeneration}`);
+      logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${safeMediaSources.length}, posters=${settingsEnablePosterFetching}, thumbnails=${settingsEnableThumbnailGeneration}`);
     } catch (e) {
       logger.error('Settings', 'Exception while logging settings mount state', e as Error);
     }
@@ -169,12 +171,13 @@ export default function SettingsPrompt() {
       }
 
       setLocalViewScale(settingsViewScale);
+      setLocalEnablePosterFetching(settingsEnablePosterFetching);
       setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
       setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnableThumbnailGeneration]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration]);
 
   const save = () => {
     try {
@@ -214,6 +217,11 @@ export default function SettingsPrompt() {
       if (defaultPage && defaultPage !== settingsDefaultPage) {
         logger.log('Settings', `Persisting: defaultPage changed ${settingsDefaultPage} → ${defaultPage}`);
         dispatch(setDefaultPage(defaultPage));
+        changeCount++;
+      }
+      if (enablePosterFetching !== settingsEnablePosterFetching) {
+        logger.log('Settings', `Persisting: enablePosterFetching changed ${settingsEnablePosterFetching} → ${enablePosterFetching}`);
+        dispatch(setEnablePosterFetching(enablePosterFetching));
         changeCount++;
       }
       if (enableThumbnailGeneration !== settingsEnableThumbnailGeneration) {
@@ -351,6 +359,22 @@ export default function SettingsPrompt() {
         />
         <ThemedText style={styles.emptyText}>
           Register for a free key at themoviedb.org. Posters are downloaded and cached locally for offline use.
+        </ThemedText>
+        <ThemedView style={styles.titleContainer}>
+          <ThemedText>Fetch posters during scan:</ThemedText>
+          <Switch
+            value={enablePosterFetching}
+            onValueChange={(value) => {
+              try {
+                setLocalEnablePosterFetching(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling poster fetching', e as Error);
+              }
+            }}
+          />
+        </ThemedView>
+        <ThemedText style={styles.emptyText}>
+          Enabled by default. When off, scans skip TMDB poster fetching even if an API key is configured.
         </ThemedText>
       </ThemedView>
 
