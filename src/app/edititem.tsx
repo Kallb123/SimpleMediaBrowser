@@ -63,13 +63,13 @@ async function downloadPoster(tmdbId: string, posterPath: string): Promise<strin
   await ensurePostersDir();
   const safeName = tmdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const localPath = POSTERS_DIR + `${safeName}.jpg`;
-  const destination = new FileSystem.File(localPath);
-  if (destination.exists) {
-    return destination.uri;
+  const localFile = new FileSystem.File(localPath);
+  if (localFile.exists) {
+    return localFile.uri;
   }
   const remoteUrl = POSTER_FULL_URL + posterPath;
-  await FileSystem.File.downloadFileAsync(remoteUrl, destination);
-  return destination.uri;
+  await FileSystem.File.downloadFileAsync(remoteUrl, localFile);
+  return localFile.uri;
 }
 
 /**
