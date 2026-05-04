@@ -1,12 +1,10 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { Button, StyleSheet, Text, View, TouchableOpacity, Switch } from 'react-native';
+import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView } from 'react-native';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { router } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
@@ -265,9 +263,8 @@ export default function SettingsPrompt() {
   
   return (
     <SettingsErrorBoundary>
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={<Ionicons size={310} name="code-slash" style={styles.headerImage} />}>
+      <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={save} /> }} />
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <ThemedView style={styles.titleContainer}>
         <ThemedText type="title">Settings</ThemedText>
       </ThemedView>
@@ -494,24 +491,21 @@ export default function SettingsPrompt() {
         />
       </ThemedView>
 
-      {/* Save */}
-      <ThemedView style={styles.titleContainer}>
-        <Button title="Save" onPress={save} />
-      </ThemedView>
       <ThemedView style={styles.footerContainer}>
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
       </ThemedView>
-    </ParallaxScrollView>
+    </ScrollView>
     </SettingsErrorBoundary>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  container: {
+    flex: 1,
+  },
+  content: {
+    padding: 32,
+    gap: 16,
   },
   crashContainer: {
     flex: 1,
