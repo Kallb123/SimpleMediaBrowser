@@ -263,11 +263,8 @@ export default function SettingsPrompt() {
   
   return (
     <SettingsErrorBoundary>
-      <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={save} /> }} />
+    <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={save} /> }} />
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Settings</ThemedText>
-      </ThemedView>
 
       {/* Password */}
       <ThemedView style={styles.titleContainer}>
@@ -379,7 +376,7 @@ export default function SettingsPrompt() {
 
       {/* Media structure */}
       <ThemedView style={styles.titleContainer}>
-        <ThemedText type="subtitle">Appearance and Layout</ThemedText>
+        <ThemedText type="subtitle">Appearance and Layout</ThemedText><br />
         <ThemedText>TV Show Navigation Structure:</ThemedText>
         <SelectDropdown
           ref={mediaStructureRef}

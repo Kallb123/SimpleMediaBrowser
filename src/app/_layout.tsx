@@ -107,7 +107,7 @@ export default function RootLayout() {
           <Stack>
             <Stack.Screen name="firsttime" options={{ headerShown: false }} />
             <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
-            <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen name="settings" options={{ headerShown: true, title: 'Settings' }} />
             <Stack.Screen name="+not-found" />
             <Stack.Screen
               name="modal"
