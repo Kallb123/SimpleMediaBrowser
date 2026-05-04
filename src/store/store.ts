@@ -3,15 +3,16 @@ import settingsReducer from './settingsReducer'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createTransform, FLUSH, PAUSE, PERSIST, persistReducer, persistStore, PURGE, REGISTER, REHYDRATE } from 'redux-persist';
 import libraryReducer from './libraryReducer';
+import type { LibraryState } from './libraryReducer';
 
 // Reset transient scan state so a scan that was in progress when the app was
 // killed does not rehydrate with isScanning=true or stale progress values.
-const scanStateTransform = createTransform(
-  // outbound (state → storage): persist as-is
-  (inboundState: any) => inboundState,
-  // inbound (storage → state): clear transient scan fields
-  (outboundState: any) => ({
-    ...outboundState,
+const scanStateTransform = createTransform<LibraryState, LibraryState>(
+  // inbound (state → storage): persist as-is
+  (state) => state,
+  // outbound (storage → state): clear transient scan fields on load
+  (state) => ({
+    ...state,
     isScanning: false,
     scanProgress: {
       phase: 'idle',

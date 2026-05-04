@@ -84,7 +84,7 @@ export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
 
 // Define a type for the slice state
-interface LibraryState {
+export interface LibraryState {
   mediaLibrary: IMediaLibrary;
   movies: IMediaObject[];
   scanList: IRawScanList;
