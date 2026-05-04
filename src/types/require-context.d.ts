@@ -4,5 +4,10 @@ interface NodeRequire {
     path: string,
     deep?: boolean,
     filter?: RegExp,
-  ): { keys(): string[]; (id: string): unknown };
+  ): {
+    keys(): string[];
+    (id: string): unknown;
+    resolve(id: string): string;
+    id: string;
+  };
 }
