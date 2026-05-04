@@ -151,6 +151,9 @@ jobs:
             echo "metro.config.js not found"
           fi
 
+      - name: Link EAS project
+        run: eas init --non-interactive --force 
+
       - name: 📱 Build Development APK
         if: github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'dev' || github.event_name == 'push'
         run: |
