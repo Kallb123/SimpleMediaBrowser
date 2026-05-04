@@ -4,17 +4,46 @@ import { ThemedTextInput } from '@/components/ThemedTextInput';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
-import { FileScanner } from '@/scripts/FileScanner';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
+
+class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error.message || 'Unknown error' };
+  }
+
+  componentDidCatch(error: Error) {
+    logger.error('Settings', 'Render exception caught by SettingsErrorBoundary', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <ThemedView style={styles.crashContainer}>
+          <ThemedText type="title">Settings failed to load</ThemedText>
+          <ThemedText style={styles.emptyText}>Error: {this.state.message}</ThemedText>
+          <ThemedText style={styles.emptyText}>Open Debug Logs for stack details.</ThemedText>
+        </ThemedView>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 export default function SettingsPrompt() {
   const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -45,7 +74,7 @@ export default function SettingsPrompt() {
   const settingsViewScale = useSelector(selectViewScale);
   const settingsDefaultPage = useSelector(selectDefaultPage);
   const settingsEnableThumbnailGeneration = useSelector(selectEnableThumbnailGeneration);
-  
+
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
   const viewOrientationRef = useRef(null);
@@ -73,94 +102,167 @@ export default function SettingsPrompt() {
     {id: 'movies', label: 'Movies'},
   ];
 
+  const safeDecodeUri = useCallback((uri: string) => {
+    try {
+      return decodeURIComponent(uri);
+    } catch {
+      logger.warn('Settings', `Unable to decode source URI for display: ${uri}`);
+      return uri;
+    }
+  }, []);
+
+  const safeMediaSources = useMemo(() => {
+    try {
+      if (!Array.isArray(mediaSources)) {
+        logger.warn('Settings', 'mediaSources is not an array; falling back to empty list');
+        return [] as IMediaSource[];
+      }
+
+      const sanitised = mediaSources.filter((source): source is IMediaSource => {
+        if (!source || typeof source !== 'object') return false;
+        const uriOk = typeof source.uri === 'string' && source.uri.length > 0;
+        const typeOk = source.contentType === 'tv' || source.contentType === 'movie';
+        return uriOk && typeOk;
+      });
+
+      if (sanitised.length !== mediaSources.length) {
+        logger.warn('Settings', `Filtered out ${mediaSources.length - sanitised.length} invalid media source item(s)`);
+      }
+      return sanitised;
+    } catch (e) {
+      logger.error('Settings', 'Failed to sanitise mediaSources, using empty list', e as Error);
+      return [] as IMediaSource[];
+    }
+  }, [mediaSources]);
+
   useEffect(() => {
-    logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${mediaSources.length}, thumbnails=${settingsEnableThumbnailGeneration}`);
+    try {
+      logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${safeMediaSources.length}, thumbnails=${settingsEnableThumbnailGeneration}`);
+    } catch (e) {
+      logger.error('Settings', 'Exception while logging settings mount state', e as Error);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    setLocalPassword(settingsPassword);
-    setLocalTmdbApiKey(settingsTmdbApiKey);
-    if (dataSourceRef.current) (dataSourceRef.current as any).selectIndex(dataSourceOptions.findIndex(o => o.id === settingsDataSource));
-    if (mediaStructureRef.current) (mediaStructureRef.current as any).selectIndex(viewTypeOptions.findIndex(o => o.id === settingsMediaStructure));
-    if (viewOrientationRef.current) (viewOrientationRef.current as any).selectIndex(uiTypeOptions.findIndex(o => o.id === settingsViewOrientation));
-    if (defaultPageRef.current) (defaultPageRef.current as any).selectIndex(defaultPageOptions.findIndex(o => o.id === settingsDefaultPage));
-    setLocalViewScale(settingsViewScale);
-    setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
-    setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
+    try {
+      setLocalPassword(settingsPassword);
+      setLocalTmdbApiKey(settingsTmdbApiKey);
+      const dataSourceIndex = dataSourceOptions.findIndex(o => o.id === settingsDataSource);
+      if (dataSourceRef.current && dataSourceIndex >= 0) {
+        (dataSourceRef.current as any).selectIndex(dataSourceIndex);
+      }
+
+      const mediaStructureIndex = viewTypeOptions.findIndex(o => o.id === settingsMediaStructure);
+      if (mediaStructureRef.current && mediaStructureIndex >= 0) {
+        (mediaStructureRef.current as any).selectIndex(mediaStructureIndex);
+      }
+
+      const viewOrientationIndex = uiTypeOptions.findIndex(o => o.id === settingsViewOrientation);
+      if (viewOrientationRef.current && viewOrientationIndex >= 0) {
+        (viewOrientationRef.current as any).selectIndex(viewOrientationIndex);
+      }
+
+      const defaultPageIndex = defaultPageOptions.findIndex(o => o.id === settingsDefaultPage);
+      if (defaultPageRef.current && defaultPageIndex >= 0) {
+        (defaultPageRef.current as any).selectIndex(defaultPageIndex);
+      }
+
+      setLocalViewScale(settingsViewScale);
+      setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
+      setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
+    } catch (e) {
+      logger.error('Settings', 'Exception while syncing local settings state', e as Error);
+    }
   }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnableThumbnailGeneration]);
 
   const save = () => {
-    logger.log('Settings', 'Save pressed – evaluating changes');
-    let changeCount = 0;
-    const passwordToSave = password || null;
-    if (password !== null && passwordToSave !== settingsPassword) {
-      logger.log('Settings', 'Persisting: password changed');
-      dispatch(setPassword(passwordToSave));
-      changeCount++;
+    try {
+      logger.log('Settings', 'Save pressed – evaluating changes');
+      let changeCount = 0;
+      const passwordToSave = password || null;
+      if (password !== null && passwordToSave !== settingsPassword) {
+        logger.log('Settings', 'Persisting: password changed');
+        dispatch(setPassword(passwordToSave));
+        changeCount++;
+      }
+      if (dataSource && dataSource !== settingsDataSource) {
+        logger.log('Settings', `Persisting: dataSource changed ${settingsDataSource} → ${dataSource}`);
+        dispatch(setDataSource(dataSource));
+        changeCount++;
+      }
+      if (mediaStructure && mediaStructure !== settingsMediaStructure) {
+        logger.log('Settings', `Persisting: mediaStructure changed ${settingsMediaStructure} → ${mediaStructure}`);
+        dispatch(setMediaStructure(mediaStructure));
+        changeCount++;
+      }
+      if (viewOrientation && viewOrientation !== settingsViewOrientation) {
+        logger.log('Settings', `Persisting: viewOrientation changed ${settingsViewOrientation} → ${viewOrientation}`);
+        dispatch(setViewOrientation(viewOrientation));
+        changeCount++;
+      }
+      if (viewScale && viewScale !== settingsViewScale) {
+        logger.log('Settings', `Persisting: viewScale changed ${settingsViewScale} → ${viewScale}`);
+        dispatch(setViewScale(viewScale));
+        changeCount++;
+      }
+      if (tmdbApiKey !== settingsTmdbApiKey) {
+        logger.log('Settings', 'Persisting: tmdbApiKey changed');
+        dispatch(setTmdbApiKey(tmdbApiKey || null));
+        changeCount++;
+      }
+      if (defaultPage && defaultPage !== settingsDefaultPage) {
+        logger.log('Settings', `Persisting: defaultPage changed ${settingsDefaultPage} → ${defaultPage}`);
+        dispatch(setDefaultPage(defaultPage));
+        changeCount++;
+      }
+      if (enableThumbnailGeneration !== settingsEnableThumbnailGeneration) {
+        logger.log('Settings', `Persisting: enableThumbnailGeneration changed ${settingsEnableThumbnailGeneration} → ${enableThumbnailGeneration}`);
+        dispatch(setEnableThumbnailGeneration(enableThumbnailGeneration));
+        changeCount++;
+      }
+      logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
+      router.replace('/(drawer)');
+    } catch (e) {
+      logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-    if (dataSource && dataSource !== settingsDataSource) {
-      logger.log('Settings', `Persisting: dataSource changed ${settingsDataSource} → ${dataSource}`);
-      dispatch(setDataSource(dataSource));
-      changeCount++;
-    }
-    if (mediaStructure && mediaStructure !== settingsMediaStructure) {
-      logger.log('Settings', `Persisting: mediaStructure changed ${settingsMediaStructure} → ${mediaStructure}`);
-      dispatch(setMediaStructure(mediaStructure));
-      changeCount++;
-    }
-    if (viewOrientation && viewOrientation !== settingsViewOrientation) {
-      logger.log('Settings', `Persisting: viewOrientation changed ${settingsViewOrientation} → ${viewOrientation}`);
-      dispatch(setViewOrientation(viewOrientation));
-      changeCount++;
-    }
-    if (viewScale && viewScale !== settingsViewScale) {
-      logger.log('Settings', `Persisting: viewScale changed ${settingsViewScale} → ${viewScale}`);
-      dispatch(setViewScale(viewScale));
-      changeCount++;
-    }
-    if (tmdbApiKey !== settingsTmdbApiKey) {
-      logger.log('Settings', 'Persisting: tmdbApiKey changed');
-      dispatch(setTmdbApiKey(tmdbApiKey || null));
-      changeCount++;
-    }
-    if (defaultPage && defaultPage !== settingsDefaultPage) {
-      logger.log('Settings', `Persisting: defaultPage changed ${settingsDefaultPage} → ${defaultPage}`);
-      dispatch(setDefaultPage(defaultPage));
-      changeCount++;
-    }
-    if (enableThumbnailGeneration !== settingsEnableThumbnailGeneration) {
-      logger.log('Settings', `Persisting: enableThumbnailGeneration changed ${settingsEnableThumbnailGeneration} → ${enableThumbnailGeneration}`);
-      dispatch(setEnableThumbnailGeneration(enableThumbnailGeneration));
-      changeCount++;
-    }
-    logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
-    router.replace('/(drawer)')
   };
 
   const deleteSource = useCallback((uri: string) => {
-    logger.log('Settings', `Removing media source: ${uri}`);
-    dispatch(removeMediaSource(uri));
+    try {
+      logger.log('Settings', `Removing media source: ${uri}`);
+      dispatch(removeMediaSource(uri));
+    } catch (e) {
+      logger.error('Settings', 'Exception while removing media source', e as Error);
+    }
   }, [dispatch]);
 
   const scanNow = useCallback(async () => {
-    logger.log('Settings', `Manual rescan triggered for ${mediaSources.length} source(s)`);
-    setScanning(true);
-    setScanComplete(false);
     try {
-      await FileScanner.getInstance().scanAllSources(mediaSources);
+      logger.log('Settings', `Manual rescan triggered for ${safeMediaSources.length} source(s)`);
+      setScanning(true);
+      setScanComplete(false);
+      const scannerModule = await import('@/scripts/FileScanner');
+      await scannerModule.FileScanner.getInstance().scanAllSources(safeMediaSources);
       setScanComplete(true);
       setTimeout(() => setScanComplete(false), 4000);
+    } catch (e) {
+      logger.error('Settings', 'Exception while scanning sources', e as Error);
     } finally {
       setScanning(false);
     }
-  }, [mediaSources]);
+  }, [safeMediaSources]);
 
   const handleUIScaleChange = (value: number) => {
-    setLocalViewScale(11-value);
-  }
+    try {
+      setLocalViewScale(11 - value);
+    } catch (e) {
+      logger.error('Settings', 'Exception while applying UI scale change', e as Error);
+    }
+  };
   
   return (
+    <SettingsErrorBoundary>
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
       headerImage={<Ionicons size={310} name="code-slash" style={styles.headerImage} />}>
@@ -187,9 +289,13 @@ export default function SettingsPrompt() {
           <SelectDropdown
             ref={dataSourceRef}
             data={dataSourceOptions}
-            defaultValue={settingsDataSource}
+            defaultValue={dataSourceOptions.find(o => o.id === settingsDataSource)}
             onSelect={(selectedItem) => {
-              setLocalDataSource(selectedItem.id);
+              try {
+                setLocalDataSource(selectedItem.id);
+              } catch (e) {
+                logger.error('Settings', 'Exception while selecting data source', e as Error);
+              }
             }}
             renderButton={(selectedItem, isOpened) => (
               <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
@@ -226,14 +332,14 @@ export default function SettingsPrompt() {
       {/* Media Sources */}
       <ThemedView style={styles.sectionContainer}>
         <ThemedText type="subtitle">Media Sources</ThemedText>
-        {mediaSources.length === 0 && (
+        {safeMediaSources.length === 0 && (
           <ThemedText style={styles.emptyText}>No sources added yet.</ThemedText>
         )}
-        {mediaSources.map((source) => (
+        {safeMediaSources.map((source) => (
           <ThemedView key={source.uri} style={styles.sourceRow}>
             <ThemedView style={styles.sourceInfo}>
               <ThemedText style={styles.sourceType}>{source.contentType === 'tv' ? '📺 TV' : '🎬 Movies'}</ThemedText>
-              <ThemedText style={styles.sourceUri} numberOfLines={1}>{decodeURIComponent(source.uri)}</ThemedText>
+              <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
             </ThemedView>
             <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>
               <ThemedText style={styles.deleteButtonText}>✕</ThemedText>
@@ -257,7 +363,13 @@ export default function SettingsPrompt() {
           <ThemedText>Generate video thumbnails:</ThemedText>
           <Switch
             value={enableThumbnailGeneration}
-            onValueChange={setLocalEnableThumbnailGeneration}
+            onValueChange={(value) => {
+              try {
+                setLocalEnableThumbnailGeneration(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling thumbnail generation', e as Error);
+              }
+            }}
           />
         </ThemedView>
         <ThemedText style={styles.emptyText}>
@@ -271,10 +383,14 @@ export default function SettingsPrompt() {
         <SelectDropdown
           ref={mediaStructureRef}
           data={viewTypeOptions}
-          defaultValue={settingsMediaStructure}
+          defaultValue={viewTypeOptions.find(o => o.id === settingsMediaStructure)}
           onSelect={(selectedItem) => {
-            if (selectedItem.title) setStructureDescription(selectedItem.title);
-            setLocalMediaStructure(selectedItem.id);
+            try {
+              if (selectedItem.title) setStructureDescription(selectedItem.title);
+              setLocalMediaStructure(selectedItem.id);
+            } catch (e) {
+              logger.error('Settings', 'Exception while selecting media structure', e as Error);
+            }
           }}
           renderButton={(selectedItem, isOpened) => (
             <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
@@ -303,9 +419,13 @@ export default function SettingsPrompt() {
         <SelectDropdown
           ref={viewOrientationRef}
           data={uiTypeOptions}
-          defaultValue={settingsViewOrientation}
+          defaultValue={uiTypeOptions.find(o => o.id === settingsViewOrientation)}
           onSelect={(selectedItem) => {
-            setLocalViewOrientation(selectedItem.id);
+            try {
+              setLocalViewOrientation(selectedItem.id);
+            } catch (e) {
+              logger.error('Settings', 'Exception while selecting view orientation', e as Error);
+            }
           }}
           renderButton={(selectedItem, isOpened) => (
             <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
@@ -348,7 +468,11 @@ export default function SettingsPrompt() {
           data={defaultPageOptions}
           defaultValue={defaultPageOptions.find(o => o.id === settingsDefaultPage)}
           onSelect={(selectedItem) => {
-            setLocalDefaultPage(selectedItem.id as defaultPages);
+            try {
+              setLocalDefaultPage(selectedItem.id as defaultPages);
+            } catch (e) {
+              logger.error('Settings', 'Exception while selecting default page', e as Error);
+            }
           }}
           renderButton={(selectedItem, isOpened) => (
             <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
@@ -373,6 +497,7 @@ export default function SettingsPrompt() {
         <Button title="Save" onPress={save} />
       </ThemedView>
     </ParallaxScrollView>
+    </SettingsErrorBoundary>
   );
 }
 
@@ -382,6 +507,13 @@ const styles = StyleSheet.create({
     bottom: -90,
     left: -35,
     position: 'absolute',
+  },
+  crashContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    gap: 8,
   },
   titleContainer: {
     flexDirection: 'row',
@@ -461,9 +593,5 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '500',
-  },
-  dropdownItemIconStyle: {
-    fontSize: 28,
-    marginRight: 8,
   },
 });

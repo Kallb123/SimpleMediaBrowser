@@ -14,6 +14,7 @@ export default function LogsScreen() {
     const isDark = colorScheme === 'dark';
 
     const [lines, setLines] = useState<readonly string[]>([]);
+    const [diagnosticsText, setDiagnosticsText] = useState('');
     const [autoScroll, setAutoScroll] = useState(true);
     const [filter, setFilter] = useState<LogFilter>('ALL');
     const [searchText, setSearchText] = useState('');
@@ -21,6 +22,8 @@ export default function LogsScreen() {
 
     const refresh = useCallback(() => {
         setLines(logger.getLines());
+        const d = logger.getDiagnostics();
+        setDiagnosticsText(`exists=${d.fileExists} size=${d.fileSizeBytes} hydrated=${d.hydratedLineCount} hadPrevious=${d.hadPreviousLogFile}${d.lastHydrateError ? ` hydrateError=${d.lastHydrateError}` : ''}`);
     }, []);
 
     // Auto-refresh while the screen is mounted.
@@ -137,6 +140,9 @@ export default function LogsScreen() {
             {/* File path hint */}
             <ThemedText style={styles.pathHint} numberOfLines={2}>
                 File: {logger.getLogFilePath()}
+            </ThemedText>
+            <ThemedText style={styles.pathHint} numberOfLines={2}>
+                Hydration: {diagnosticsText}
             </ThemedText>
 
             {/* Log output */}

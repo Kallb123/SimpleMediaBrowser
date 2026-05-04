@@ -1,5 +1,6 @@
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { Drawer } from 'expo-router/drawer';
+import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { DrawerContentScrollView, DrawerItemList, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useEditMode } from '@/contexts/EditModeContext';
@@ -106,6 +107,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 export default function DrawerLayout() {
     const colorScheme = useColorScheme();
     const theme = (colorScheme ?? 'light') as 'light' | 'dark';
+  const settingsPassword = useSelector(selectPassword);
   
     return (
         <Drawer
@@ -140,6 +142,15 @@ export default function DrawerLayout() {
             options={{
                 drawerLabel: '⚙️ Settings',
                 title: "",
+            }}
+            listeners={{
+              drawerItemPress: (e) => {
+                if (!settingsPassword) {
+                  e.preventDefault();
+                  logger.log('Drawer', 'No settings password set – bypassing prompt and opening settings directly');
+                  router.push('/settings');
+                }
+              },
             }}
             />
             <Drawer.Screen

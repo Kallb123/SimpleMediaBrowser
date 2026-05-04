@@ -28,6 +28,28 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    const maybeErrorUtils = (globalThis as any).ErrorUtils;
+    if (!maybeErrorUtils || typeof maybeErrorUtils.getGlobalHandler !== 'function' || typeof maybeErrorUtils.setGlobalHandler !== 'function') {
+      return;
+    }
+
+    const previousHandler = maybeErrorUtils.getGlobalHandler();
+    maybeErrorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('Unhandled', `Uncaught exception (fatal=${Boolean(isFatal)}): ${err.message}`, err.stack ?? '(no stack)');
+      if (typeof previousHandler === 'function') {
+        previousHandler(error, isFatal);
+      }
+    });
+
+    return () => {
+      if (typeof previousHandler === 'function') {
+        maybeErrorUtils.setGlobalHandler(previousHandler);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (fontsLoaded) {
       logger.log('RootLayout', 'Fonts loaded');
       if (loaded) {

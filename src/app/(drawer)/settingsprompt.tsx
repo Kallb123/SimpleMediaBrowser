@@ -4,7 +4,7 @@ import { ThemedTextInput } from '@/components/ThemedTextInput';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { useSelector } from 'react-redux';
 import { selectPassword } from '@/store/settingsReducer';
@@ -12,25 +12,42 @@ import { logger } from '@/scripts/Logger';
 
 export default function SettingsPrompt() {
   const [password, setPassword] = useState("");
+  const hasAutoNavigatedRef = useRef(false);
 
   const settingsPassword = useSelector(selectPassword);
 
   useEffect(() => {
-    if (!settingsPassword) {
-      logger.log('SettingsPrompt', 'No password set – skipping prompt and navigating to settings');
-      router.replace('/settings');
+    try {
+      if (!settingsPassword) {
+        if (hasAutoNavigatedRef.current) {
+          return;
+        }
+        hasAutoNavigatedRef.current = true;
+        logger.log('SettingsPrompt', 'No password set – skipping prompt and navigating to settings (one-shot)');
+        const frame = requestAnimationFrame(() => {
+          router.push('/settings');
+        });
+        return () => cancelAnimationFrame(frame);
+      }
+      hasAutoNavigatedRef.current = false;
+    } catch (e) {
+      logger.error('SettingsPrompt', 'Error during auto-navigation to settings', e as Error);
     }
   }, [settingsPassword]);
 
   const goSettings = () => {
-    const storedPassword = settingsPassword ?? "";
-    if (password === storedPassword) {
-      logger.log('SettingsPrompt', 'Password accepted – navigating to settings');
-      router.replace('/settings');
-    } else {
-      logger.warn('SettingsPrompt', 'Password rejected – entered password does not match stored password');
-      // Toast
-      console.log(`Passwords don't match: ${password} - ${settingsPassword}`);
+    try {
+      const storedPassword = settingsPassword ?? "";
+      if (password === storedPassword) {
+        logger.log('SettingsPrompt', 'Password accepted – navigating to settings');
+        router.push('/settings');
+      } else {
+        logger.warn('SettingsPrompt', 'Password rejected – entered password does not match stored password');
+        // Toast
+        console.log(`Passwords don't match: ${password} - ${settingsPassword}`);
+      }
+    } catch (e) {
+      logger.error('SettingsPrompt', 'Error while validating password or navigating', e as Error);
     }
   };
   
