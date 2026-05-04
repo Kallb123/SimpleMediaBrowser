@@ -615,7 +615,7 @@ export class FileScanner {
     private async generateThumbnail(videoUri: string): Promise<VideoThumbnail | null> {
         const player = createVideoPlayer(videoUri);
         try {
-            const thumbnails = await player.generateThumbnailsAsync(5, { maxWidth: 640 });
+            const thumbnails = await player.generateThumbnailsAsync(11, { maxWidth: 640 });
             return thumbnails[0] ?? null;
         } finally {
             const releasable = player as unknown as {
