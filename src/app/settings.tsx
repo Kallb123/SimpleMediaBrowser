@@ -281,8 +281,37 @@ export default function SettingsPrompt() {
         />
       </ThemedView>
 
-      {/* Data source */}
+      {/* Media Sources */}
       <ThemedView style={styles.sectionContainer}>
+        <ThemedText type="subtitle">Media Sources</ThemedText>
+        {safeMediaSources.length === 0 && (
+          <ThemedText style={styles.emptyText}>No sources added yet.</ThemedText>
+        )}
+        {safeMediaSources.map((source) => (
+          <ThemedView key={source.uri} style={styles.sourceRow}>
+            <ThemedView style={styles.sourceInfo}>
+              <ThemedText style={styles.sourceType}>{source.contentType === 'tv' ? '📺 TV' : '🎬 Movies'}</ThemedText>
+              <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
+            </ThemedView>
+            <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>
+              <ThemedText style={styles.deleteButtonText}>✕</ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
+        ))}
+
+        {/* Add new source */}
+        <AddMediaSource />
+      </ThemedView>
+
+      {/* Rescan */}
+      <ThemedView style={styles.titleContainer}>
+        <Button title={scanning ? 'Scanning…' : 'Rescan now'} onPress={scanNow} disabled={scanning} />
+        {!scanning && scanComplete && <ThemedText style={styles.scanStatus}>✓ Scan complete</ThemedText>}
+      </ThemedView>
+
+      {/* Metadata */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText type="subtitle">Media Metadata</ThemedText>
         <ThemedView style={styles.titleContainer}>
           <ThemedText>Data source:</ThemedText>
           <SelectDropdown
@@ -328,34 +357,6 @@ export default function SettingsPrompt() {
         </ThemedText>
       </ThemedView>
 
-      {/* Media Sources */}
-      <ThemedView style={styles.sectionContainer}>
-        <ThemedText type="subtitle">Media Sources</ThemedText>
-        {safeMediaSources.length === 0 && (
-          <ThemedText style={styles.emptyText}>No sources added yet.</ThemedText>
-        )}
-        {safeMediaSources.map((source) => (
-          <ThemedView key={source.uri} style={styles.sourceRow}>
-            <ThemedView style={styles.sourceInfo}>
-              <ThemedText style={styles.sourceType}>{source.contentType === 'tv' ? '📺 TV' : '🎬 Movies'}</ThemedText>
-              <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
-            </ThemedView>
-            <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>
-              <ThemedText style={styles.deleteButtonText}>✕</ThemedText>
-            </TouchableOpacity>
-          </ThemedView>
-        ))}
-
-        {/* Add new source */}
-        <AddMediaSource />
-      </ThemedView>
-
-      {/* Rescan */}
-      <ThemedView style={styles.titleContainer}>
-        <Button title={scanning ? 'Scanning…' : 'Rescan now'} onPress={scanNow} disabled={scanning} />
-        {!scanning && scanComplete && <ThemedText style={styles.scanStatus}>✓ Scan complete</ThemedText>}
-      </ThemedView>
-
       {/* Thumbnail generation */}
       <ThemedView style={styles.sectionContainer}>
         <ThemedView style={styles.titleContainer}>
@@ -372,13 +373,14 @@ export default function SettingsPrompt() {
           />
         </ThemedView>
         <ThemedText style={styles.emptyText}>
-          Disabled by default. When off, scans skip thumbnail generation.
+          Disabled by default. When off, scans skip thumbnail generation. When on, scans generate thumbnails from the local video files.
         </ThemedText>
       </ThemedView>
 
       {/* Media structure */}
       <ThemedView style={styles.titleContainer}>
-        <ThemedText>Media structure (TV):</ThemedText>
+        <ThemedText type="subtitle">Appearance and Layout</ThemedText>
+        <ThemedText>TV Show Navigation Structure:</ThemedText>
         <SelectDropdown
           ref={mediaStructureRef}
           data={viewTypeOptions}
@@ -557,7 +559,7 @@ const styles = StyleSheet.create({
     color: '#E55',
   },
   dropdownButtonStyle: {
-    width: 140,
+    width: 220,
     height: 50,
     borderRadius: 12,
     flexDirection: 'row',
