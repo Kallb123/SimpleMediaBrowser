@@ -3,7 +3,7 @@ import { StorageAccessFramework } from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
+import { setScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason, MergeEpisodePayload } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
@@ -202,9 +202,6 @@ export class FileScanner {
         sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
         store.dispatch(setIsScanning(true));
         store.dispatch(setScanProgress({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
-        // Clear stale data so the UI transitions to the scanning view and items
-        // appear progressively as they are discovered rather than all at once.
-        store.dispatch(clearLibraryAndMovies());
         try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
