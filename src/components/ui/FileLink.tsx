@@ -1,6 +1,7 @@
 import { IMediaObject } from '@/scripts/FileScanner';
 import { ThemedText } from '../ThemedText';
-import { Linking, TouchableOpacity } from 'react-native';
+import { TouchableOpacity } from 'react-native';
+import { openMediaInExternalApp } from '@/scripts/openMedia';
 
 export type MediaItemProps =  {
   mediaObject: IMediaObject
@@ -8,7 +9,7 @@ export type MediaItemProps =  {
 
 export function FileLink({ mediaObject }: MediaItemProps) {
   const handlePress = () => {
-    Linking.openURL(mediaObject.path).catch((e) => console.error('Failed to open file:', e));
+    openMediaInExternalApp(mediaObject.path, mediaObject.filename).catch((e) => console.error('Failed to open file:', e));
   };
   return (
     <TouchableOpacity onPress={handlePress}>

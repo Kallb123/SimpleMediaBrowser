@@ -1,4 +1,5 @@
-import { BackHandler, Linking, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Image } from 'expo-image';
@@ -554,7 +555,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 ? item.onPress
                 : () => {
                     logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
-                    Linking.openURL(item.mediaObject.path).catch((e: unknown) => {
+                    openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
                       logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
                     });
                   };
