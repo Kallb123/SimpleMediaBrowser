@@ -18,7 +18,7 @@ export default function SettingsPrompt() {
   useEffect(() => {
     if (!settingsPassword) {
       logger.log('SettingsPrompt', 'No password set – skipping prompt and navigating to settings');
-      router.navigate('/settings');
+      router.replace('/settings');
     }
   }, [settingsPassword]);
 
@@ -26,7 +26,7 @@ export default function SettingsPrompt() {
     const storedPassword = settingsPassword ?? "";
     if (password === storedPassword) {
       logger.log('SettingsPrompt', 'Password accepted – navigating to settings');
-      router.navigate('/settings');
+      router.replace('/settings');
     } else {
       logger.warn('SettingsPrompt', 'Password rejected – entered password does not match stored password');
       // Toast
