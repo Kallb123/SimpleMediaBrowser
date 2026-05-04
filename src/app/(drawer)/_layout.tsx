@@ -117,7 +117,7 @@ export default function DrawerLayout() {
             <Drawer.Screen
             name="index"
             options={{
-                drawerLabel: 'Home',
+                drawerLabel: '🏠 Home',
                 title: "",
             }}
             />
@@ -138,7 +138,7 @@ export default function DrawerLayout() {
             <Drawer.Screen
             name="settingsprompt"
             options={{
-                drawerLabel: 'Settings',
+                drawerLabel: '⚙️ Settings',
                 title: "",
             }}
             />
