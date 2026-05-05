@@ -15,7 +15,7 @@ import { logger } from '@/scripts/Logger';
 const MAIN_ROUTES = ['index', 'tv', 'movies'];
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
-  const { editMode, setEditMode } = useEditMode();
+  const { editMode, setEditMode, drawerUnlocked, setDrawerUnlocked } = useEditMode();
   const settingsPassword = useSelector(selectPassword);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
@@ -32,8 +32,35 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     state: {
       ...props.state,
       routes: mainRoutes,
-      index: mainIndex >= 0 ? mainIndex : props.state.index,
+      index: mainIndex >= 0 ? mainIndex : 0,
     },
+  };
+
+  const resetPasswordModal = () => {
+    setShowPasswordModal(false);
+    setPasswordInput('');
+    setPasswordError('');
+  };
+
+  const handleUnlockPress = () => {
+    if (!settingsPassword) {
+      logger.log('Drawer', 'Drawer unlocked (no password set)');
+      setDrawerUnlocked(true);
+      return;
+    }
+    setPasswordInput('');
+    setPasswordError('');
+    setShowPasswordModal(true);
+  };
+
+  const handleLockPress = () => {
+    logger.log('Drawer', 'Drawer locked by user');
+    setDrawerUnlocked(false);
+    setEditMode(false);
+    resetPasswordModal();
+    if (currentRouteName === 'logs') {
+      props.navigation.navigate('index');
+    }
   };
 
   const handleEditModeToggle = () => {
@@ -42,24 +69,13 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       setEditMode(false);
       return;
     }
-    if (!settingsPassword) {
-      logger.log('Drawer', 'Edit mode enabled (no password set)');
-      setEditMode(true);
-      return;
-    }
-    setPasswordInput('');
-    setPasswordError('');
-    setShowPasswordModal(true);
+    logger.log('Drawer', 'Edit mode enabled');
+    setEditMode(true);
   };
 
   const handleSettingsPress = () => {
-    if (!settingsPassword) {
-      logger.log('Drawer', 'No settings password set – bypassing prompt and opening settings directly');
-      props.navigation.closeDrawer();
-      router.push('/settings');
-    } else {
-      props.navigation.navigate('settingsprompt');
-    }
+    props.navigation.closeDrawer();
+    router.push('/settings');
   };
 
   const handleLogsPress = () => {
@@ -68,21 +84,17 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
   const submitPassword = () => {
     if (passwordInput === settingsPassword) {
-      logger.log('Drawer', 'Edit mode password accepted – enabling edit mode');
-      setEditMode(true);
-      setShowPasswordModal(false);
-      setPasswordInput('');
-      setPasswordError('');
+      logger.log('Drawer', 'Drawer password accepted – unlocked protected actions');
+      setDrawerUnlocked(true);
+      resetPasswordModal();
     } else {
-      logger.warn('Drawer', 'Edit mode password rejected');
+      logger.warn('Drawer', 'Drawer password rejected');
       setPasswordError('Incorrect password.');
     }
   };
 
   const cancelPassword = () => {
-    setShowPasswordModal(false);
-    setPasswordInput('');
-    setPasswordError('');
+    resetPasswordModal();
   };
 
   return (
@@ -93,21 +105,35 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
       <View style={[styles.drawerSeparator, { backgroundColor: colorScheme === 'dark' ? '#444' : '#CCC' }]} />
 
-      <DrawerItem
-        label="⚙️ Settings"
-        onPress={handleSettingsPress}
-        focused={currentRouteName === 'settingsprompt'}
-      />
-      <DrawerItem
-        label="🪲 Debug Logs"
-        onPress={handleLogsPress}
-        focused={currentRouteName === 'logs'}
-      />
-      <DrawerItem
-        label={editMode ? '✏️ Exit Edit Mode' : '✏️ Enter Edit Mode'}
-        onPress={handleEditModeToggle}
-        labelStyle={editMode ? styles.editModeActiveLabel : undefined}
-      />
+      {drawerUnlocked ? (
+        <>
+          <DrawerItem
+            label="⚙️ Settings"
+            onPress={handleSettingsPress}
+          />
+          <DrawerItem
+            label="🪲 Debug Logs"
+            onPress={handleLogsPress}
+            focused={currentRouteName === 'logs'}
+          />
+          <DrawerItem
+            label={editMode ? '✏️ Exit Edit Mode' : '✏️ Enter Edit Mode'}
+            onPress={handleEditModeToggle}
+            labelStyle={editMode ? styles.editModeActiveLabel : undefined}
+          />
+          <DrawerItem
+            label="🔒 Lock"
+            onPress={handleLockPress}
+            labelStyle={styles.lockLabel}
+          />
+        </>
+      ) : (
+        <DrawerItem
+          label="🔓 Unlock"
+          onPress={handleUnlockPress}
+          labelStyle={styles.unlockLabel}
+        />
+      )}
 
       {/* Password prompt modal */}
       <Modal
@@ -117,9 +143,9 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         onRequestClose={cancelPassword}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
+          <View style={[styles.modalBox, { backgroundColor: colorScheme === 'dark' ? '#1E2022' : '#fff' }]}>
             <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
-            <ThemedText style={styles.modalSubtitle}>Edit mode requires the settings password.</ThemedText>
+            <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>
             <ThemedTextInput
               value={passwordInput}
               onChangeText={(v) => {
@@ -136,7 +162,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
               <ThemedText style={styles.errorText}>{passwordError}</ThemedText>
             )}
             <View style={styles.modalButtons}>
-              <TouchableOpacity onPress={cancelPassword} style={styles.modalButton}>
+              <TouchableOpacity onPress={cancelPassword} style={[styles.modalButton, { borderColor: colorScheme === 'dark' ? '#555' : '#CCC' }]}>
                 <ThemedText>Cancel</ThemedText>
               </TouchableOpacity>
               <TouchableOpacity onPress={submitPassword} style={[styles.modalButton, styles.modalButtonPrimary]}>
@@ -183,13 +209,6 @@ export default function DrawerLayout() {
             }}
             />
             <Drawer.Screen
-            name="settingsprompt"
-            options={{
-                drawerLabel: '⚙️ Settings',
-                title: "",
-            }}
-            />
-            <Drawer.Screen
             name="logs"
             options={{
                 drawerLabel: '🪲 Debug Logs',
@@ -216,6 +235,14 @@ const styles = StyleSheet.create({
     color: '#E55',
     fontWeight: '700',
   },
+  unlockLabel: {
+    color: '#0a7ea4',
+    fontWeight: '700',
+  },
+  lockLabel: {
+    color: '#E55',
+    fontWeight: '700',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -223,7 +250,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalBox: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
     width: '80%',
@@ -231,17 +257,13 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     textAlign: 'center',
-    color: '#11181C',
   },
   modalSubtitle: {
     textAlign: 'center',
     opacity: 0.7,
-    color: '#11181C',
   },
   modalInput: {
-    color: '#11181C',
-    backgroundColor: '#F5F5F5',
-    borderColor: '#CCC',
+    paddingVertical: 12,
   },
   errorText: {
     color: '#E55',
@@ -259,7 +281,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#CCC',
   },
   modalButtonPrimary: {
     backgroundColor: '#0a7ea4',

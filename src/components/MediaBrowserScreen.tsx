@@ -7,7 +7,7 @@ import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
+import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
@@ -28,7 +28,7 @@ type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' }
+  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season'; count?: number }
   | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
@@ -164,16 +164,24 @@ function buildDisplayItems(
       if (navStack.length === 0) {
         // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
-          .map((showName) => ({
-            kind: 'folder' as const,
-            label: showDisplayLabel(showName, overrides),
-            sortKey: showSortKey(showName, overrides),
-            key: showName,
-            posterUri: overrides[`show:${showName}`]?.poster || library[showName].poster || undefined,
-            thumbnailUri: pickShowThumbnail(library, showName),
-            onPress: () => navigateInto({ label: showName, showName }),
-            mediaType: 'show' as const,
-          }));
+          .map((showName) => {
+            const show = library[showName];
+            const episodeCount = Object.values(show.seasons).reduce(
+              (sum, season) => sum + Object.keys(season.episodes).length,
+              0,
+            );
+            return {
+              kind: 'folder' as const,
+              label: showDisplayLabel(showName, overrides),
+              sortKey: showSortKey(showName, overrides),
+              key: showName,
+              posterUri: overrides[`show:${showName}`]?.poster || show.poster || undefined,
+              thumbnailUri: pickShowThumbnail(library, showName),
+              onPress: () => navigateInto({ label: showName, showName }),
+              mediaType: 'show' as const,
+              count: episodeCount,
+            };
+          });
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
@@ -234,6 +242,7 @@ function buildDisplayItems(
               thumbnailUri: firstEpThumb,
               onPress: () => navigateInto({ label, showName, seasonKey }),
               mediaType: 'season',
+              count: Object.keys(season.episodes).length,
             });
           }
         }
@@ -285,6 +294,10 @@ function buildDisplayItems(
             thumbnailUri: pickShowThumbnail(library, showName),
             onPress: () => navigateInto({ label: showName, showName }),
             mediaType: 'show' as const,
+            count: Object.values(library[showName].seasons).reduce(
+              (sum, season) => sum + Object.keys(season.episodes).length,
+              0,
+            ),
           }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
@@ -325,6 +338,7 @@ function buildDisplayItems(
                   seasonKey,
                 }),
               mediaType: 'season' as const,
+              count: Object.keys(season.episodes).length,
             };
           });
       }
@@ -387,7 +401,6 @@ interface MediaBrowserScreenProps {
 
 export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const mediaSources = useSelector(selectMediaSources);
-  const settingsPassword = useSelector(selectPassword);
   const viewType = useSelector(selectMediaStructure);
   const viewScale = useSelector(selectViewScale);
   const viewOrientation = useSelector(selectViewOrientation);
@@ -633,6 +646,15 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                         <ThemedText style={styles.editOverlayIcon}>✏️</ThemedText>
                       </View>
                     )}
+                    {/* Entry count badge for show/season folders */}
+                    {item.kind === 'folder' && item.count !== undefined && (
+                      <View
+                        style={styles.countBadge}
+                        accessibilityLabel={`${item.count} ${item.count === 1 ? 'episode' : 'episodes'}`}
+                      >
+                        <ThemedText style={styles.countBadgeText}>{item.count}</ThemedText>
+                      </View>
+                    )}
                   </View>
                   <ThemedText style={styles.cardLabel} numberOfLines={2}>
                     {item.label}
@@ -702,7 +724,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           {mediaSources.length > 0 ? (
             <ThemedText>
               Your library directories are empty or invalid, check them in{' '}
-              <Link href={settingsPassword ? '/(drawer)/settingsprompt' : '/settings'}>
+              <Link href="/settings">
                 Settings
               </Link>
               .
@@ -710,7 +732,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           ) : (
             <ThemedText>
               You need to set up a library directory in{' '}
-              <Link href={settingsPassword ? '/(drawer)/settingsprompt' : '/settings'}>
+              <Link href="/settings">
                 Settings
               </Link>
               .
@@ -794,6 +816,20 @@ const styles = StyleSheet.create({
   },
   editOverlayIcon: {
     fontSize: 14,
+  },
+  countBadge: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  countBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
   },
   stepContainer: {
     gap: 8,
