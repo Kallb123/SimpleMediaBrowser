@@ -190,7 +190,7 @@ export class MetadataService {
             const searchTitle = movie.title || movie.filename.replace(/\.[^.]+$/, '');
             try {
                 // Honour a user-set poster override (from manual TMDB rematch or local browse).
-                const overridePoster = overrides[`movie:${movie.path}`]?.poster;
+                const overridePoster = overrides[`movie:${movie.parsedPath}`]?.poster;
                 if (overridePoster) {
                     if (new File(overridePoster).exists) {
                         store.dispatch(updateMovieMetadata({ path: movie.path, tmdbId: movie.ids.tmdb ?? '', poster: overridePoster }));

@@ -178,9 +178,9 @@ export default function EditItemScreen() {
       const showName = itemKey.replace(/^show:/, '');
       dispatch(updateShowMetadata({ showName, tmdbId: mediaLibrary[showName]?.ids.tmdb ?? '', poster: localUri }));
     } else if (itemType === 'movie') {
-      const path = itemKey.replace(/^movie:/, '');
-      const movie = movies.find((m) => m.path === path);
-      dispatch(updateMovieMetadata({ path, tmdbId: movie?.ids.tmdb ?? '', poster: localUri }));
+      const parsedPath = itemKey.replace(/^movie:/, '');
+      const movie = movies.find((m) => m.parsedPath === parsedPath);
+      dispatch(updateMovieMetadata({ path: movie?.path ?? parsedPath, tmdbId: movie?.ids.tmdb ?? '', poster: localUri }));
     }
     // Persist the poster URI in mediaOverrides so it survives rescans.
     dispatch(setMediaOverride({ key: itemKey, override: { poster: localUri } }));
