@@ -252,8 +252,9 @@ export default function EditItemScreen() {
       setPostersByResultId((prev) => ({ ...prev, [id]: resolved }));
     } catch (e) {
       logger.warn('EditItem', 'Failed to fetch TMDB images', e);
-      const fallback = result.poster_path ? [result.poster_path] : [];
-      setPostersByResultId((prev) => ({ ...prev, [id]: fallback }));
+      // Do not cache on error so the user can retry by collapsing and re-expanding.
+      // Clear the expanded state so the gallery is closed on failure.
+      setExpandedResultId(null);
     } finally {
       setLoadingPostersForId(null);
     }
@@ -476,7 +477,9 @@ export default function EditItemScreen() {
                             {isLoadingPosters
                               ? 'Loading posters…'
                               : posterCount !== null
-                                ? `${posterCount} poster${posterCount !== 1 ? 's' : ''} available`
+                                ? posterCount === 0
+                                  ? 'No posters available'
+                                  : `${posterCount} poster${posterCount !== 1 ? 's' : ''} available`
                                 : isExpanded
                                   ? '…'
                                   : 'Tap to browse posters'}
