@@ -569,8 +569,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const hasBothImages = hasPoster && !!item.thumbnailUri;
               const isRevealed = pressedKey === item.key;
               // Items with a poster show the poster by default; long-press reveals the video thumbnail (unless in edit mode).
-              const displaySource = hasPoster && !isRevealed
-                ? { uri: item.posterUri as string }
+              const displaySource = item.posterUri && !isRevealed
+                ? { uri: item.posterUri }
                 : typeof item.thumbnailUri === 'string'
                   ? { uri: item.thumbnailUri }
                   : item.thumbnailUri; // VideoThumbnail (SharedRef) passed directly to expo-image
