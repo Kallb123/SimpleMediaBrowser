@@ -63,7 +63,7 @@ function showSortKey(showName: string, overrides: { [key: string]: IMediaOverrid
 
 /** Returns the effective sort key for a movie (sortTitle > title override > title > filename). */
 function movieSortKey(movie: IMediaObject, overrides: { [key: string]: IMediaOverride }): string {
-  const o = overrides[`movie:${movie.path}`];
+  const o = overrides[`movie:${movie.parsedPath}`];
   return o?.sortTitle ?? o?.title ?? movie.title ?? movie.filename;
 }
 
@@ -76,8 +76,8 @@ function compareEpisodes(
   b: IMediaObject,
   overrides: { [key: string]: IMediaOverride },
 ): number {
-  const aO = overrides[`episode:${a.path}`];
-  const bO = overrides[`episode:${b.path}`];
+  const aO = overrides[`episode:${a.parsedPath}`];
+  const bO = overrides[`episode:${b.parsedPath}`];
   const aSortTitle = aO?.sortTitle;
   const bSortTitle = bO?.sortTitle;
   if (aSortTitle || bSortTitle) {
@@ -94,7 +94,7 @@ const NATURAL_SORT_OPTS: Intl.CollatorOptions = { numeric: true, sensitivity: 'b
 
 /** Returns the effective display label for an episode, applying overrides to the title portion. */
 function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }, prefix: string): string {
-  const override = overrides[`episode:${ep.path}`];
+  const override = overrides[`episode:${ep.parsedPath}`];
   const title = override?.title ?? ep.title;
   if (prefix) {
     return title ? `${prefix} - ${title}` : prefix;
@@ -104,7 +104,7 @@ function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMedi
 
 /** Returns the effective display label for a movie, applying overrides if present. */
 function movieDisplayLabel(movie: IMediaObject, overrides: { [key: string]: IMediaOverride }): string {
-  return overrides[`movie:${movie.path}`]?.title ?? movie.title ?? movie.filename;
+  return overrides[`movie:${movie.parsedPath}`]?.title ?? movie.title ?? movie.filename;
 }
 
 function buildDisplayItems(
@@ -132,7 +132,7 @@ function buildDisplayItems(
             items.push({
               kind: 'file',
               label: episodeDisplayLabel(ep, overrides, displayPrefix),
-              sortKey: sortPrefix || overrides[`episode:${ep.path}`]?.sortTitle || ep.title || ep.filename,
+              sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.title || ep.filename,
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
               mediaObject: ep,
@@ -148,7 +148,7 @@ function buildDisplayItems(
           sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
-          posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
+          posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie',
         });
@@ -180,7 +180,7 @@ function buildDisplayItems(
           sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
-          posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
+          posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
         }));
@@ -243,7 +243,7 @@ function buildDisplayItems(
           sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
-          posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
+          posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
         }));
@@ -292,7 +292,7 @@ function buildDisplayItems(
           sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
-          posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
+          posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
         }));
@@ -486,7 +486,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       itemKey = `show:${item.key}`;
     } else if (item.kind === 'file') {
       itemType = item.mediaType === 'movie' ? 'movie' : 'episode';
-      itemKey = `${item.mediaType}:${item.mediaObject.path}`;
+      itemKey = `${item.mediaType}:${item.mediaObject.parsedPath}`;
     } else {
       // Season folders are not editable
       return;
