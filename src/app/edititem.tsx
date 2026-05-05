@@ -136,7 +136,9 @@ export default function EditItemScreen() {
   const [searchError, setSearchError] = useState('');
   const [applyingMatch, setApplyingMatch] = useState(false);
   const [matchApplied, setMatchApplied] = useState<number | null>(null);
-  const [selectedPosterPath, setSelectedPosterPath] = useState<string | null>(null);
+  // Tracks which specific poster was last applied, scoped to a result ID to avoid
+  // false highlights if two results share the same poster path.
+  const [selectedPoster, setSelectedPoster] = useState<{ resultId: number; posterPath: string } | null>(null);
 
   // Per-result expandable poster gallery
   const [expandedResultId, setExpandedResultId] = useState<number | null>(null);
@@ -249,7 +251,11 @@ export default function EditItemScreen() {
       const paths = (data.posters ?? []).map((p: { file_path: string }) => p.file_path) as string[];
       // Fall back to the search-result thumbnail if no dedicated posters are returned.
       const resolved = paths.length > 0 ? paths : (result.poster_path ? [result.poster_path] : []);
-      setPostersByResultId((prev) => ({ ...prev, [id]: resolved }));
+      // Only cache when there's something to show; an empty result is not cached
+      // so the user can retry by collapsing and re-expanding.
+      if (resolved.length > 0) {
+        setPostersByResultId((prev) => ({ ...prev, [id]: resolved }));
+      }
     } catch (e) {
       logger.warn('EditItem', 'Failed to fetch TMDB images', e);
       // Do not cache on error so the user can retry by collapsing and re-expanding.
@@ -285,7 +291,7 @@ export default function EditItemScreen() {
 
       dispatch(setMediaOverride({ key: itemKey, override: { tmdbId, year } }));
       setMatchApplied(result.id);
-      setSelectedPosterPath(posterPath);
+      setSelectedPoster({ resultId: result.id, posterPath });
       logger.log('EditItem', `Poster applied: TMDB ID ${tmdbId}, path=${posterPath}, year=${year}`);
     } catch (e) {
       logger.error('EditItem', 'Failed to apply poster', e);
@@ -503,7 +509,10 @@ export default function EditItemScreen() {
                               showsHorizontalScrollIndicator={false}
                               contentContainerStyle={styles.posterGalleryContent}
                               renderItem={({ item: posterPath }) => {
-                                const isChosen = isMatched && selectedPosterPath === posterPath;
+                                const isChosen =
+                                    isMatched &&
+                                    selectedPoster?.resultId === item.id &&
+                                    selectedPoster?.posterPath === posterPath;
                                 return (
                                   <TouchableOpacity
                                     onPress={() => handleSelectPoster(item, posterPath)}
