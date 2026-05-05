@@ -12,12 +12,29 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { logger } from '@/scripts/Logger';
 
+const MAIN_ROUTES = ['index', 'tv', 'movies'];
+
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { editMode, setEditMode } = useEditMode();
   const settingsPassword = useSelector(selectPassword);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const colorScheme = useColorScheme() ?? 'light';
+
+  const currentRouteName = props.state.routes[props.state.index]?.name;
+
+  // Only show Home, TV, Movies in the main list; adjust index to match filtered routes
+  const mainRoutes = props.state.routes.filter(r => MAIN_ROUTES.includes(r.name));
+  const mainIndex = mainRoutes.findIndex(r => r.name === currentRouteName);
+  const mainProps = {
+    ...props,
+    state: {
+      ...props.state,
+      routes: mainRoutes,
+      index: mainIndex >= 0 ? mainIndex : props.state.index,
+    },
+  };
 
   const handleEditModeToggle = () => {
     if (editMode) {
@@ -33,6 +50,20 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     setPasswordInput('');
     setPasswordError('');
     setShowPasswordModal(true);
+  };
+
+  const handleSettingsPress = () => {
+    if (!settingsPassword) {
+      logger.log('Drawer', 'No settings password set – bypassing prompt and opening settings directly');
+      props.navigation.closeDrawer();
+      router.push('/settings');
+    } else {
+      props.navigation.navigate('settingsprompt');
+    }
+  };
+
+  const handleLogsPress = () => {
+    props.navigation.navigate('logs');
   };
 
   const submitPassword = () => {
@@ -55,10 +86,25 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
   };
 
   return (
-    <DrawerContentScrollView {...props}>
-      <DrawerItemList {...props} />
+    <DrawerContentScrollView {...props} contentContainerStyle={styles.drawerContent}>
+      <DrawerItemList {...mainProps} />
+
+      <View style={styles.drawerSpacer} />
+
+      <View style={[styles.drawerSeparator, { backgroundColor: colorScheme === 'dark' ? '#444' : '#CCC' }]} />
+
       <DrawerItem
-        label={editMode ? '✏️ Exit Edit Mode' : '✏️ Edit Mode'}
+        label="⚙️ Settings"
+        onPress={handleSettingsPress}
+        focused={currentRouteName === 'settingsprompt'}
+      />
+      <DrawerItem
+        label="🪲 Debug Logs"
+        onPress={handleLogsPress}
+        focused={currentRouteName === 'logs'}
+      />
+      <DrawerItem
+        label={editMode ? '✏️ Exit Edit Mode' : '✏️ Enter Edit Mode'}
         onPress={handleEditModeToggle}
         labelStyle={editMode ? styles.editModeActiveLabel : undefined}
       />
@@ -107,7 +153,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 export default function DrawerLayout() {
     const colorScheme = useColorScheme();
     const theme = (colorScheme ?? 'light') as 'light' | 'dark';
-  const settingsPassword = useSelector(selectPassword);
   
     return (
         <Drawer
@@ -143,15 +188,6 @@ export default function DrawerLayout() {
                 drawerLabel: '⚙️ Settings',
                 title: "",
             }}
-            listeners={{
-              drawerItemPress: (e) => {
-                if (!settingsPassword) {
-                  e.preventDefault();
-                  logger.log('Drawer', 'No settings password set – bypassing prompt and opening settings directly');
-                  router.push('/settings');
-                }
-              },
-            }}
             />
             <Drawer.Screen
             name="logs"
@@ -165,6 +201,17 @@ export default function DrawerLayout() {
 }
 
 const styles = StyleSheet.create({
+  drawerContent: {
+    flexGrow: 1,
+  },
+  drawerSpacer: {
+    flex: 1,
+  },
+  drawerSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
+    marginVertical: 8,
+  },
   editModeActiveLabel: {
     color: '#E55',
     fontWeight: '700',
