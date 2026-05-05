@@ -1,4 +1,6 @@
-import { StyleSheet, Button, Switch, ScrollView } from 'react-native';
+import { StyleSheet, Button, Switch, ScrollView, View, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HelloWave } from '@/components/HelloWave';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -13,12 +15,15 @@ import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 
+const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
+
 export default function FirstTime() {
   const [password, onChangePassword] = useState(null as string | null);
   const [sourceAdded, setSourceAdded] = useState(false);
   const [enableThumbnailGeneration, setEnableThumbnailGenerationLocal] = useState(false);
   const dispatch = useDispatch();
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
+  const insets = useSafeAreaInsets();
 
   logger.log('FirstTime', 'FirstTime screen rendered');
 
@@ -33,72 +38,119 @@ export default function FirstTime() {
     router.replace('/(drawer)');
   }, [password, enableThumbnailGeneration, dispatch]);
 
+  const contentPlatformStyle = Platform.select({
+    android: {
+      paddingTop: insets.top,
+    },
+    default: {},
+  });
+
   return (
-    <ScrollView contentContainerStyle={styles.contentContainer}>
-      <ThemedView style={styles.titleContainer}>
+    <SafeAreaView style={styles.container}>
+    <ThemedView style={styles.container}>
+    <ScrollView contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
+      <View style={styles.header}>
         <ThemedText type="title">Welcome to Simple Media Browser</ThemedText>
         <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Add a media source:</ThemedText>
-      </ThemedView>
-      <AddMediaSource onAdded={(source) => {
+      </View>
+
+      {/* Settings Password */}
+      <View style={styles.section}>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>Settings password (optional):</ThemedText>
+        <View style={styles.field}>
+          <ThemedTextInput
+            onChangeText={onChangePassword}
+            value={password ?? ""}
+            placeholder="Leave blank for no password"
+            keyboardType="default"
+            secureTextEntry={true}
+          />
+        </View>
+      </View>
+
+      {/* Add Media Source */}
+      <View style={styles.section}>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>Add a media source:</ThemedText>
+        <AddMediaSource onAdded={(source) => {
           logger.log('FirstTime', `Media source added: type=${source.contentType} uri=${source.uri}`);
           setSourceAdded(true);
         }} />
-      {sourceAdded && (
-        <ThemedText style={styles.addedNote} accessibilityLabel="Source added successfully. You can add more in Settings later.">
-          ✓ Source added. You can add more in Settings later.
-        </ThemedText>
-      )}
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Settings password (optional):</ThemedText>
-        <ThemedTextInput
-          onChangeText={onChangePassword}
-          value={password ?? ""}
-          placeholder="Leave blank for no password"
-          keyboardType="default"
-          secureTextEntry={true}
-        />
-      </ThemedView>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText>Generate video thumbnails:</ThemedText>
-        <Switch
-          value={enableThumbnailGeneration}
-          onValueChange={setEnableThumbnailGenerationLocal}
-        />
-      </ThemedView>
-      <ThemedText style={styles.addedNote}>
-        Off by default. You can change this later in Settings.
-      </ThemedText>
-      <ThemedView style={styles.titleContainer}>
+        {sourceAdded && (
+          <ThemedText style={styles.addedNote} accessibilityLabel="Source added successfully. You can add more in Settings later.">
+            ✓ Source added. You can add more in Settings later.
+          </ThemedText>
+        )}
+      </View>
+
+      {/* Thumbnail Generation */}
+      <View style={styles.section}>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>Generate video thumbnails:</ThemedText>
+        <View style={styles.row}>
+          <Switch
+            value={enableThumbnailGeneration}
+            onValueChange={setEnableThumbnailGenerationLocal}
+          />
+          <ThemedText style={styles.emptyText}>Off by default. You can change this later in Settings.</ThemedText>
+        </View>
+      </View>
+
+      {/* Action Button */}
+      <View style={styles.section}>
         <Button
-            title="Finished, Go Home"
-            onPress={finishedGoHome}
+          title="Finished, Go Home"
+          onPress={finishedGoHome}
         />
-      </ThemedView>
-      <ThemedView style={styles.footerContainer}>
+      </View>
+
+      {/* Footer */}
+      <View style={styles.footerContainer}>
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
-      </ThemedView>
+      </View>
     </ScrollView>
+    </ThemedView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  contentContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 24,
-    gap: 12,
+  container: {
+    flex: 1,
   },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  contentContainer: {
+    padding: 20,
+    gap: 0,
+  },
+  header: {
     gap: 8,
+    marginBottom: 8,
+  },
+  section: {
+    gap: 12,
+    paddingTop: 20,
+    paddingBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: DIVIDER_COLOR,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    marginBottom: 2,
+  },
+  field: {
+    gap: 6,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
   },
   addedNote: {
     fontSize: 13,
     opacity: 0.7,
+  },
+  emptyText: {
+    opacity: 0.5,
+    fontStyle: 'italic',
+    fontSize: 13,
   },
   footerContainer: {
     marginTop: 24,

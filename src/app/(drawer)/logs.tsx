@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, Share, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { router } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { logger } from '@/scripts/Logger';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useEditMode } from '@/contexts/EditModeContext';
 
 const REFRESH_INTERVAL_MS = 2000;
 
@@ -12,6 +14,7 @@ type LogFilter = 'ALL' | 'LOG' | 'WARN' | 'ERROR';
 export default function LogsScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isDark = colorScheme === 'dark';
+    const { drawerUnlocked } = useEditMode();
 
     const [lines, setLines] = useState<readonly string[]>([]);
     const [diagnosticsText, setDiagnosticsText] = useState('');
@@ -25,6 +28,13 @@ export default function LogsScreen() {
         const d = logger.getDiagnostics();
         setDiagnosticsText(`exists=${d.fileExists} size=${d.fileSizeBytes} hydrated=${d.hydratedLineCount} hadPrevious=${d.hadPreviousLogFile}${d.lastHydrateError ? ` hydrateError=${d.lastHydrateError}` : ''}`);
     }, []);
+
+    useEffect(() => {
+        if (!drawerUnlocked) {
+            logger.warn('Logs', 'Blocked logs access while drawer is locked');
+            router.replace('/(drawer)');
+        }
+    }, [drawerUnlocked]);
 
     // Auto-refresh while the screen is mounted.
     useEffect(() => {

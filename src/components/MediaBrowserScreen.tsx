@@ -7,7 +7,7 @@ import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectPassword, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
+import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
@@ -401,7 +401,6 @@ interface MediaBrowserScreenProps {
 
 export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const mediaSources = useSelector(selectMediaSources);
-  const settingsPassword = useSelector(selectPassword);
   const viewType = useSelector(selectMediaStructure);
   const viewScale = useSelector(selectViewScale);
   const viewOrientation = useSelector(selectViewOrientation);
@@ -725,7 +724,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           {mediaSources.length > 0 ? (
             <ThemedText>
               Your library directories are empty or invalid, check them in{' '}
-              <Link href={settingsPassword ? '/(drawer)/settingsprompt' : '/settings'}>
+              <Link href="/settings">
                 Settings
               </Link>
               .
@@ -733,7 +732,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           ) : (
             <ThemedText>
               You need to set up a library directory in{' '}
-              <Link href={settingsPassword ? '/(drawer)/settingsprompt' : '/settings'}>
+              <Link href="/settings">
                 Settings
               </Link>
               .
