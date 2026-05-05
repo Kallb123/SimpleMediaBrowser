@@ -34,6 +34,12 @@ export interface IMediaShow {
     year: number;
     poster: string;
     seasons: { [season: string] : IMediaSeason; };
+    /**
+     * Raw folder / filename names that were merged under this canonical show
+     * entry via name normalization (e.g. "Bluey (2018)" merged into "Bluey").
+     * Populated during scanning; useful for debugging and the edit screen.
+     */
+    rawNames?: string[];
 }
 
 export interface IMediaSeason {
@@ -54,7 +60,16 @@ export type IRawScanList = string[];
  * a separate type module.
  */
 export interface MergeEpisodePayload {
+  /** Normalized (canonical) show name used as the Redux library key. */
   showName: string;
+  /**
+   * Raw folder / filename name before year-suffix normalization.
+   * E.g. "Bluey (2018)" when showName is "Bluey".
+   * Equal to showName when no normalization was applied.
+   */
+  rawShowName: string;
+  /** Year extracted from the raw show name/folder suffix (0 if not present). */
+  folderYear: number;
   /** Local poster URI for the show folder (empty string when not yet found). */
   folderPoster: string;
   seasonKey: string;
@@ -160,11 +175,13 @@ export const settingsSlice = createSlice({
     clearThumbnails: (state) => {
       state.thumbnails = {};
     },
-    updateShowMetadata: (state, action: PayloadAction<{ showName: string; tmdbId: string; poster: string }>) => {
+    updateShowMetadata: (state, action: PayloadAction<{ showName: string; tmdbId: string; poster: string; title?: string; year?: number }>) => {
       const show = state.mediaLibrary[action.payload.showName];
       if (show) {
         show.ids.tmdb = action.payload.tmdbId;
         show.poster = action.payload.poster;
+        if (action.payload.title) show.title = action.payload.title;
+        if (action.payload.year) show.year = action.payload.year;
       } else {
         console.warn(`[libraryReducer] updateShowMetadata: show "${action.payload.showName}" not found`);
       }
@@ -199,18 +216,33 @@ export const settingsSlice = createSlice({
      * Used to stream discovered episodes to the UI during scanning.
      */
     mergeEpisodeBatch: (state, action: PayloadAction<MergeEpisodePayload[]>) => {
-      for (const { showName, folderPoster, seasonKey, seasonNumber, episodeKey, episode } of action.payload) {
+      for (const { showName, rawShowName, folderYear, folderPoster, seasonKey, seasonNumber, episodeKey, episode } of action.payload) {
         if (!state.mediaLibrary[showName]) {
           state.mediaLibrary[showName] = {
             ids: { tvdb: null, imdb: null, tmdb: null },
             title: showName,
-            year: 0,
+            year: folderYear,
             poster: folderPoster,
             seasons: {},
+            rawNames: rawShowName !== showName ? [rawShowName] : [],
           };
-        } else if (folderPoster && !state.mediaLibrary[showName].poster) {
-          // Back-fill poster for a show that was created without one
-          state.mediaLibrary[showName].poster = folderPoster;
+        } else {
+          if (folderPoster && !state.mediaLibrary[showName].poster) {
+            // Back-fill poster for a show that was created without one
+            state.mediaLibrary[showName].poster = folderPoster;
+          }
+          if (folderYear > 0 && !state.mediaLibrary[showName].year) {
+            // Back-fill year extracted from folder name
+            state.mediaLibrary[showName].year = folderYear;
+          }
+          // Track raw names that were merged under this canonical key
+          if (rawShowName !== showName) {
+            if (!state.mediaLibrary[showName].rawNames) {
+              state.mediaLibrary[showName].rawNames = [rawShowName];
+            } else if (!state.mediaLibrary[showName].rawNames!.includes(rawShowName)) {
+              state.mediaLibrary[showName].rawNames!.push(rawShowName);
+            }
+          }
         }
         if (!state.mediaLibrary[showName].seasons[seasonKey]) {
           state.mediaLibrary[showName].seasons[seasonKey] = {
@@ -248,6 +280,47 @@ export const settingsSlice = createSlice({
       if (movie) movie.poster = action.payload.poster;
     },
     /**
+     * Merges one or more duplicate show entries into a single canonical entry.
+     * All seasons and episodes from the removed entries are folded into `keepKey`;
+     * existing episodes at the same key are not overwritten.  Called after TMDB
+     * enrichment detects that multiple library keys share the same TMDB ID.
+     */
+    mergeDuplicateShows: (state, action: PayloadAction<{ keepKey: string; removeKeys: string[] }>) => {
+      const { keepKey, removeKeys } = action.payload;
+      const keepShow = state.mediaLibrary[keepKey];
+      if (!keepShow) return;
+      for (const removeKey of removeKeys) {
+        const removeShow = state.mediaLibrary[removeKey];
+        if (!removeShow) continue;
+        // Merge seasons and episodes
+        for (const [seasonKey, season] of Object.entries(removeShow.seasons) as Array<[string, IMediaSeason]>) {
+          if (!keepShow.seasons[seasonKey]) {
+            keepShow.seasons[seasonKey] = season;
+          } else {
+            for (const [epKey, ep] of Object.entries(season.episodes)) {
+              if (!keepShow.seasons[seasonKey].episodes[epKey]) {
+                keepShow.seasons[seasonKey].episodes[epKey] = ep;
+              }
+            }
+          }
+        }
+        // Accumulate raw names for provenance tracking
+        if (!keepShow.rawNames) keepShow.rawNames = [];
+        const existingRaw = new Set(keepShow.rawNames);
+        for (const n of (removeShow.rawNames && removeShow.rawNames.length > 0 ? removeShow.rawNames : [removeKey])) {
+          if (!existingRaw.has(n)) {
+            keepShow.rawNames.push(n);
+            existingRaw.add(n);
+          }
+        }
+        // Use the removed show's poster if the keep show has none
+        if (!keepShow.poster && removeShow.poster) {
+          keepShow.poster = removeShow.poster;
+        }
+        delete state.mediaLibrary[removeKey];
+      }
+    },
+    /**
      * Clears all cached poster data:
      * - Removes the `poster` field from every entry in `mediaOverrides`.
      * - Resets the poster URI to an empty string for every show and movie in the library.
@@ -276,7 +349,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, clearPosterOverrides } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;

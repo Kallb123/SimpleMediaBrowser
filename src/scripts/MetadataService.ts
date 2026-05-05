@@ -1,7 +1,7 @@
 import { File, Directory, Paths } from 'expo-file-system';
 import { store } from '@/store/store';
-import { updateShowMetadata, updateMovieMetadata, setScanProgress } from '@/store/libraryReducer';
-import type { IMediaLibrary } from '@/store/libraryReducer';
+import { updateShowMetadata, updateMovieMetadata, setScanProgress, mergeDuplicateShows } from '@/store/libraryReducer';
+import type { IMediaLibrary, IMediaShow } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { logger } from '@/scripts/Logger';
 
@@ -14,6 +14,14 @@ const REQUEST_DELAY_MS = 150;
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Parse the year from a TMDB date string (e.g. "2018-04-23") or return 0.
+ * Centralises the repeated `parseInt(dateStr.substring(0, 4), 10)` pattern.
+ */
+function extractYearFromDate(dateString?: string): number {
+    return dateString ? parseInt(dateString.substring(0, 4), 10) : 0;
 }
 
 /**
@@ -101,6 +109,9 @@ export class MetadataService {
                 logger.error('MetadataService', 'enrichAll: a task was rejected', result.reason);
             }
         }
+        // After both TV and movie enrichment, collapse any shows that TMDB resolved
+        // to the same series ID into a single library entry.
+        this.deduplicateByTmdbId();
     }
 
     /** Fetch TMDB posters for every show in the library that does not yet have one cached. */
@@ -151,18 +162,42 @@ export class MetadataService {
                 }
 
                 const data = await response.json();
-                const results: Array<{ id: number; poster_path: string | null }> = data.results ?? [];
+                const results: Array<{ id: number; name?: string; poster_path: string | null; first_air_date?: string }> = data.results ?? [];
 
-                if (results.length === 0 || !results[0].poster_path) {
+                if (results.length === 0) {
                     logger.log('MetadataService', `No TMDB poster found for show "${showName}"`);
                     await delay(REQUEST_DELAY_MS);
                     continue;
                 }
 
-                const tmdbId = String(results[0].id);
-                const localUri = await downloadPoster(tmdbId, results[0].poster_path);
-                store.dispatch(updateShowMetadata({ showName, tmdbId, poster: localUri }));
-                logger.log('MetadataService', `Show "${showName}" → TMDB ID ${tmdbId}, poster cached at ${localUri}`);
+                // Year-aware result selection: if the show has a known year (from the
+                // folder name suffix), prefer a TMDB result whose first_air_date year
+                // matches rather than blindly taking results[0].
+                const showYear = show.year;
+                let bestResult = results[0];
+                if (showYear > 0) {
+                    const yearMatch = results.find((r) => extractYearFromDate(r.first_air_date) === showYear);
+                    if (yearMatch) bestResult = yearMatch;
+                }
+
+                if (!bestResult.poster_path) {
+                    logger.log('MetadataService', `No TMDB poster found for show "${showName}"`);
+                    await delay(REQUEST_DELAY_MS);
+                    continue;
+                }
+
+                const tmdbId = String(bestResult.id);
+                const tmdbTitle = bestResult.name ?? showName;
+                const tmdbYear = extractYearFromDate(bestResult.first_air_date);
+                const localUri = await downloadPoster(tmdbId, bestResult.poster_path);
+                store.dispatch(updateShowMetadata({
+                    showName,
+                    tmdbId,
+                    poster: localUri,
+                    title: tmdbTitle,
+                    year: tmdbYear || undefined,
+                }));
+                logger.log('MetadataService', `Show "${showName}" → TMDB ID ${tmdbId} (${tmdbTitle}, ${tmdbYear || 'year unknown'}), poster cached at ${localUri}`);
                 await delay(REQUEST_DELAY_MS);
             } catch (e) {
                 logger.warn('MetadataService', `Error enriching show "${showName}"`, e);
@@ -243,5 +278,44 @@ export class MetadataService {
         }
 
         logger.log('MetadataService', 'enrichMovies complete');
+    }
+
+    /**
+     * Scans the current Redux library for shows that share the same TMDB ID
+     * (possible when folder naming differs but TMDB resolved them to the same
+     * series) and merges the duplicates into a single canonical entry.
+     *
+     * The canonical entry is chosen as the one that appears first alphabetically
+     * among the group; all seasons and episodes from the other entries are folded
+     * into it and those entries are removed from the library.
+     */
+    private deduplicateByTmdbId(): void {
+        const library = store.getState().libraryReducer.mediaLibrary;
+
+        // Group library keys by their TMDB ID; skip shows without one.
+        const byTmdbId = new Map<string, string[]>();
+        for (const [showKey, show] of Object.entries(library) as Array<[string, IMediaShow]>) {
+            const tmdbId = show.ids.tmdb;
+            if (!tmdbId) continue;
+            const group = byTmdbId.get(tmdbId);
+            if (group) {
+                group.push(showKey);
+            } else {
+                byTmdbId.set(tmdbId, [showKey]);
+            }
+        }
+
+        for (const [tmdbId, showKeys] of byTmdbId) {
+            if (showKeys.length <= 1) continue;
+            // Sort for a stable, reproducible choice of canonical entry.
+            showKeys.sort();
+            const keepKey = showKeys[0];
+            const removeKeys = showKeys.slice(1);
+            logger.log(
+                'MetadataService',
+                `Deduplicating by TMDB ID ${tmdbId}: keeping "${keepKey}", merging [${removeKeys.map((k) => `"${k}"`).join(', ')}]`,
+            );
+            store.dispatch(mergeDuplicateShows({ keepKey, removeKeys }));
+        }
     }
 }
