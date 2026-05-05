@@ -33,6 +33,7 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
 const POSTER_FULL_URL = 'https://image.tmdb.org/t/p/w500';
 const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
+const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 
 /**
  * Remove common year suffixes so TMDB can find titles like "Breaking Bad (2008)"
@@ -275,180 +276,196 @@ export default function EditItemScreen() {
     itemType === 'show' ? 'TV Show' : itemType === 'movie' ? 'Movie' : 'Episode';
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
-      <ThemedView style={styles.header}>
-        <ThemedText type="subtitle">Edit {itemTypeLabel}</ThemedText>
-        <ThemedText style={styles.subtitle} numberOfLines={2}>{currentTitle}</ThemedText>
-      </ThemedView>
+    <ThemedView style={styles.screen}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
+        <View style={styles.header}>
+          <ThemedText type="subtitle">Edit {itemTypeLabel}</ThemedText>
+          <ThemedText style={styles.subtitle} numberOfLines={2}>{currentTitle}</ThemedText>
+        </View>
 
-      {/* Current poster preview + poster editing options (shows and movies only) */}
-      {(itemType === 'show' || itemType === 'movie') && (
-        <ThemedView style={styles.section}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>Poster</ThemedText>
-
-          {activePosterUri ? (
-            <Image
-              source={{ uri: activePosterUri }}
-              style={styles.posterPreview}
-              contentFit="contain"
-            />
-          ) : (
-            <View style={styles.posterPlaceholder}>
-              <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
-              <ThemedText style={styles.hint}>No poster set</ThemedText>
-            </View>
-          )}
-
-          <ThemedView style={styles.posterButtonRow}>
-            <TouchableOpacity
-              style={styles.posterButton}
-              onPress={handleGoogleImageSearch}
-            >
-              <ThemedText style={styles.posterButtonText}>🔍 Google Images</ThemedText>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.posterButton}
-              onPress={handleBrowseLocally}
-              disabled={browsingLocally}
-            >
-              <ThemedText style={styles.posterButtonText}>
-                {browsingLocally ? 'Picking…' : '📁 Browse Locally'}
-              </ThemedText>
-            </TouchableOpacity>
-          </ThemedView>
-          <ThemedText style={styles.hint}>
-            Google Images opens your browser to search for a poster. Browse Locally lets you pick any image file from your device and copies it for offline use.
-          </ThemedText>
-        </ThemedView>
-      )}
-
-      {/* Title override */}
-      <ThemedView style={styles.field}>
-        <ThemedText style={styles.label}>Display Title</ThemedText>
-        <ThemedTextInput
-          value={titleInput}
-          onChangeText={setTitleInput}
-          placeholder="Override display title"
-        />
-      </ThemedView>
-
-      {/* Sort title */}
-      <ThemedView style={styles.field}>
-        <ThemedText style={styles.label}>Sort Title</ThemedText>
-        <ThemedTextInput
-          value={sortTitleInput}
-          onChangeText={setSortTitleInput}
-          placeholder="Override sort order (e.g. 'Dark Knight, The')"
-        />
-        <ThemedText style={styles.hint}>
-          Used to order the item in the grid. Leave empty to sort by display title.
-        </ThemedText>
-      </ThemedView>
-
-      {/* TMDB Rematch (shows and movies only) */}
-      {canRematch && (
-        <ThemedView style={styles.section}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            Search TMDB for Poster
-          </ThemedText>
-
-          <ThemedView style={styles.searchRow}>
+        {/* Title override */}
+        <View style={styles.section}>
+          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>Title</ThemedText>
+          <View style={styles.field}>
+            <ThemedText style={styles.label}>Display Title</ThemedText>
             <ThemedTextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Search TMDB…"
-              style={styles.searchInput}
-              onSubmitEditing={handleSearch}
-              returnKeyType="search"
+              value={titleInput}
+              onChangeText={setTitleInput}
+              placeholder="Override display title"
             />
-            <TouchableOpacity
-              style={styles.searchButton}
-              onPress={handleSearch}
-              disabled={searching || applyingMatch}
-            >
-              <ThemedText style={styles.searchButtonText}>Search</ThemedText>
-            </TouchableOpacity>
-          </ThemedView>
+          </View>
+          <View style={styles.field}>
+            <ThemedText style={styles.label}>Sort Title</ThemedText>
+            <ThemedTextInput
+              value={sortTitleInput}
+              onChangeText={setSortTitleInput}
+              placeholder="Override sort order (e.g. 'Dark Knight, The')"
+            />
+            <ThemedText style={styles.hint}>
+              Used to order the item in the grid. Leave empty to sort by display title.
+            </ThemedText>
+          </View>
+        </View>
 
-          {searching && <ActivityIndicator style={styles.spinner} />}
-          {searchError !== '' && (
-            <ThemedText style={styles.errorText}>{searchError}</ThemedText>
-          )}
-          {applyingMatch && (
-            <ThemedText style={styles.hint}>Applying match…</ThemedText>
-          )}
+        {/* Poster override (shows and movies only) */}
+        {(itemType === 'show' || itemType === 'movie') && (
+          <View style={styles.section}>
+            <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>Poster Override</ThemedText>
 
-          {searchResults.length > 0 && (
-            <FlatList
-              data={searchResults}
-              keyExtractor={(item) => String(item.id)}
-              scrollEnabled={false}
-              renderItem={({ item }) => {
-                const title = item.title ?? item.name ?? '';
-                const year = (item.release_date ?? item.first_air_date ?? '').substring(0, 4);
-                const isSelected = matchApplied === item.id;
-                return (
-                  <TouchableOpacity
-                    style={[styles.resultRow, isSelected && styles.resultRowSelected]}
-                    onPress={() => handleSelectResult(item)}
-                    disabled={applyingMatch}
-                  >
-                    {item.poster_path ? (
-                      <Image
-                        source={{ uri: POSTER_THUMB_URL + item.poster_path }}
-                        style={styles.resultPoster}
-                        contentFit="cover"
-                      />
-                    ) : (
-                      <View style={[styles.resultPoster, styles.resultPosterPlaceholder]}>
-                        <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
+            {activePosterUri ? (
+              <Image
+                source={{ uri: activePosterUri }}
+                style={styles.posterPreview}
+                contentFit="contain"
+              />
+            ) : (
+              <View style={styles.posterPlaceholder}>
+                <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
+                <ThemedText style={styles.hint}>No poster set</ThemedText>
+              </View>
+            )}
+
+            <View style={styles.posterButtonRow}>
+              <TouchableOpacity
+                style={styles.posterButton}
+                onPress={handleGoogleImageSearch}
+              >
+                <ThemedText style={styles.posterButtonText}>🔍 Google Images</ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.posterButton}
+                onPress={handleBrowseLocally}
+                disabled={browsingLocally}
+              >
+                <ThemedText style={styles.posterButtonText}>
+                  {browsingLocally ? 'Picking…' : '📁 Browse Locally'}
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+            <ThemedText style={styles.hint}>
+              Google Images opens your browser to search for a poster. Browse Locally lets you pick any image file from your device and copies it for offline use.
+            </ThemedText>
+          </View>
+        )}
+
+        {/* TMDB Rematch (shows and movies only) */}
+        {canRematch && (
+          <View style={styles.section}>
+            <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+              Search TMDB for Poster
+            </ThemedText>
+
+            <View style={styles.searchRow}>
+              <ThemedTextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search TMDB…"
+                style={styles.searchInput}
+                onSubmitEditing={handleSearch}
+                returnKeyType="search"
+              />
+              <TouchableOpacity
+                style={styles.searchButton}
+                onPress={handleSearch}
+                disabled={searching || applyingMatch}
+              >
+                <ThemedText style={styles.searchButtonText}>Search</ThemedText>
+              </TouchableOpacity>
+            </View>
+
+            {searching && <ActivityIndicator style={styles.spinner} />}
+            {searchError !== '' && (
+              <ThemedText style={styles.errorText}>{searchError}</ThemedText>
+            )}
+            {applyingMatch && (
+              <ThemedText style={styles.hint}>Applying match…</ThemedText>
+            )}
+
+            {searchResults.length > 0 && (
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item) => String(item.id)}
+                scrollEnabled={false}
+                renderItem={({ item }) => {
+                  const title = item.title ?? item.name ?? '';
+                  const year = (item.release_date ?? item.first_air_date ?? '').substring(0, 4);
+                  const isSelected = matchApplied === item.id;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.resultRow, isSelected && styles.resultRowSelected]}
+                      onPress={() => handleSelectResult(item)}
+                      disabled={applyingMatch}
+                    >
+                      {item.poster_path ? (
+                        <Image
+                          source={{ uri: POSTER_THUMB_URL + item.poster_path }}
+                          style={styles.resultPoster}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <View style={[styles.resultPoster, styles.resultPosterPlaceholder]}>
+                          <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
+                        </View>
+                      )}
+                      <View style={styles.resultInfo}>
+                        <ThemedText style={styles.resultTitle}>{title}</ThemedText>
+                        {year !== '' && (
+                          <ThemedText style={styles.resultYear}>{year}</ThemedText>
+                        )}
+                        {isSelected && (
+                          <ThemedText style={styles.selectedLabel}>✔ Matched</ThemedText>
+                        )}
                       </View>
-                    )}
-                    <View style={styles.resultInfo}>
-                      <ThemedText style={styles.resultTitle}>{title}</ThemedText>
-                      {year !== '' && (
-                        <ThemedText style={styles.resultYear}>{year}</ThemedText>
-                      )}
-                      {isSelected && (
-                        <ThemedText style={styles.selectedLabel}>✔ Matched</ThemedText>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          )}
-        </ThemedView>
-      )}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
+          </View>
+        )}
 
-      {!tmdbApiKey && (itemType === 'show' || itemType === 'movie') && (
-        <ThemedView style={styles.section}>
-          <ThemedText style={styles.hint}>
-            Add a TMDB API key in Settings to enable TMDB poster search.
-          </ThemedText>
-        </ThemedView>
-      )}
-    </ScrollView>
+        {!tmdbApiKey && (itemType === 'show' || itemType === 'movie') && (
+          <View style={styles.section}>
+            <ThemedText style={styles.hint}>
+              Add a TMDB API key in Settings to enable TMDB poster search.
+            </ThemedText>
+          </View>
+        )}
+      </ScrollView>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },
   content: {
     padding: 16,
-    gap: 16,
+    gap: 20,
   },
   header: {
     gap: 4,
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   subtitle: {
     opacity: 0.6,
     fontSize: 13,
+  },
+  section: {
+    gap: 10,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: DIVIDER_COLOR,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    marginBottom: 2,
   },
   field: {
     gap: 6,
@@ -461,15 +478,6 @@ const styles = StyleSheet.create({
     opacity: 0.6,
     fontSize: 12,
     fontStyle: 'italic',
-  },
-  section: {
-    gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#CCC',
-    paddingTop: 12,
-  },
-  sectionTitle: {
-    fontSize: 15,
   },
   posterPreview: {
     width: 120,
@@ -537,7 +545,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#CCC',
+    borderBottomColor: DIVIDER_COLOR,
   },
   resultRowSelected: {
     backgroundColor: 'rgba(10,126,164,0.12)',
