@@ -180,7 +180,9 @@ export default function EditItemScreen() {
     } else if (itemType === 'movie') {
       const parsedPath = itemKey.replace(/^movie:/, '');
       const movie = movies.find((m) => m.parsedPath === parsedPath);
-      dispatch(updateMovieMetadata({ path: movie?.path ?? parsedPath, tmdbId: movie?.ids.tmdb ?? '', poster: localUri }));
+      if (movie) {
+        dispatch(updateMovieMetadata({ path: movie.path, tmdbId: movie.ids.tmdb ?? '', poster: localUri }));
+      }
     }
     // Persist the poster URI in mediaOverrides so it survives rescans.
     dispatch(setMediaOverride({ key: itemKey, override: { poster: localUri } }));
