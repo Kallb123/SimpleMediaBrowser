@@ -28,7 +28,7 @@ type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' }
+  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season'; count?: number; countUnit?: 'seasons' | 'episodes' }
   | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
@@ -164,16 +164,25 @@ function buildDisplayItems(
       if (navStack.length === 0) {
         // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
-          .map((showName) => ({
-            kind: 'folder' as const,
-            label: showDisplayLabel(showName, overrides),
-            sortKey: showSortKey(showName, overrides),
-            key: showName,
-            posterUri: overrides[`show:${showName}`]?.poster || library[showName].poster || undefined,
-            thumbnailUri: pickShowThumbnail(library, showName),
-            onPress: () => navigateInto({ label: showName, showName }),
-            mediaType: 'show' as const,
-          }));
+          .map((showName) => {
+            const show = library[showName];
+            const episodeCount = Object.values(show.seasons).reduce(
+              (sum, season) => sum + Object.keys(season.episodes).length,
+              0,
+            );
+            return {
+              kind: 'folder' as const,
+              label: showDisplayLabel(showName, overrides),
+              sortKey: showSortKey(showName, overrides),
+              key: showName,
+              posterUri: overrides[`show:${showName}`]?.poster || show.poster || undefined,
+              thumbnailUri: pickShowThumbnail(library, showName),
+              onPress: () => navigateInto({ label: showName, showName }),
+              mediaType: 'show' as const,
+              count: episodeCount,
+              countUnit: 'episodes' as const,
+            };
+          });
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
@@ -234,6 +243,8 @@ function buildDisplayItems(
               thumbnailUri: firstEpThumb,
               onPress: () => navigateInto({ label, showName, seasonKey }),
               mediaType: 'season',
+              count: Object.keys(season.episodes).length,
+              countUnit: 'episodes' as const,
             });
           }
         }
@@ -285,6 +296,8 @@ function buildDisplayItems(
             thumbnailUri: pickShowThumbnail(library, showName),
             onPress: () => navigateInto({ label: showName, showName }),
             mediaType: 'show' as const,
+            count: Object.keys(library[showName].seasons).length,
+            countUnit: 'seasons' as const,
           }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
@@ -325,6 +338,8 @@ function buildDisplayItems(
                   seasonKey,
                 }),
               mediaType: 'season' as const,
+              count: Object.keys(season.episodes).length,
+              countUnit: 'episodes' as const,
             };
           });
       }
@@ -633,6 +648,15 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                         <ThemedText style={styles.editOverlayIcon}>✏️</ThemedText>
                       </View>
                     )}
+                    {/* Entry count badge for show/season folders */}
+                    {item.kind === 'folder' && item.count !== undefined && (
+                      <View
+                        style={styles.countBadge}
+                        accessibilityLabel={`${item.count} ${item.count === 1 ? (item.countUnit === 'seasons' ? 'season' : 'episode') : item.countUnit}`}
+                      >
+                        <ThemedText style={styles.countBadgeText}>{item.count}</ThemedText>
+                      </View>
+                    )}
                   </View>
                   <ThemedText style={styles.cardLabel} numberOfLines={2}>
                     {item.label}
@@ -794,6 +818,20 @@ const styles = StyleSheet.create({
   },
   editOverlayIcon: {
     fontSize: 14,
+  },
+  countBadge: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  countBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
   },
   stepContainer: {
     gap: 8,
