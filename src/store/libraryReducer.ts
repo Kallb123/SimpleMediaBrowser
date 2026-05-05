@@ -247,6 +247,23 @@ export const settingsSlice = createSlice({
       const movie = state.movies.find((m) => m.path === action.payload.path);
       if (movie) movie.poster = action.payload.poster;
     },
+    /**
+     * Clears all cached poster data:
+     * - Removes the `poster` field from every entry in `mediaOverrides`.
+     * - Resets the poster URI to an empty string for every show and movie in the library.
+     * Call this after deleting the smb_posters directory from disk.
+     */
+    clearPosterOverrides: (state) => {
+      for (const key of Object.keys(state.mediaOverrides)) {
+        delete state.mediaOverrides[key].poster;
+      }
+      for (const show of Object.values(state.mediaLibrary)) {
+        show.poster = '';
+      }
+      for (const movie of state.movies) {
+        movie.poster = '';
+      }
+    },
   },
   extraReducers: (builder) => {
     // Reset transient scan state when redux-persist rehydrates the store.
@@ -259,7 +276,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, clearPosterOverrides } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;

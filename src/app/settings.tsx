@@ -1,4 +1,4 @@
-import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView } from 'react-native';
+import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView, Alert } from 'react-native';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router, Stack } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
+import { clearLibraryAndMovies, clearPosterOverrides, clearThumbnails, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -16,6 +17,7 @@ import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
+const DESTRUCTIVE_COLOR = '#E55';
 
 class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {
@@ -70,6 +72,7 @@ export default function SettingsPrompt() {
   const [enableThumbnailGeneration, setLocalEnableThumbnailGeneration] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
+  const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
 
   const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
@@ -274,6 +277,83 @@ export default function SettingsPrompt() {
       logger.error('Settings', 'Exception while applying UI scale change', e as Error);
     }
   };
+
+  const clearThumbnailCache = useCallback(() => {
+    Alert.alert(
+      'Clear thumbnail cache',
+      'This will delete all generated video thumbnails from disk and from memory. They will be regenerated on the next scan.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { Directory, Paths } = await import('expo-file-system');
+              const thumbnailsDir = new Directory(Paths.document, 'smb_thumbnails');
+              if (thumbnailsDir.exists) {
+                thumbnailsDir.delete();
+              }
+              dispatch(clearThumbnails());
+              logger.log('Settings', 'Thumbnail cache cleared');
+            } catch (e) {
+              logger.error('Settings', 'Exception while clearing thumbnail cache', e as Error);
+            }
+          },
+        },
+      ],
+    );
+  }, [dispatch]);
+
+  const clearPosterCache = useCallback(() => {
+    Alert.alert(
+      'Clear poster overrides',
+      'This will delete all downloaded poster images from disk and reset any poster overrides. Posters will be re-fetched on the next scan.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { Directory, Paths } = await import('expo-file-system');
+              const postersDir = new Directory(Paths.document, 'smb_posters');
+              if (postersDir.exists) {
+                postersDir.delete();
+              }
+              dispatch(clearPosterOverrides());
+              logger.log('Settings', 'Poster overrides cleared');
+            } catch (e) {
+              logger.error('Settings', 'Exception while clearing poster overrides', e as Error);
+            }
+          },
+        },
+      ],
+    );
+  }, [dispatch]);
+
+  const clearScannedData = useCallback(() => {
+    Alert.alert(
+      'Clear scanned data',
+      'This will remove all scanned TV and movie data from memory. You will need to rescan your sources to see your library again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            try {
+              dispatch(clearLibraryAndMovies());
+              dispatch(setScanList([]));
+              logger.log('Settings', 'Scanned data cleared');
+            } catch (e) {
+              logger.error('Settings', 'Exception while clearing scanned data', e as Error);
+            }
+          },
+        },
+      ],
+    );
+  }, [dispatch]);
   
   return (
     <SettingsErrorBoundary>
@@ -513,6 +593,35 @@ export default function SettingsPrompt() {
         </View>
       </View>
 
+      {/* Troubleshooting */}
+      <View style={styles.section}>
+        <TouchableOpacity
+          style={styles.troubleshootingHeader}
+          onPress={() => setTroubleshootingExpanded(prev => !prev)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: troubleshootingExpanded }}
+        >
+          <ThemedText type="subtitle" style={styles.sectionTitle}>Troubleshooting</ThemedText>
+          <ThemedText style={styles.troubleshootingChevron}>{troubleshootingExpanded ? '▲' : '▼'}</ThemedText>
+        </TouchableOpacity>
+        {troubleshootingExpanded && (
+          <View style={styles.troubleshootingContent}>
+            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearThumbnailCache}>
+              <ThemedText style={styles.troubleshootingButtonText}>🗑 Clear thumbnail cache</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all generated video thumbnails from disk.</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearPosterCache}>
+              <ThemedText style={styles.troubleshootingButtonText}>🖼 Clear poster overrides</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all downloaded posters and resets poster overrides.</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearScannedData}>
+              <ThemedText style={styles.troubleshootingButtonText}>📂 Clear scanned data</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Removes all scanned TV and movie data from memory.</ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
       <View style={styles.footerContainer}>
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
       </View>
@@ -586,7 +695,7 @@ const styles = StyleSheet.create({
   },
   deleteButtonText: {
     fontSize: 16,
-    color: '#E55',
+    color: DESTRUCTIVE_COLOR,
   },
   dropdownButtonStyle: {
     width: 220,
@@ -637,5 +746,35 @@ const styles = StyleSheet.create({
   slider: {
     width: 200,
     height: 40,
+  },
+  troubleshootingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  troubleshootingChevron: {
+    fontSize: 14,
+    opacity: 0.6,
+  },
+  troubleshootingContent: {
+    gap: 12,
+  },
+  troubleshootingButton: {
+    gap: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: DIVIDER_COLOR,
+  },
+  troubleshootingButtonText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: DESTRUCTIVE_COLOR,
+  },
+  troubleshootingButtonDesc: {
+    fontSize: 12,
+    opacity: 0.55,
+    fontStyle: 'italic',
   },
 });
