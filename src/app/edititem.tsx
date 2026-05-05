@@ -26,13 +26,12 @@ import {
 } from '@/store/libraryReducer';
 import { selectTmdbApiKey } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
-import * as FileSystem from 'expo-file-system';
-import { Directory } from 'expo-file-system';
+import { File, Directory, Paths } from 'expo-file-system';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
 const POSTER_FULL_URL = 'https://image.tmdb.org/t/p/w500';
-const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
+const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 
 /**
@@ -53,23 +52,27 @@ interface TmdbResult {
   first_air_date?: string;
 }
 
-async function ensurePostersDir(): Promise<void> {
-  const dir = new FileSystem.Directory(POSTERS_DIR);
-  if (!dir.exists) {
-    await dir.create();
+function ensurePostersDir(): void {
+  if (!POSTERS_DIR.exists) {
+    POSTERS_DIR.create({ intermediates: true, idempotent: true });
   }
 }
 
-async function downloadPoster(tmdbId: string, posterPath: string): Promise<string> {
-  await ensurePostersDir();
-  const safeName = tmdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const localPath = POSTERS_DIR + `${safeName}.jpg`;
-  const localFile = new FileSystem.File(localPath);
+/**
+ * Download a TMDB poster image to local storage and return the local file URI.
+ * `cacheKey` is used as the filename (sanitised); using the poster path
+ * basename (e.g. "aBcDeFg123" from "/aBcDeFg123.jpg") ensures each unique
+ * TMDB image path maps to its own cached file.
+ */
+async function downloadPoster(cacheKey: string, posterPath: string): Promise<string> {
+  ensurePostersDir();
+  const safeName = cacheKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const localFile = new File(POSTERS_DIR, `${safeName}.jpg`);
   if (localFile.exists) {
     return localFile.uri;
   }
   const remoteUrl = POSTER_FULL_URL + posterPath;
-  await FileSystem.File.downloadFileAsync(remoteUrl, localFile);
+  await File.downloadFileAsync(remoteUrl, localFile);
   return localFile.uri;
 }
 
@@ -78,21 +81,19 @@ async function downloadPoster(tmdbId: string, posterPath: string): Promise<strin
  * persistent smb_posters directory and return the local file:// URI.
  */
 async function copyPickedPoster(sourceUri: string, key: string): Promise<string> {
-  await ensurePostersDir();
+  ensurePostersDir();
   const safeName = key.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const localPath = POSTERS_DIR + `${safeName}_custom.jpg`;
+  const localFile = new File(POSTERS_DIR, `${safeName}_custom.jpg`);
   try {
-    const file = new FileSystem.File(sourceUri);
-    const newFile = new FileSystem.File(localPath);
-    await file.copy(newFile);
+    const source = new File(sourceUri);
+    await source.copy(localFile);
   } catch {
     // Fall back to base64 read/write for SAF content:// URIs.
-    const file = new FileSystem.File(sourceUri);
-    const base64 = await file.base64();
-    const copy = new FileSystem.File(localPath);
-    await copy.write(base64, { encoding: "base64" });
+    const source = new File(sourceUri);
+    const base64 = await source.base64();
+    await localFile.write(base64, { encoding: 'base64' });
   }
-  return localPath;
+  return localFile.uri;
 }
 
 export default function EditItemScreen() {
@@ -135,6 +136,12 @@ export default function EditItemScreen() {
   const [searchError, setSearchError] = useState('');
   const [applyingMatch, setApplyingMatch] = useState(false);
   const [matchApplied, setMatchApplied] = useState<number | null>(null);
+  const [selectedPosterPath, setSelectedPosterPath] = useState<string | null>(null);
+
+  // Per-result expandable poster gallery
+  const [expandedResultId, setExpandedResultId] = useState<number | null>(null);
+  const [postersByResultId, setPostersByResultId] = useState<Record<number, string[]>>({});
+  const [loadingPostersForId, setLoadingPostersForId] = useState<number | null>(null);
 
   // Browse-locally state
   const [browsingLocally, setBrowsingLocally] = useState(false);
@@ -182,6 +189,10 @@ export default function EditItemScreen() {
     setSearching(true);
     setSearchError('');
     setSearchResults([]);
+    // Reset expanded state so stale galleries from prior searches are cleared.
+    setExpandedResultId(null);
+    setPostersByResultId({});
+    setLoadingPostersForId(null);
     try {
       const endpoint = itemType === 'movie' ? 'movie' : 'tv';
       const tmdbQuery = stripYearSuffix(searchQuery.trim());
@@ -208,7 +219,48 @@ export default function EditItemScreen() {
     }
   };
 
-  const handleSelectResult = async (result: TmdbResult) => {
+  /**
+   * Toggle the poster gallery for a search result.
+   * First expansion fetches all poster images from the TMDB images endpoint.
+   */
+  const fetchAndExpandResult = async (result: TmdbResult) => {
+    if (!tmdbApiKey) return;
+    const id = result.id;
+
+    if (expandedResultId === id) {
+      setExpandedResultId(null);
+      return;
+    }
+    setExpandedResultId(id);
+
+    if (postersByResultId[id] !== undefined) return; // already fetched
+
+    setLoadingPostersForId(id);
+    try {
+      const endpoint = itemType === 'movie' ? 'movie' : 'tv';
+      const url =
+        `${TMDB_BASE_URL}/${endpoint}/${id}/images` +
+        `?api_key=${encodeURIComponent(tmdbApiKey)}` +
+        `&include_image_language=en,null`;
+      logger.log('EditItem', `Fetching TMDB images for ${endpoint} ID ${id}`);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const paths = (data.posters ?? []).map((p: { file_path: string }) => p.file_path) as string[];
+      // Fall back to the search-result thumbnail if no dedicated posters are returned.
+      const resolved = paths.length > 0 ? paths : (result.poster_path ? [result.poster_path] : []);
+      setPostersByResultId((prev) => ({ ...prev, [id]: resolved }));
+    } catch (e) {
+      logger.warn('EditItem', 'Failed to fetch TMDB images', e);
+      const fallback = result.poster_path ? [result.poster_path] : [];
+      setPostersByResultId((prev) => ({ ...prev, [id]: fallback }));
+    } finally {
+      setLoadingPostersForId(null);
+    }
+  };
+
+  /** Download a specific TMDB poster and apply it to the item. */
+  const handleSelectPoster = async (result: TmdbResult, posterPath: string) => {
     if (!tmdbApiKey) return;
     setApplyingMatch(true);
     try {
@@ -216,30 +268,27 @@ export default function EditItemScreen() {
       const dateStr = result.release_date ?? result.first_air_date ?? '';
       const year = dateStr ? parseInt(dateStr.substring(0, 4), 10) : undefined;
 
+      // Use the poster path basename (e.g. "aBcDeFg123" from "/aBcDeFg123.jpg")
+      // as the cache key so each distinct TMDB image gets its own local file.
+      const cacheKey = posterPath.replace(/^\//, '').replace(/\.[^.]+$/, '');
       let localPosterUri: string | undefined;
-      if (result.poster_path) {
-        try {
-          localPosterUri = await downloadPoster(tmdbId, result.poster_path);
-        } catch (e) {
-          logger.warn('EditItem', 'Poster download failed', e);
-        }
+      try {
+        localPosterUri = await downloadPoster(cacheKey, posterPath);
+      } catch (e) {
+        logger.warn('EditItem', 'Poster download failed', e);
       }
 
       if (localPosterUri) {
         applyPoster(localPosterUri);
       }
 
-      // Store override metadata (tmdbId + year) so it survives rescans
-      dispatch(setMediaOverride({
-        key: itemKey,
-        override: { tmdbId, year },
-      }));
-
+      dispatch(setMediaOverride({ key: itemKey, override: { tmdbId, year } }));
       setMatchApplied(result.id);
-      logger.log('EditItem', `Rematch applied: TMDB ID ${tmdbId}, year=${year}`);
+      setSelectedPosterPath(posterPath);
+      logger.log('EditItem', `Poster applied: TMDB ID ${tmdbId}, path=${posterPath}, year=${year}`);
     } catch (e) {
-      logger.error('EditItem', 'Failed to apply rematch', e);
-      setSearchError('Failed to apply match.');
+      logger.error('EditItem', 'Failed to apply poster', e);
+      setSearchError('Failed to apply poster.');
     } finally {
       setApplyingMatch(false);
     }
@@ -391,34 +440,93 @@ export default function EditItemScreen() {
                 renderItem={({ item }) => {
                   const title = item.title ?? item.name ?? '';
                   const year = (item.release_date ?? item.first_air_date ?? '').substring(0, 4);
-                  const isSelected = matchApplied === item.id;
+                  const isMatched = matchApplied === item.id;
+                  const isExpanded = expandedResultId === item.id;
+                  const isLoadingPosters = loadingPostersForId === item.id;
+                  const posters: string[] = postersByResultId[item.id] ?? [];
+                  const posterCount = isExpanded && !isLoadingPosters ? posters.length : null;
                   return (
-                    <TouchableOpacity
-                      style={[styles.resultRow, isSelected && styles.resultRowSelected]}
-                      onPress={() => handleSelectResult(item)}
-                      disabled={applyingMatch}
-                    >
-                      {item.poster_path ? (
-                        <Image
-                          source={{ uri: POSTER_THUMB_URL + item.poster_path }}
-                          style={styles.resultPoster}
-                          contentFit="cover"
-                        />
-                      ) : (
-                        <View style={[styles.resultPoster, styles.resultPosterPlaceholder]}>
-                          <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
+                    <View style={[styles.resultRow, isMatched && styles.resultRowSelected]}>
+                      {/* Header row: thumbnail + title/year + expand button */}
+                      <TouchableOpacity
+                        style={styles.resultHeader}
+                        onPress={() => fetchAndExpandResult(item)}
+                        disabled={applyingMatch}
+                      >
+                        {item.poster_path ? (
+                          <Image
+                            source={{ uri: POSTER_THUMB_URL + item.poster_path }}
+                            style={styles.resultPoster}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <View style={[styles.resultPoster, styles.resultPosterPlaceholder]}>
+                            <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
+                          </View>
+                        )}
+                        <View style={styles.resultInfo}>
+                          <ThemedText style={styles.resultTitle}>{title}</ThemedText>
+                          {year !== '' && (
+                            <ThemedText style={styles.resultYear}>{year}</ThemedText>
+                          )}
+                          {isMatched && (
+                            <ThemedText style={styles.selectedLabel}>✔ Matched</ThemedText>
+                          )}
+                          <ThemedText style={styles.posterCountLabel}>
+                            {isLoadingPosters
+                              ? 'Loading posters…'
+                              : posterCount !== null
+                                ? `${posterCount} poster${posterCount !== 1 ? 's' : ''} available`
+                                : isExpanded
+                                  ? '…'
+                                  : 'Tap to browse posters'}
+                          </ThemedText>
+                        </View>
+                        <ThemedText style={styles.expandChevron}>
+                          {isExpanded ? '▲' : '▼'}
+                        </ThemedText>
+                      </TouchableOpacity>
+
+                      {/* Expanded poster gallery */}
+                      {isExpanded && (
+                        <View style={styles.posterGallery}>
+                          {isLoadingPosters ? (
+                            <ActivityIndicator style={styles.spinner} />
+                          ) : posters.length > 0 ? (
+                            <FlatList
+                              data={posters}
+                              keyExtractor={(path) => path}
+                              horizontal
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={styles.posterGalleryContent}
+                              renderItem={({ item: posterPath }) => {
+                                const isChosen = isMatched && selectedPosterPath === posterPath;
+                                return (
+                                  <TouchableOpacity
+                                    onPress={() => handleSelectPoster(item, posterPath)}
+                                    disabled={applyingMatch}
+                                    style={[styles.galleryPosterWrapper, isChosen && styles.galleryPosterWrapperChosen]}
+                                  >
+                                    <Image
+                                      source={{ uri: POSTER_THUMB_URL + posterPath }}
+                                      style={styles.galleryPoster}
+                                      contentFit="cover"
+                                    />
+                                    {isChosen && (
+                                      <View style={styles.galleryCheckOverlay}>
+                                        <ThemedText style={styles.galleryCheckIcon}>✔</ThemedText>
+                                      </View>
+                                    )}
+                                  </TouchableOpacity>
+                                );
+                              }}
+                            />
+                          ) : (
+                            <ThemedText style={styles.hint}>No posters available.</ThemedText>
+                          )}
                         </View>
                       )}
-                      <View style={styles.resultInfo}>
-                        <ThemedText style={styles.resultTitle}>{title}</ThemedText>
-                        {year !== '' && (
-                          <ThemedText style={styles.resultYear}>{year}</ThemedText>
-                        )}
-                        {isSelected && (
-                          <ThemedText style={styles.selectedLabel}>✔ Matched</ThemedText>
-                        )}
-                      </View>
-                    </TouchableOpacity>
+                    </View>
                   );
                 }}
               />
@@ -540,9 +648,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   resultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    flexDirection: 'column',
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: DIVIDER_COLOR,
@@ -550,6 +656,11 @@ const styles = StyleSheet.create({
   resultRowSelected: {
     backgroundColor: 'rgba(10,126,164,0.12)',
     borderRadius: 6,
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   resultPoster: {
     width: 50,
@@ -580,5 +691,53 @@ const styles = StyleSheet.create({
     color: '#0a7ea4',
     fontSize: 12,
     fontWeight: '600',
+  },
+  posterCountLabel: {
+    opacity: 0.7,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  expandChevron: {
+    fontSize: 12,
+    opacity: 0.6,
+    paddingHorizontal: 4,
+  },
+  posterGallery: {
+    marginTop: 10,
+  },
+  posterGalleryContent: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  galleryPosterWrapper: {
+    borderRadius: 6,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  galleryPosterWrapperChosen: {
+    borderColor: '#0a7ea4',
+  },
+  galleryPoster: {
+    width: 80,
+    height: 120,
+    borderRadius: 4,
+    backgroundColor: '#333',
+  },
+  galleryCheckOverlay: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#0a7ea4',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryCheckIcon: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
