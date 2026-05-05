@@ -143,9 +143,9 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         onRequestClose={cancelPassword}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
+          <View style={[styles.modalBox, { backgroundColor: colorScheme === 'dark' ? '#1E2022' : '#fff' }]}>
             <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
-            <ThemedText style={styles.modalSubtitle}>Unlock protected drawer actions.</ThemedText>
+            <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>
             <ThemedTextInput
               value={passwordInput}
               onChangeText={(v) => {
@@ -162,7 +162,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
               <ThemedText style={styles.errorText}>{passwordError}</ThemedText>
             )}
             <View style={styles.modalButtons}>
-              <TouchableOpacity onPress={cancelPassword} style={styles.modalButton}>
+              <TouchableOpacity onPress={cancelPassword} style={[styles.modalButton, { borderColor: colorScheme === 'dark' ? '#555' : '#CCC' }]}>
                 <ThemedText>Cancel</ThemedText>
               </TouchableOpacity>
               <TouchableOpacity onPress={submitPassword} style={[styles.modalButton, styles.modalButtonPrimary]}>
@@ -250,7 +250,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalBox: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
     width: '80%',
@@ -258,17 +257,13 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     textAlign: 'center',
-    color: '#11181C',
   },
   modalSubtitle: {
     textAlign: 'center',
     opacity: 0.7,
-    color: '#11181C',
   },
   modalInput: {
-    color: '#11181C',
-    backgroundColor: '#F5F5F5',
-    borderColor: '#CCC',
+    paddingVertical: 12,
   },
   errorText: {
     color: '#E55',
@@ -286,7 +281,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#CCC',
   },
   modalButtonPrimary: {
     backgroundColor: '#0a7ea4',
