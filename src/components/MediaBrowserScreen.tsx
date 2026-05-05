@@ -28,8 +28,8 @@ type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; key: string; thumbnailUri?: ThumbnailSource; onPress: () => void; mediaType: 'show' | 'season' }
-  | { kind: 'file'; label: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
+  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' }
+  | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -126,10 +126,13 @@ function buildDisplayItems(
           for (const ep of sortedEps) {
             const sNum = `S${String(season.seasonNumber).padStart(2, '0')}`;
             const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
-            const prefix = ep.episodeNumber > 0 ? `${showDisplayLabel(showName, overrides)} ${sNum}${eNum}` : '';
+            const displayPrefix = ep.episodeNumber > 0 ? `${showDisplayLabel(showName, overrides)} ${sNum}${eNum}` : '';
+            // Sort key uses show sort key (respects sortTitle override) instead of display title.
+            const sortPrefix = ep.episodeNumber > 0 ? `${showSortKey(showName, overrides)} ${sNum}${eNum}` : '';
             items.push({
               kind: 'file',
-              label: episodeDisplayLabel(ep, overrides, prefix),
+              label: episodeDisplayLabel(ep, overrides, displayPrefix),
+              sortKey: sortPrefix || overrides[`episode:${ep.path}`]?.sortTitle || ep.title || ep.filename,
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
               mediaObject: ep,
@@ -138,13 +141,11 @@ function buildDisplayItems(
           }
         }
       }
-      const sortedMovies = [...movies].sort((a, b) =>
-        movieSortKey(a, overrides).localeCompare(movieSortKey(b, overrides), undefined, NATURAL_SORT_OPTS),
-      );
-      for (const movie of sortedMovies) {
+      for (const movie of movies) {
         items.push({
           kind: 'file',
           label: movieDisplayLabel(movie, overrides),
+          sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
@@ -152,36 +153,41 @@ function buildDisplayItems(
           mediaType: 'movie',
         });
       }
-      items.sort((a, b) => a.label.localeCompare(b.label, undefined, NATURAL_SORT_OPTS));
+      // Sort by sort key (respects sortTitle overrides), falling back to label.
+      items.sort((a, b) =>
+        (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
+      );
       return items;
     }
 
     case 'show': {
       if (navStack.length === 0) {
-        // Root: one folder per show (sorted by sort key) + movie files
+        // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
-          .sort((a, b) => showSortKey(a, overrides).localeCompare(showSortKey(b, overrides), undefined, NATURAL_SORT_OPTS))
           .map((showName) => ({
             kind: 'folder' as const,
             label: showDisplayLabel(showName, overrides),
+            sortKey: showSortKey(showName, overrides),
             key: showName,
-            thumbnailUri: overrides[`show:${showName}`]?.poster || library[showName].poster || pickShowThumbnail(library, showName),
+            posterUri: overrides[`show:${showName}`]?.poster || library[showName].poster || undefined,
+            thumbnailUri: pickShowThumbnail(library, showName),
             onPress: () => navigateInto({ label: showName, showName }),
             mediaType: 'show' as const,
           }));
-        const sortedMovies = [...movies].sort((a, b) =>
-          movieSortKey(a, overrides).localeCompare(movieSortKey(b, overrides), undefined, NATURAL_SORT_OPTS),
-        );
-        const movieItems: DisplayItem[] = sortedMovies.map((movie) => ({
+        const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
+          sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
         }));
-        return [...showFolders, ...movieItems];
+        // Interleave shows and movies sorted together by sort key.
+        return [...showFolders, ...movieItems].sort(
+          (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
+        );
       }
       // Inside a show: all episodes from every season
       const show = library[navStack[0].showName!];
@@ -209,45 +215,42 @@ function buildDisplayItems(
 
     case 'show+season': {
       if (navStack.length === 0) {
-        // Root: one folder per show+season combination + movie files
-        type ShowSeasonEntry = { item: DisplayItem; sortKey: string };
-        const showSeasonEntries: ShowSeasonEntry[] = [];
+        // Root: one folder per show+season combination + movie files, all sorted together by sort key
+        const showSeasonItems: DisplayItem[] = [];
         for (const [showName, show] of Object.entries(library)) {
           for (const [seasonKey, season] of Object.entries(show.seasons)) {
             const displayShow = showDisplayLabel(showName, overrides);
             const label = `${displayShow} – Season ${season.seasonNumber}`;
             const sortKey = `${showSortKey(showName, overrides)} – Season ${String(season.seasonNumber).padStart(4, '0')}`;
-            // Prefer the override poster, then the show's API poster, then first episode thumbnail
             const firstEpThumb = Object.values(season.episodes)
               .map((ep) => thumbnailCache.get(ep.path))
               .find(Boolean);
-            showSeasonEntries.push({
+            showSeasonItems.push({
+              kind: 'folder',
+              label,
               sortKey,
-              item: {
-                kind: 'folder',
-                label,
-                key: `${showName}::${seasonKey}`,
-                thumbnailUri: overrides[`show:${showName}`]?.poster || show.poster || firstEpThumb,
-                onPress: () => navigateInto({ label, showName, seasonKey }),
-                mediaType: 'season',
-              },
+              key: `${showName}::${seasonKey}`,
+              posterUri: overrides[`show:${showName}`]?.poster || show.poster || undefined,
+              thumbnailUri: firstEpThumb,
+              onPress: () => navigateInto({ label, showName, seasonKey }),
+              mediaType: 'season',
             });
           }
         }
-        showSeasonEntries.sort((a, b) => a.sortKey.localeCompare(b.sortKey, undefined, NATURAL_SORT_OPTS));
-        const sortedMovies = [...movies].sort((a, b) =>
-          movieSortKey(a, overrides).localeCompare(movieSortKey(b, overrides), undefined, NATURAL_SORT_OPTS),
-        );
-        const movieItems: DisplayItem[] = sortedMovies.map((movie) => ({
+        const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
+          sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
         }));
-        return [...showSeasonEntries.map((e) => e.item), ...movieItems];
+        // Interleave show+season folders and movies sorted together by sort key.
+        return [...showSeasonItems, ...movieItems].sort(
+          (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
+        );
       }
       // Inside a show+season folder: episodes of that season
       const { showName, seasonKey } = navStack[0];
@@ -271,30 +274,32 @@ function buildDisplayItems(
     case 'show/season':
     default: {
       if (navStack.length === 0) {
-        // Root: one folder per show (sorted by sort key) + movie files
+        // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
-          .sort((a, b) => showSortKey(a, overrides).localeCompare(showSortKey(b, overrides), undefined, NATURAL_SORT_OPTS))
           .map((showName) => ({
             kind: 'folder' as const,
             label: showDisplayLabel(showName, overrides),
+            sortKey: showSortKey(showName, overrides),
             key: showName,
-            thumbnailUri: overrides[`show:${showName}`]?.poster || library[showName].poster || pickShowThumbnail(library, showName),
+            posterUri: overrides[`show:${showName}`]?.poster || library[showName].poster || undefined,
+            thumbnailUri: pickShowThumbnail(library, showName),
             onPress: () => navigateInto({ label: showName, showName }),
             mediaType: 'show' as const,
           }));
-        const sortedMovies = [...movies].sort((a, b) =>
-          movieSortKey(a, overrides).localeCompare(movieSortKey(b, overrides), undefined, NATURAL_SORT_OPTS),
-        );
-        const movieItems: DisplayItem[] = sortedMovies.map((movie) => ({
+        const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
           label: movieDisplayLabel(movie, overrides),
+          sortKey: movieSortKey(movie, overrides),
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.path}`]?.poster || movie.poster || undefined,
           mediaObject: movie,
           mediaType: 'movie' as const,
         }));
-        return [...showFolders, ...movieItems];
+        // Interleave shows and movies sorted together by sort key.
+        return [...showFolders, ...movieItems].sort(
+          (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
+        );
       }
       if (navStack.length === 1) {
         // Inside a show: one folder per season
@@ -304,7 +309,6 @@ function buildDisplayItems(
           .sort((a, b) => a[1].seasonNumber - b[1].seasonNumber)
           .map(([seasonKey, season]) => {
             const label = `Season ${season.seasonNumber}`;
-            // Prefer the override poster, then the show's API poster, then first episode thumbnail
             const firstEpThumb = Object.values(season.episodes)
               .map((ep) => thumbnailCache.get(ep.path))
               .find(Boolean);
@@ -312,7 +316,8 @@ function buildDisplayItems(
               kind: 'folder' as const,
               label,
               key: seasonKey,
-              thumbnailUri: overrides[`show:${navStack[0].showName!}`]?.poster || show.poster || firstEpThumb,
+              posterUri: overrides[`show:${navStack[0].showName!}`]?.poster || show.poster || undefined,
+              thumbnailUri: firstEpThumb,
               onPress: () =>
                 navigateInto({
                   label,
@@ -559,11 +564,12 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             extraData={`${editMode}|${pressedKey ?? ''}`}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
-              const hasPoster = item.kind === 'file' && !!item.posterUri;
+              // Both folder (show/season) and file (movie/episode) items can have a poster.
+              const hasPoster = !!item.posterUri;
               const hasBothImages = hasPoster && !!item.thumbnailUri;
               const isRevealed = pressedKey === item.key;
-              // Files with a poster show the poster by default; long-press reveals the video thumbnail (unless in edit mode).
-              const displaySource = hasPoster && !isRevealed
+              // Items with a poster show the poster by default; long-press reveals the video thumbnail (unless in edit mode).
+              const displaySource = item.posterUri && !isRevealed
                 ? { uri: item.posterUri }
                 : typeof item.thumbnailUri === 'string'
                   ? { uri: item.thumbnailUri }
