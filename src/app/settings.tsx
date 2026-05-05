@@ -54,7 +54,7 @@ export default function SettingsPrompt() {
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
   const containerStyle = useMemo(
-    () => [styles.container, { backgroundColor: theme.background }] as const,
+    () => [styles.container, { backgroundColor: theme.background }],
     [theme.background],
   );
 
