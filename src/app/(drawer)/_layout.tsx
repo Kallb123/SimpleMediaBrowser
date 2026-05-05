@@ -32,7 +32,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     state: {
       ...props.state,
       routes: mainRoutes,
-      index: mainIndex >= 0 ? mainIndex : props.state.index,
+      index: mainIndex >= 0 ? mainIndex : 0,
     },
   };
 
