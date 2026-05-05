@@ -1,6 +1,5 @@
-import { Image, StyleSheet, Button, Switch } from 'react-native';
+import { StyleSheet, Button, Switch, ScrollView } from 'react-native';
 import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
@@ -35,14 +34,7 @@ export default function FirstTime() {
   }, [password, enableThumbnailGeneration, dispatch]);
 
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
+    <ScrollView contentContainerStyle={styles.contentContainer}>
       <ThemedView style={styles.titleContainer}>
         <ThemedText type="title">Welcome to Simple Media Browser</ThemedText>
         <HelloWave />
@@ -88,19 +80,21 @@ export default function FirstTime() {
       <ThemedView style={styles.footerContainer}>
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
       </ThemedView>
-    </ParallaxScrollView>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+    gap: 12,
+  },
   titleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
   },
   addedNote: {
     fontSize: 13,
@@ -114,13 +108,6 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     opacity: 0.6,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
   },
 });
 
