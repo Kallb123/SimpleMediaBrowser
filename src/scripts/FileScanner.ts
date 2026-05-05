@@ -2,6 +2,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { StorageAccessFramework } from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { store } from "@/store/store";
 import { setScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason, MergeEpisodePayload } from "@/store/libraryReducer";
@@ -28,12 +29,88 @@ export interface IMediaObject {
 export type { IMediaLibrary, IMediaShow, IMediaSeason };
 
 /**
- * In-memory cache of VideoThumbnail SharedRef objects keyed by media file path.
- * VideoThumbnail cannot be stored in Redux (non-serializable), so this module-level
- * cache holds them for the lifetime of the JS runtime (i.e., the current app session).
- * Thumbnails are regenerated on each new scan if the cache is empty.
+ * Cross-session cache of thumbnail sources keyed by media file path.
+ *
+ * Values are either:
+ * - A `string` local `file://` URI loaded from the persistent on-disk index at
+ *   startup, or written there after a thumbnail is first generated.
+ * - A `VideoThumbnail` SharedRef for thumbnails whose disk-persist step failed
+ *   (in-session fallback only; they will be regenerated on the next restart).
+ *
+ * Because `VideoThumbnail` is non-serialisable it cannot be stored in Redux;
+ * string URIs for thumbnails that were already persisted are used instead.
  */
-export const thumbnailCache = new Map<string, VideoThumbnail>();
+export const thumbnailCache = new Map<string, VideoThumbnail | string>();
+
+/** Persistent directory where generated thumbnail JPEG files are stored. */
+const THUMBNAILS_DIR = new Directory(Paths.document, 'smb_thumbnails');
+
+/** JSON index file that maps video-file paths to their thumbnail file URIs. */
+const THUMBNAIL_INDEX_FILE = new File(THUMBNAILS_DIR, 'index.json');
+
+/** Maps video-file path → local thumbnail file URI (persisted across restarts). */
+type ThumbnailIndex = Record<string, string>;
+
+/**
+ * Returns a short, stable filename for the thumbnail corresponding to `videoPath`.
+ *
+ * Uses two independent DJB2-family hash passes over the full path to give a
+ * 128-bit-equivalent name (two independent 32-bit values) so the probability
+ * of any collision in even a very large library is negligible.  The sanitised
+ * filename component is appended as a final disambiguator for human readability.
+ */
+function thumbnailFilename(videoPath: string): string {
+    let h1 = 5381;
+    let h2 = 0x811c9dc5;
+    for (let i = 0; i < videoPath.length; i++) {
+        const c = videoPath.charCodeAt(i);
+        h1 = (((h1 << 5) + h1) ^ c) | 0;   // DJB2xor variant
+        h2 = ((h2 ^ c) * 0x01000193) | 0;   // FNV-1a 32-bit variant
+    }
+    const segment = Math.abs(h1).toString(16).padStart(8, '0') +
+                    Math.abs(h2).toString(16).padStart(8, '0');
+    const filename = videoPath.substring(videoPath.lastIndexOf('/') + 1);
+    const safe = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40);
+    return `thumb_${segment}_${safe}.jpg`;
+}
+
+/**
+ * Reads the on-disk thumbnail index and pre-populates {@link thumbnailCache}
+ * with string URIs for files that already have a persisted thumbnail.
+ * Returns the parsed index (or an empty object on any error).
+ */
+function loadThumbnailIndex(): ThumbnailIndex {
+    try {
+        if (!THUMBNAIL_INDEX_FILE.exists) return {};
+        const json = THUMBNAIL_INDEX_FILE.textSync();
+        const index: ThumbnailIndex = JSON.parse(json);
+        let count = 0;
+        for (const [videoPath, thumbUri] of Object.entries(index)) {
+            thumbnailCache.set(videoPath, thumbUri);
+            count++;
+        }
+        logger.log('FileScanner', `Loaded ${count} thumbnail(s) from disk cache`);
+        return index;
+    } catch (e) {
+        logger.warn('FileScanner', 'Failed to load thumbnail index from disk', e);
+        return {};
+    }
+}
+
+/**
+ * Persists the given thumbnail index to disk so it can be reloaded next session.
+ * Safe to call with an empty object (clears the index file).
+ */
+function saveThumbnailIndex(index: ThumbnailIndex): void {
+    try {
+        if (!THUMBNAILS_DIR.exists) {
+            THUMBNAILS_DIR.create({ intermediates: true, idempotent: true });
+        }
+        THUMBNAIL_INDEX_FILE.write(JSON.stringify(index));
+    } catch (e) {
+        logger.warn('FileScanner', 'Failed to save thumbnail index to disk', e);
+    }
+}
 
 const VIDEO_EXTENSIONS = new Set([
     '.mkv', '.mp4', '.avi', '.mov', '.m4v', '.wmv', '.flv',
@@ -285,6 +362,10 @@ export class FileScanner {
         ];
         const enableThumbnailGeneration = store.getState().settingsReducer.enableThumbnailGeneration ?? false;
         if (enableThumbnailGeneration) {
+            // Load the on-disk thumbnail index and pre-populate the cache with persistent URIs.
+            // This must run before filtering uncached files so already-persisted thumbnails
+            // are treated as cached and skipped.
+            const diskIndex = loadThumbnailIndex();
             const uncached = allMediaFiles.filter((m) => !thumbnailCache.has(m.path));
             logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
             if (uncached.length > 0) {
@@ -305,7 +386,15 @@ export class FileScanner {
                             if (!thumbnail) {
                                 throw new Error('No thumbnail returned by expo-video');
                             }
-                            thumbnailCache.set(media.path, thumbnail);
+                            // Attempt to persist the thumbnail to disk so it survives restarts.
+                            const diskUri = await this.persistThumbnail(media.path, thumbnail);
+                            if (diskUri) {
+                                thumbnailCache.set(media.path, diskUri);
+                                diskIndex[media.path] = diskUri;
+                            } else {
+                                // Disk-persist failed; keep the VideoThumbnail for this session only.
+                                thumbnailCache.set(media.path, thumbnail);
+                            }
                             thumbSuccess++;
                         } catch (e) {
                             thumbFail++;
@@ -325,6 +414,8 @@ export class FileScanner {
                     }),
                 );
                 logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+                // Persist the updated index (existing entries + any newly generated ones).
+                saveThumbnailIndex(diskIndex);
             } else {
                 logger.log('FileScanner', 'All thumbnails already cached – skipping thumbnail generation');
             }
@@ -626,6 +717,40 @@ export class FileScanner {
             };
             releasable.release?.();
             releasable.destroy?.();
+        }
+    }
+
+    /**
+     * Saves a generated `VideoThumbnail` to the persistent `smb_thumbnails/`
+     * directory as a JPEG file.
+     *
+     * @returns The local `file://` URI of the saved thumbnail, or `null` if
+     *          saving failed (the caller should fall back to the in-memory
+     *          `VideoThumbnail` for the current session only).
+     */
+    private async persistThumbnail(videoPath: string, thumbnail: VideoThumbnail): Promise<string | null> {
+        try {
+            if (!THUMBNAILS_DIR.exists) {
+                THUMBNAILS_DIR.create({ intermediates: true, idempotent: true });
+            }
+            const destFile = new File(THUMBNAILS_DIR, thumbnailFilename(videoPath));
+            if (destFile.exists) {
+                // Already on disk (e.g. written by a previous in-session call).
+                return destFile.uri;
+            }
+            // Render the native image to a temporary JPEG in the system cache dir.
+            const context = ImageManipulator.manipulate(thumbnail);
+            const imageRef = await context.renderAsync();
+            const result = await imageRef.saveAsync({ format: SaveFormat.JPEG, compress: 0.85 });
+            // Copy from the (evictable) cache dir to our persistent document dir.
+            const tempFile = new File(result.uri);
+            tempFile.copy(destFile);
+            // Clean up the temporary file now that it has been copied.
+            try { tempFile.delete(); } catch { /* ignore – the OS will evict it eventually */ }
+            return destFile.uri;
+        } catch (e) {
+            logger.warn('FileScanner', `Failed to persist thumbnail to disk for ${videoPath}`, e);
+            return null;
         }
     }
 
