@@ -15,6 +15,8 @@ import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 
+const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
+
 class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -51,6 +53,10 @@ export default function SettingsPrompt() {
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
+  const containerStyle = useMemo(
+    () => [styles.container, { backgroundColor: theme.background }] as const,
+    [theme.background],
+  );
 
   const [password, setLocalPassword] = useState(null as string | null);
   const [tmdbApiKey, setLocalTmdbApiKey] = useState(null as string | null);
@@ -272,7 +278,7 @@ export default function SettingsPrompt() {
   return (
     <SettingsErrorBoundary>
     <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={save} /> }} />
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView style={containerStyle} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
       {/* Access */}
       <View style={styles.section}>
@@ -426,9 +432,9 @@ export default function SettingsPrompt() {
             dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
           />
         </View>
-        {structureDescription ? (
+        {structureDescription && (
           <ThemedText style={styles.emptyText}>{structureDescription}</ThemedText>
-        ) : null}
+        )}
 
         <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>Interface type:</ThemedText>
@@ -464,7 +470,7 @@ export default function SettingsPrompt() {
         <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>UI scale:</ThemedText>
           <Slider
-            style={{width: 200, height: 40}}
+            style={styles.slider}
             minimumValue={1}
             maximumValue={10}
             step={1}
@@ -535,7 +541,7 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(128,128,128,0.35)',
+    borderTopColor: DIVIDER_COLOR,
   },
   sectionTitle: {
     marginBottom: 2,
@@ -627,5 +633,9 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     opacity: 0.6,
+  },
+  slider: {
+    width: 200,
+    height: 40,
   },
 });

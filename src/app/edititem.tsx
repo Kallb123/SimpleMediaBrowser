@@ -33,6 +33,7 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
 const POSTER_FULL_URL = 'https://image.tmdb.org/t/p/w500';
 const POSTERS_DIR = (FileSystem.Paths.document ?? '') + 'smb_posters/';
+const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 
 /**
  * Remove common year suffixes so TMDB can find titles like "Breaking Bad (2008)"
@@ -460,7 +461,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(128,128,128,0.35)',
+    borderTopColor: DIVIDER_COLOR,
   },
   sectionTitle: {
     fontSize: 15,
@@ -544,7 +545,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(128,128,128,0.35)',
+    borderBottomColor: DIVIDER_COLOR,
   },
   resultRowSelected: {
     backgroundColor: 'rgba(10,126,164,0.12)',
