@@ -17,6 +17,7 @@ import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
+const DESTRUCTIVE_COLOR = '#E55';
 
 class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {
@@ -694,7 +695,7 @@ const styles = StyleSheet.create({
   },
   deleteButtonText: {
     fontSize: 16,
-    color: '#E55',
+    color: DESTRUCTIVE_COLOR,
   },
   dropdownButtonStyle: {
     width: 220,
@@ -769,7 +770,7 @@ const styles = StyleSheet.create({
   troubleshootingButtonText: {
     fontSize: 15,
     fontWeight: '500',
-    color: '#E55',
+    color: DESTRUCTIVE_COLOR,
   },
   troubleshootingButtonDesc: {
     fontSize: 12,
