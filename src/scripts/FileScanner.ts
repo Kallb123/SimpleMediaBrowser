@@ -280,10 +280,11 @@ interface StreamState {
  * separately so the TMDB enrichment pass can select the correct result.
  */
 function normalizeShowName(raw: string): { name: string; year: number } {
-    const yearMatch = raw.match(/\s*[\[(]?(\d{4})[\])]?\s*$/);
-    const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+    // Require balanced brackets: (YYYY), [YYYY], or bare YYYY at end of string.
+    const yearMatch = raw.match(/\s*(?:\((\d{4})\)|\[(\d{4})\]|(\d{4}))\s*$/);
+    const year = yearMatch ? parseInt(yearMatch[1] ?? yearMatch[2] ?? yearMatch[3], 10) : 0;
     // Strip the matched suffix; fall back to the original if stripping leaves an empty string.
-    const name = (yearMatch ? raw.slice(0, yearMatch.index).trim() : raw.trim()) || raw.trim();
+    const name = yearMatch ? (raw.slice(0, yearMatch.index).trim() || raw.trim()) : raw.trim();
     return { name, year };
 }
 

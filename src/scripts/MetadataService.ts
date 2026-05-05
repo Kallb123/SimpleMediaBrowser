@@ -17,6 +17,14 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Parse the year from a TMDB date string (e.g. "2018-04-23") or return 0.
+ * Centralises the repeated `parseInt(dateStr.substring(0, 4), 10)` pattern.
+ */
+function extractYearFromDate(dateString?: string): number {
+    return dateString ? parseInt(dateString.substring(0, 4), 10) : 0;
+}
+
+/**
  * Remove common year suffixes so TMDB can find titles like "Breaking Bad (2008)"
  * or "Movie Title 2008". Strips patterns like "(2008)", "[2008]", or " 2008" at
  * the end of the string.
@@ -168,10 +176,7 @@ export class MetadataService {
                 const showYear = show.year;
                 let bestResult = results[0];
                 if (showYear > 0) {
-                    const yearMatch = results.find((r) => {
-                        const y = r.first_air_date ? parseInt(r.first_air_date.substring(0, 4), 10) : 0;
-                        return y === showYear;
-                    });
+                    const yearMatch = results.find((r) => extractYearFromDate(r.first_air_date) === showYear);
                     if (yearMatch) bestResult = yearMatch;
                 }
 
@@ -183,9 +188,7 @@ export class MetadataService {
 
                 const tmdbId = String(bestResult.id);
                 const tmdbTitle = bestResult.name ?? showName;
-                const tmdbYear = bestResult.first_air_date
-                    ? parseInt(bestResult.first_air_date.substring(0, 4), 10)
-                    : 0;
+                const tmdbYear = extractYearFromDate(bestResult.first_air_date);
                 const localUri = await downloadPoster(tmdbId, bestResult.poster_path);
                 store.dispatch(updateShowMetadata({
                     showName,

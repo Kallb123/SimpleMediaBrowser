@@ -307,7 +307,7 @@ export const settingsSlice = createSlice({
         // Accumulate raw names for provenance tracking
         if (!keepShow.rawNames) keepShow.rawNames = [];
         const existingRaw = new Set(keepShow.rawNames);
-        for (const n of (removeShow.rawNames?.length ? removeShow.rawNames : [removeKey])) {
+        for (const n of (removeShow.rawNames && removeShow.rawNames.length > 0 ? removeShow.rawNames : [removeKey])) {
           if (!existingRaw.has(n)) {
             keepShow.rawNames.push(n);
             existingRaw.add(n);
