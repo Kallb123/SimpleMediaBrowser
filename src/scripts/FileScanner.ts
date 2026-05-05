@@ -225,7 +225,15 @@ async function copyLocalPoster(sourceUri: string, key: string): Promise<string> 
 }
 
 interface ParsedMetadata {
+    /** Canonical (normalized) show name, used as the Redux library key. */
     showName: string;
+    /**
+     * Raw name before year-suffix stripping (equals showName when no suffix was
+     * removed).  Stored on the library entry for debugging and provenance.
+     */
+    rawShowName: string;
+    /** Year extracted from the raw show name/folder suffix (0 if not present). */
+    showYear: number;
     season: number;
     episode: number;
     title: string;
@@ -257,7 +265,30 @@ interface StreamState {
     moviePathsByFolder: Map<string, string[]>;
 }
 
+/**
+ * Strips a trailing year suffix from a raw show/folder name and returns the
+ * canonical name together with the extracted year.
+ *
+ * Patterns recognised (at end of string):
+ *   "Bluey (2018)"  →  name: "Bluey",  year: 2018
+ *   "Bluey [2018]"  →  name: "Bluey",  year: 2018
+ *   "Bluey 2018"    →  name: "Bluey",  year: 2018
+ *   "Bluey"         →  name: "Bluey",  year: 0
+ *
+ * This allows folders named "Bluey" and "Bluey (2018)" to be merged under the
+ * single canonical key "Bluey" in the Redux library, while the year is stored
+ * separately so the TMDB enrichment pass can select the correct result.
+ */
+function normalizeShowName(raw: string): { name: string; year: number } {
+    const yearMatch = raw.match(/\s*[\[(]?(\d{4})[\])]?\s*$/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+    // Strip the matched suffix; fall back to the original if stripping leaves an empty string.
+    const name = (yearMatch ? raw.slice(0, yearMatch.index).trim() : raw.trim()) || raw.trim();
+    return { name, year };
+}
+
 export class FileScanner {
+
     static myInstance: FileScanner | null = null;
 
     _userID = "";
@@ -578,8 +609,9 @@ export class FileScanner {
                             posterMap.set(folderKey, localUri);
                             // Immediately update already-dispatched Redux entries with the poster.
                             if (streamState.sourceType === 'tv') {
-                                // Show may already be in Redux from a previous batch flush.
-                                store.dispatch(updateShowPoster({ showName: folderKey, poster: localUri }));
+                                // The library key uses the normalized show name, not the raw folder name.
+                                const normalizedKey = normalizeShowName(folderKey).name;
+                                store.dispatch(updateShowPoster({ showName: normalizedKey, poster: localUri }));
                             } else {
                                 // Update any movies already flushed to Redux for this folder.
                                 for (const path of streamState.moviePathsByFolder.get(folderKey) ?? []) {
@@ -642,13 +674,15 @@ export class FileScanner {
         if (streamState.sourceType === 'tv') {
             const metadata = this.parseMediaFile(file);
             if (!metadata) return;
-            const { showName, season, episode, title } = metadata;
+            const { showName, rawShowName, showYear, season, episode, title } = metadata;
             const folderPoster = folderKey ? (posterMap.get(folderKey) ?? '') : '';
             const seasonKey = `s${String(season).padStart(2, '0')}`;
             const episodeKey = `e${String(episode).padStart(2, '0')}`;
             const { relativePathParts: _, ...mediaObj } = file;
             streamState.episodeBatch.push({
                 showName,
+                rawShowName,
+                folderYear: showYear,
                 folderPoster,
                 seasonKey,
                 seasonNumber: season,
@@ -786,7 +820,7 @@ export class FileScanner {
             const metadata = this.parseMediaFile(file);
             if (!metadata) continue;
 
-            const { showName, season, episode, title } = metadata;
+            const { showName, rawShowName, showYear, season, episode, title } = metadata;
 
             if (!library[showName]) {
                 // Use the raw folder name (relativePathParts[0]) to look up any local
@@ -797,10 +831,23 @@ export class FileScanner {
                 library[showName] = {
                     ids: { tvdb: null, imdb: null, tmdb: null },
                     title: showName,
-                    year: 0,
+                    year: showYear,
                     poster: folderPoster,
                     seasons: {},
+                    rawNames: rawShowName !== showName ? [rawShowName] : [],
                 };
+            } else {
+                // Back-fill year if not yet recorded for this canonical show
+                if (showYear > 0 && !library[showName].year) {
+                    library[showName].year = showYear;
+                }
+                // Track raw folder/filename names that were merged under this key
+                if (rawShowName !== showName) {
+                    if (!library[showName].rawNames) library[showName].rawNames = [];
+                    if (!library[showName].rawNames!.includes(rawShowName)) {
+                        library[showName].rawNames!.push(rawShowName);
+                    }
+                }
             }
 
             const seasonKey = `s${String(season).padStart(2, '0')}`;
@@ -854,8 +901,12 @@ export class FileScanner {
             /^(.*?)[\.\s_-]+\b[Ss](\d{1,2})[Ee](\d{1,3})\b(?:[\.\s_-]+(.*))?$/,
         );
         if (sxxMatch) {
+            const rawShowName = this.cleanName(sxxMatch[1]);
+            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
             return {
-                showName: this.cleanName(sxxMatch[1]),
+                showName,
+                rawShowName,
+                showYear,
                 season: parseInt(sxxMatch[2], 10),
                 episode: parseInt(sxxMatch[3], 10),
                 title: sxxMatch[4] ? this.cleanName(sxxMatch[4]) : '',
@@ -868,8 +919,12 @@ export class FileScanner {
             /^(.*?)[\.\s_-]+\b(\d{1,2})x(\d{1,3})\b(?:[\.\s_-]+(.*))?$/,
         );
         if (nxnnMatch) {
+            const rawShowName = this.cleanName(nxnnMatch[1]);
+            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
             return {
-                showName: this.cleanName(nxnnMatch[1]),
+                showName,
+                rawShowName,
+                showYear,
                 season: parseInt(nxnnMatch[2], 10),
                 episode: parseInt(nxnnMatch[3], 10),
                 title: nxnnMatch[4] ? this.cleanName(nxnnMatch[4]) : '',
@@ -904,7 +959,8 @@ export class FileScanner {
 
         if (parts.length >= 2) {
             // rootDir/ShowName/SeasonFolder/episode.mkv  (or deeper)
-            const showName = parts[0];
+            const rawShowName = parts[0];
+            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
             const seasonFolder = parts[1];
             // Prefer an explicit 'Season N' word; otherwise take the first digit run.
             const namedSeasonMatch = seasonFolder.match(/[Ss]eason\s*(\d+)/i);
@@ -913,12 +969,14 @@ export class FileScanner {
                 ? namedSeasonMatch[1]
                 : rawNumberMatch?.[1] ?? '1';
             const season = parseInt(seasonStr, 10);
-            return { showName, season, episode, title: baseTitle };
+            return { showName, rawShowName, showYear, season, episode, title: baseTitle };
         }
 
         if (parts.length === 1) {
             // rootDir/ShowName/episode.mkv
-            return { showName: parts[0], season: 1, episode, title: baseTitle };
+            const rawShowName = parts[0];
+            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
+            return { showName, rawShowName, showYear, season: 1, episode, title: baseTitle };
         }
 
         // File is directly in the root scan directory with no enclosing folder;
