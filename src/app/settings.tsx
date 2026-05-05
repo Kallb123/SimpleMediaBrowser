@@ -15,6 +15,7 @@ import { Colors } from '@/constants/Colors';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
+import { useEditMode } from '@/contexts/EditModeContext';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 const DESTRUCTIVE_COLOR = '#E55';
@@ -52,6 +53,7 @@ export default function SettingsPrompt() {
   const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const theme = Colors[colorScheme];
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
+  const { drawerUnlocked } = useEditMode();
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
@@ -145,6 +147,14 @@ export default function SettingsPrompt() {
       return [] as IMediaSource[];
     }
   }, [mediaSources]);
+
+  useEffect(() => {
+    if (!drawerUnlocked) {
+      logger.warn('Settings', 'Blocked settings access while drawer is locked');
+      router.replace('/(drawer)');
+      return;
+    }
+  }, [drawerUnlocked]);
 
   useEffect(() => {
     try {
