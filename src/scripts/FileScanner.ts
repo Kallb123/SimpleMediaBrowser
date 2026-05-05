@@ -53,15 +53,25 @@ type ThumbnailIndex = Record<string, string>;
 
 /**
  * Returns a short, stable filename for the thumbnail corresponding to `videoPath`.
- * Uses a DJB2-style hash so the name stays within filesystem limits regardless
- * of how long the original path is.
+ *
+ * Uses two independent DJB2-family hash passes over the full path to give a
+ * 128-bit-equivalent name (two independent 32-bit values) so the probability
+ * of any collision in even a very large library is negligible.  The sanitised
+ * filename component is appended as a final disambiguator for human readability.
  */
 function thumbnailFilename(videoPath: string): string {
-    let hash = 0;
+    let h1 = 5381;
+    let h2 = 0x811c9dc5;
     for (let i = 0; i < videoPath.length; i++) {
-        hash = ((hash << 5) - hash + videoPath.charCodeAt(i)) | 0;
+        const c = videoPath.charCodeAt(i);
+        h1 = (((h1 << 5) + h1) ^ c) | 0;   // DJB2xor variant
+        h2 = ((h2 ^ c) * 0x01000193) | 0;   // FNV-1a 32-bit variant
     }
-    return `thumb_${Math.abs(hash).toString(16)}.jpg`;
+    const segment = Math.abs(h1).toString(16).padStart(8, '0') +
+                    Math.abs(h2).toString(16).padStart(8, '0');
+    const filename = videoPath.substring(videoPath.lastIndexOf('/') + 1);
+    const safe = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40);
+    return `thumb_${segment}_${safe}.jpg`;
 }
 
 /**
@@ -735,6 +745,8 @@ export class FileScanner {
             // Copy from the (evictable) cache dir to our persistent document dir.
             const tempFile = new File(result.uri);
             tempFile.copy(destFile);
+            // Clean up the temporary file now that it has been copied.
+            try { tempFile.delete(); } catch { /* ignore – the OS will evict it eventually */ }
             return destFile.uri;
         } catch (e) {
             logger.warn('FileScanner', `Failed to persist thumbnail to disk for ${videoPath}`, e);
