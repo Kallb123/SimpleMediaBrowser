@@ -28,7 +28,7 @@ type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season'; count?: number; countUnit?: 'seasons' | 'episodes' }
+  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season'; count?: number }
   | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
@@ -180,7 +180,6 @@ function buildDisplayItems(
               onPress: () => navigateInto({ label: showName, showName }),
               mediaType: 'show' as const,
               count: episodeCount,
-              countUnit: 'episodes' as const,
             };
           });
         const movieItems: DisplayItem[] = movies.map((movie) => ({
@@ -244,7 +243,6 @@ function buildDisplayItems(
               onPress: () => navigateInto({ label, showName, seasonKey }),
               mediaType: 'season',
               count: Object.keys(season.episodes).length,
-              countUnit: 'episodes' as const,
             });
           }
         }
@@ -296,8 +294,10 @@ function buildDisplayItems(
             thumbnailUri: pickShowThumbnail(library, showName),
             onPress: () => navigateInto({ label: showName, showName }),
             mediaType: 'show' as const,
-            count: Object.keys(library[showName].seasons).length,
-            countUnit: 'seasons' as const,
+            count: Object.values(library[showName].seasons).reduce(
+              (sum, season) => sum + Object.keys(season.episodes).length,
+              0,
+            ),
           }));
         const movieItems: DisplayItem[] = movies.map((movie) => ({
           kind: 'file' as const,
@@ -339,7 +339,6 @@ function buildDisplayItems(
                 }),
               mediaType: 'season' as const,
               count: Object.keys(season.episodes).length,
-              countUnit: 'episodes' as const,
             };
           });
       }
@@ -652,7 +651,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                     {item.kind === 'folder' && item.count !== undefined && (
                       <View
                         style={styles.countBadge}
-                        accessibilityLabel={`${item.count} ${item.count === 1 ? (item.countUnit === 'seasons' ? 'season' : 'episode') : item.countUnit}`}
+                        accessibilityLabel={`${item.count} ${item.count === 1 ? 'episode' : 'episodes'}`}
                       >
                         <ThemedText style={styles.countBadgeText}>{item.count}</ThemedText>
                       </View>
