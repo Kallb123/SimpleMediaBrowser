@@ -551,7 +551,7 @@ export class FileScanner {
         const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(
             directory,
             new Semaphore(MAX_CONCURRENT_DIR_READS),
-            { filesFound: 0 },
+            { filesFound: 0, currentSourceIndex: 1, sourcesTotal: 1 },
             'tv',
         );
         const library = this.buildLibrary(allMediaFiles, posterMap);
