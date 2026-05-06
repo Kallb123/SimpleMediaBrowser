@@ -27,21 +27,13 @@ import {
 import { selectTmdbApiKey } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
 import { File, Directory, Paths } from 'expo-file-system';
+import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
 const POSTER_FULL_URL = 'https://image.tmdb.org/t/p/w500';
 const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
-
-/**
- * Remove common year suffixes so TMDB can find titles like "Breaking Bad (2008)"
- * or "Movie Title 2008". Strips patterns like "(2008)", "[2008]", or " 2008" at
- * the end of the string.
- */
-function stripYearSuffix(title: string): string {
-  return title.replace(/\s*[\[(]?\d{4}[\])]?\s*$/, '').trim();
-}
 
 interface TmdbResult {
   id: number;
@@ -199,7 +191,7 @@ export default function EditItemScreen() {
     setLoadingPostersForId(null);
     try {
       const endpoint = itemType === 'movie' ? 'movie' : 'tv';
-      const tmdbQuery = stripYearSuffix(searchQuery.trim());
+      const tmdbQuery = buildTmdbSearchQuery(searchQuery.trim());
       const url =
         `${TMDB_BASE_URL}/search/${endpoint}` +
         `?api_key=${encodeURIComponent(tmdbApiKey)}` +

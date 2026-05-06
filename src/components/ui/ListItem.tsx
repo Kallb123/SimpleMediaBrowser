@@ -7,6 +7,7 @@ export type ListItemProps = {
   rowHeight: number;
   editMode: boolean;
   isEditable: boolean;
+  isSelected?: boolean;
   count?: number;
   onPress: () => void;
   onLongPress?: () => void;
@@ -18,6 +19,7 @@ export function ListItem({
   rowHeight,
   editMode,
   isEditable,
+  isSelected,
   count,
   onPress,
   onLongPress,
@@ -29,7 +31,7 @@ export function ListItem({
     <TouchableOpacity
       onPress={onPress}
       onLongPress={onLongPress}
-      style={[styles.row, { height: rowHeight }]}
+      style={[styles.row, { height: rowHeight }, isSelected && styles.rowSelected]}
     >
       <ThemedText style={styles.icon}>{icon}</ThemedText>
       <ThemedText style={styles.label} numberOfLines={1}>{label}</ThemedText>
@@ -41,9 +43,11 @@ export function ListItem({
           <ThemedText style={styles.countBadgeText}>{count}</ThemedText>
         </View>
       )}
-      {editMode && isEditable && (
+      {isSelected ? (
+        <ThemedText style={styles.selectedIcon}>✓</ThemedText>
+      ) : editMode && isEditable ? (
         <ThemedText style={styles.editIcon}>✏️</ThemedText>
-      )}
+      ) : null}
     </TouchableOpacity>
   );
 }
@@ -56,6 +60,9 @@ const styles = StyleSheet.create({
     gap: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(128,128,128,0.3)',
+  },
+  rowSelected: {
+    backgroundColor: 'rgba(10,126,164,0.18)',
   },
   icon: {
     fontSize: 20,
@@ -76,5 +83,10 @@ const styles = StyleSheet.create({
   },
   editIcon: {
     fontSize: 14,
+  },
+  selectedIcon: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0a7ea4',
   },
 });
