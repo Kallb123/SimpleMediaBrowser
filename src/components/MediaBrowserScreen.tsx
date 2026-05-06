@@ -2,6 +2,7 @@ import { BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } 
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
