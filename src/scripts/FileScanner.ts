@@ -17,7 +17,28 @@ export interface IMediaObject {
         tmdb: string | null;
     }
     episodeNumber: number;
+    /**
+     * Display title for the episode or movie.  For TV episodes this is the
+     * scanned title derived from the local filename (see also `scannedTitle`).
+     * Prefer `tmdbTitle` for display when it is available.
+     */
     title: string;
+    /**
+     * The title as parsed from the local filename or folder structure during
+     * scanning.  Stored separately so the TMDB-sourced title (`tmdbTitle`) can
+     * be displayed without losing the original locally-derived value.
+     */
+    scannedTitle?: string;
+    /**
+     * Episode name fetched from TMDB (TV episodes only).
+     * When present, the UI prefers this over the locally-scanned title.
+     */
+    tmdbTitle?: string;
+    /**
+     * Local file URI for the episode still image downloaded from TMDB.
+     * TV episodes only.  Used as the episode "poster" in the grid/list UI.
+     */
+    tmdbThumbnail?: string;
     filename: string
     path: string
     parsedPath: string
@@ -424,20 +445,46 @@ export class FileScanner {
         const prevLibrary = store.getState().libraryReducer.mediaLibrary;
         for (const [showName, show] of Object.entries(mergedLibrary)) {
             const prev = prevLibrary[showName];
-            if (prev?.ids.tmdb && prev?.poster) {
+            if (prev?.ids.tmdb) {
                 try {
-                    if (new File(prev.poster).exists) {
-                        // Always restore the TMDB ID so deduplication and the edit screen
-                        // continue to work correctly without requiring a full re-enrichment.
-                        show.ids.tmdb = prev.ids.tmdb;
-                        // Only restore the TMDB poster when the new scan did not find a
-                        // local folder image (folder.jpg / poster.jpg etc.) for this show.
-                        if (!show.poster) {
-                            show.poster = prev.poster;
+                    // Always restore the TMDB ID so deduplication and the edit screen
+                    // continue to work correctly without requiring a full re-enrichment.
+                    show.ids.tmdb = prev.ids.tmdb;
+                    if (prev.poster) {
+                        try {
+                            if (new File(prev.poster).exists) {
+                                // Only restore the TMDB poster when the new scan did not find a
+                                // local folder image (folder.jpg / poster.jpg etc.) for this show.
+                                if (!show.poster) {
+                                    show.poster = prev.poster;
+                                }
+                            }
+                        } catch {
+                            // Ignore file-existence errors; the poster will be re-fetched during enrichment.
+                        }
+                    }
+                    // Carry over episode-level TMDB metadata (names + stills) so they
+                    // survive rescans without requiring a full re-enrichment from the API.
+                    for (const [seasonKey, season] of Object.entries(show.seasons)) {
+                        const prevSeason = prev.seasons[seasonKey];
+                        if (!prevSeason) continue;
+                        for (const [epKey, ep] of Object.entries(season.episodes)) {
+                            const prevEp = prevSeason.episodes[epKey];
+                            if (!prevEp) continue;
+                            if (prevEp.tmdbTitle) ep.tmdbTitle = prevEp.tmdbTitle;
+                            if (prevEp.tmdbThumbnail) {
+                                try {
+                                    if (new File(prevEp.tmdbThumbnail).exists) {
+                                        ep.tmdbThumbnail = prevEp.tmdbThumbnail;
+                                    }
+                                } catch {
+                                    // ignore; thumbnail will be re-fetched during enrichment
+                                }
+                            }
                         }
                     }
                 } catch {
-                    // Ignore file-existence errors; the poster will be re-fetched during enrichment.
+                    // Ignore errors; metadata will be re-fetched during enrichment.
                 }
             }
         }
@@ -799,7 +846,7 @@ export class FileScanner {
                 seasonKey,
                 seasonNumber: season,
                 episodeKey,
-                episode: { ...mediaObj, title: title || file.filename, episodeNumber: episode },
+                episode: { ...mediaObj, title: title || file.filename, scannedTitle: title || file.filename, episodeNumber: episode },
             });
         } else {
             // Movie: derive title the same way buildMovieList does
@@ -976,9 +1023,11 @@ export class FileScanner {
             if (!library[showName].seasons[seasonKey].episodes[episodeKey]) {
                 // Strip the internal relativePathParts field before storing
                 const { relativePathParts, ...mediaObj } = file;
+                const resolvedTitle = title || file.filename;
                 library[showName].seasons[seasonKey].episodes[episodeKey] = {
                     ...mediaObj,
-                    title: title || file.filename,
+                    title: resolvedTitle,
+                    scannedTitle: resolvedTitle,
                     episodeNumber: episode,
                 };
             }

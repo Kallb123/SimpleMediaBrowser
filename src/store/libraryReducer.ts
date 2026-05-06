@@ -338,7 +338,8 @@ export const settingsSlice = createSlice({
      * Clears all cached poster data:
      * - Removes the `poster` field from every entry in `mediaOverrides`.
      * - Resets the poster URI to an empty string for every show and movie in the library.
-     * Call this after deleting the smb_posters directory from disk.
+     * - Clears `tmdbThumbnail` from every episode (TMDB stills will be re-fetched on next scan).
+     * Call this after deleting the smb_posters and smb_thumbnails_tmdb directories from disk.
      */
     clearPosterOverrides: (state) => {
       for (const key of Object.keys(state.mediaOverrides)) {
@@ -346,9 +347,38 @@ export const settingsSlice = createSlice({
       }
       for (const show of Object.values(state.mediaLibrary)) {
         show.poster = '';
+        for (const season of Object.values(show.seasons)) {
+          for (const ep of Object.values(season.episodes)) {
+            ep.tmdbThumbnail = undefined;
+          }
+        }
       }
       for (const movie of state.movies) {
         movie.poster = '';
+      }
+    },
+    /**
+     * Batch-updates episode metadata (tmdbTitle and/or tmdbThumbnail) for all
+     * episodes in one season fetched from the TMDB season endpoint.
+     * This is dispatched once per season after a single API call, avoiding
+     * the need for individual per-episode API calls.
+     */
+    updateSeasonEpisodeMetadata: (
+      state,
+      action: PayloadAction<{
+        showName: string;
+        seasonKey: string;
+        episodeUpdates: { [episodeKey: string]: { tmdbTitle?: string; tmdbThumbnail?: string } };
+      }>,
+    ) => {
+      const { showName, seasonKey, episodeUpdates } = action.payload;
+      const season = state.mediaLibrary[showName]?.seasons[seasonKey];
+      if (!season) return;
+      for (const [epKey, update] of Object.entries(episodeUpdates)) {
+        const ep = season.episodes[epKey];
+        if (!ep) continue;
+        if (update.tmdbTitle !== undefined) ep.tmdbTitle = update.tmdbTitle;
+        if (update.tmdbThumbnail !== undefined) ep.tmdbThumbnail = update.tmdbThumbnail;
       }
     },
   },
@@ -363,7 +393,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearAllOverrides } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
