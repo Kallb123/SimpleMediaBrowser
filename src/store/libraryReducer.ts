@@ -92,6 +92,13 @@ export interface ScanProgress {
   metadataDone: number;
   /** Total number of metadata items to process during enrichment. */
   metadataTotal: number;
+  /**
+   * 1-based index of the source currently being collected.
+   * Only present during the 'collecting' phase when there is more than one source.
+   */
+  currentSourceIndex?: number;
+  /** Total number of sources being scanned. Only present when there is more than one source. */
+  sourcesTotal?: number;
 }
 
 export type contentTypes = 'tv' | 'movie';

@@ -530,7 +530,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             <View style={styles.scanBanner}>
               <ThemedText style={styles.scanBannerText}>
                 {scanProgress.phase === 'collecting'
-                  ? `Scanning… found ${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''}`
+                  ? scanProgress.sourcesTotal && scanProgress.sourcesTotal > 1 && scanProgress.currentSourceIndex
+                    ? `Scanning library ${scanProgress.currentSourceIndex} of ${scanProgress.sourcesTotal}… (${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''} found)`
+                    : `Scanning… found ${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''}`
                   : scanProgress.phase === 'thumbnails'
                     ? `Generating thumbnails (${scanProgress.thumbnailsDone} / ${scanProgress.thumbnailsTotal})`
                     : `Fetching metadata… (${scanProgress.metadataDone} / ${scanProgress.metadataTotal})`}
@@ -701,9 +703,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             </>
           ) : (
             <ThemedText>
-              {scanProgress.filesFound > 0
-                ? `Found ${scanProgress.filesFound} file${scanProgress.filesFound === 1 ? '' : 's'} so far…`
-                : 'Scanning your library, please wait.'}
+              {scanProgress.sourcesTotal && scanProgress.sourcesTotal > 1 && scanProgress.currentSourceIndex
+                ? `Scanning library ${scanProgress.currentSourceIndex} of ${scanProgress.sourcesTotal}…`
+                : scanProgress.filesFound > 0
+                  ? `Found ${scanProgress.filesFound} file${scanProgress.filesFound === 1 ? '' : 's'} so far…`
+                  : 'Scanning your library, please wait.'}
             </ThemedText>
           )}
         </ThemedView>
