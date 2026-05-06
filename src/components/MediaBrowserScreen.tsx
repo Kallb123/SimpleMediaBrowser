@@ -1,4 +1,4 @@
-import { BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { BackHandler, FlatList, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -532,6 +532,35 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     });
   }, []);
 
+  /**
+   * Computes the common item handlers shared by both the list-mode (FlatList)
+   * and grid-mode (FlashList) renderItem callbacks.
+   */
+  const getItemHandlers = useCallback((item: DisplayItem) => {
+    const isEditable = (
+      item.mediaType === 'show' ||
+      item.mediaType === 'movie' ||
+      item.mediaType === 'episode'
+    );
+    const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
+    const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
+
+    let handlePress: () => void;
+    if (item.kind === 'folder') {
+      handlePress = item.onPress;
+    } else {
+      handlePress = () => {
+        logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
+        openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
+          logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
+        });
+      };
+    }
+
+    const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
+    return { isEditable, isShowAtRoot, isSelected, handlePress, onEditPress };
+  }, [editMode, navStack, selectedShows, openEditScreen]);
+
   return (
     <View style={styles.container}>
       {mediaSources.length > 0 && hasLibraryContent ? (
@@ -593,43 +622,25 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             </ThemedView>
           )}
 
-          <FlashList
-            data={displayItems}
-            keyExtractor={(item: DisplayItem) => item.key}
-            numColumns={numColumns}
-            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
-            renderItem={({ item }: { item: DisplayItem }) => {
-              const isFolder = item.kind === 'folder';
-              const isEditable = (
-                item.mediaType === 'show' ||
-                item.mediaType === 'movie' ||
-                item.mediaType === 'episode'
-              );
-              // Shows at root level get tap-to-select behaviour in edit mode.
-              const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
-              const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
-
-              // Folders always navigate; files always open in player.
-              let handlePress: () => void;
-              if (item.kind === 'folder') {
-                handlePress = item.onPress;
-              } else {
-                handlePress = () => {
-                  logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
-                  openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
-                    logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
-                  });
-                };
-              }
-
-              // Edit badge callback – lets the user navigate to the edit screen for this item.
-              const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
-
-              if (isListMode) {
+          {isListMode ? (
+            <FlatList
+              data={displayItems}
+              keyExtractor={(item: DisplayItem) => item.key}
+              // pressedKey is a poster-mode-only feature (thumbnail reveal), so it is
+              // intentionally excluded from list-mode extraData.
+              extraData={`${editMode}|${Array.from(selectedShows).join(',')}`}
+              getItemLayout={(_data, index) => ({
+                length: listRowHeight,
+                offset: listRowHeight * index,
+                index,
+              })}
+              renderItem={({ item }: { item: DisplayItem }) => {
+                const { isEditable, isShowAtRoot, isSelected, handlePress, onEditPress } = getItemHandlers(item);
                 // In edit mode, long press on a show at root selects it for merging.
                 const handleLongPress = editMode && isShowAtRoot
                   ? () => toggleShowSelection(item.key)
                   : undefined;
+
                 return (
                   <ListItem
                     kind={item.kind}
@@ -644,46 +655,56 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                     onEditPress={onEditPress}
                   />
                 );
-              }
+              }}
+              contentContainerStyle={styles.listContent}
+            />
+          ) : (
+            <FlashList
+              data={displayItems}
+              keyExtractor={(item: DisplayItem) => item.key}
+              numColumns={numColumns}
+              extraData={`${editMode}|${pressedKey ?? ''}|${Array.from(selectedShows).join(',')}`}
+              renderItem={({ item }: { item: DisplayItem }) => {
+                const { isEditable, isShowAtRoot, isSelected, handlePress, onEditPress } = getItemHandlers(item);
 
-              // Poster mode
-              const hasPoster = !!item.posterUri;
-              const hasBothImages = hasPoster && !!item.thumbnailUri;
-              const isRevealed = pressedKey === item.key;
+                const hasPoster = !!item.posterUri;
+                const hasBothImages = hasPoster && !!item.thumbnailUri;
+                const isRevealed = pressedKey === item.key;
 
-              // In edit mode: long press on a show at root selects it for merging;
-              // thumbnail reveal is disabled. Outside edit mode: long press reveals
-              // the video thumbnail when a poster is also available.
-              const handleLongPress = editMode
-                ? (isShowAtRoot ? () => toggleShowSelection(item.key) : undefined)
-                : hasBothImages
-                  ? () => setPressedKey(item.key)
-                  : undefined;
-              const handlePressOut = editMode
-                ? undefined
-                : hasBothImages
-                  ? () => setPressedKey(null)
-                  : undefined;
+                // In edit mode: long press on a show at root selects it for merging;
+                // thumbnail reveal is disabled. Outside edit mode: long press reveals
+                // the video thumbnail when a poster is also available.
+                const handleLongPress = editMode
+                  ? (isShowAtRoot ? () => toggleShowSelection(item.key) : undefined)
+                  : hasBothImages
+                    ? () => setPressedKey(item.key)
+                    : undefined;
+                const handlePressOut = editMode
+                  ? undefined
+                  : hasBothImages
+                    ? () => setPressedKey(null)
+                    : undefined;
 
-              return (
-                <PosterBox
-                  item={item}
-                  cardWidth={cardWidth}
-                  thumbnailHeight={thumbnailHeight}
-                  viewOrientation={viewOrientation}
-                  editMode={editMode}
-                  isRevealed={isRevealed}
-                  isEditable={isEditable}
-                  isSelected={isSelected}
-                  onPress={handlePress}
-                  onLongPress={handleLongPress}
-                  onPressOut={handlePressOut}
-                  onEditPress={onEditPress}
-                />
-              );
-            }}
-            contentContainerStyle={isListMode ? styles.listContent : styles.gridContent}
-          />
+                return (
+                  <PosterBox
+                    item={item}
+                    cardWidth={cardWidth}
+                    thumbnailHeight={thumbnailHeight}
+                    viewOrientation={viewOrientation}
+                    editMode={editMode}
+                    isRevealed={isRevealed}
+                    isEditable={isEditable}
+                    isSelected={isSelected}
+                    onPress={handlePress}
+                    onLongPress={handleLongPress}
+                    onPressOut={handlePressOut}
+                    onEditPress={onEditPress}
+                  />
+                );
+              }}
+              contentContainerStyle={styles.gridContent}
+            />
+          )}
           {/* Merge toolbar – visible when 2+ shows are selected in edit mode at root level */}
           {editMode && selectedShows.size >= 2 && navStack.length === 0 && (
             <View style={styles.mergeToolbar}>
