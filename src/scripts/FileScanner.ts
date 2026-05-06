@@ -326,6 +326,7 @@ export class FileScanner {
         // so that TV and movie sources contribute to the same running total.
         // currentSourceIndex (1-based) and sourcesTotal are also tracked here so
         // the throttled dispatches inside recursiveCollect can include them.
+        const sourceIndexByUri = new Map(sources.map((s, i) => [s.uri, i + 1]));
         const collectProgress = {
             filesFound: 0,
             currentSourceIndex: 1,
@@ -336,7 +337,7 @@ export class FileScanner {
         const allTvFiles: IScannedFile[] = [];
         const tvPosterMap = new Map<string, string>();
         for (const src of tvSources) {
-            collectProgress.currentSourceIndex = sources.findIndex((s) => s.uri === src.uri) + 1;
+            collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning TV source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
             const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv');
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
@@ -350,7 +351,7 @@ export class FileScanner {
         const allMovieFiles: IScannedFile[] = [];
         const moviePosterMap = new Map<string, string>();
         for (const src of movieSources) {
-            collectProgress.currentSourceIndex = sources.findIndex((s) => s.uri === src.uri) + 1;
+            collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning Movie source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
             const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie');
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
