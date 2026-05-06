@@ -110,7 +110,7 @@ export class MetadataService {
         }));
         // Shared mutable progress state threaded through both enrichment tasks so TV + movie
         // completions both contribute to the same running total.
-        const progress = { done: 0, total: metadataTotal };
+        const progress = { done: 0 };
         // Dispatch progress every N items to avoid flooding Redux for large libraries,
         // and always on the final item so the counter reaches 100%.
         const METADATA_PROGRESS_INTERVAL = 5;

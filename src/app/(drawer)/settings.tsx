@@ -352,7 +352,7 @@ export default function SettingsPrompt() {
   const clearPosterCache = useCallback(() => {
     Alert.alert(
       'Clear poster overrides',
-      'This will delete all downloaded poster images and episode thumbnails from disk and reset any poster overrides. Posters and episode thumbnails will be re-fetched on the next scan.',
+      'This will delete all downloaded poster images and episode thumbnails from disk and reset any poster overrides. Poster images and episode thumbnails will be re-fetched on the next scan.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

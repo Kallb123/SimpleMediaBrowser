@@ -109,6 +109,11 @@ function movieDisplayLabel(movie: IMediaObject, overrides: { [key: string]: IMed
   return overrides[`movie:${movie.parsedPath}`]?.title ?? movie.title ?? movie.filename;
 }
 
+/** Returns the effective poster URI for an episode: user override > TMDB still > none. */
+function getEpisodePosterUri(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }): string | undefined {
+  return overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined;
+}
+
 function buildDisplayItems(
   library: IMediaLibrary,
   movies: IMediaObject[],
@@ -137,7 +142,7 @@ function buildDisplayItems(
               sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.tmdbTitle || ep.title || ep.filename,
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
-              posterUri: overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined,
+              posterUri: getEpisodePosterUri(ep, overrides),
               mediaObject: ep,
               mediaType: 'episode',
             });
@@ -216,7 +221,7 @@ function buildDisplayItems(
             label: episodeDisplayLabel(ep, overrides, prefix),
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
-            posterUri: overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined,
+            posterUri: getEpisodePosterUri(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode',
           });
@@ -278,7 +283,7 @@ function buildDisplayItems(
             label: episodeDisplayLabel(ep, overrides, eNum),
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
-            posterUri: overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined,
+            posterUri: getEpisodePosterUri(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };
@@ -360,7 +365,7 @@ function buildDisplayItems(
             label: episodeDisplayLabel(ep, overrides, eNum),
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
-            posterUri: overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined,
+            posterUri: getEpisodePosterUri(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };
