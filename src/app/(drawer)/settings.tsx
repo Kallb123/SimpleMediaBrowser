@@ -430,10 +430,12 @@ export default function SettingsPrompt() {
         {safeMediaSources.length === 0 && (
           <ThemedText style={styles.emptyText}>No sources added yet.</ThemedText>
         )}
-        {safeMediaSources.map((source) => (
+        {safeMediaSources.map((source, index) => (
           <View key={source.uri} style={styles.sourceRow}>
             <View style={styles.sourceInfo}>
-              <ThemedText style={styles.sourceType}>{source.contentType === 'tv' ? '📺 TV' : '🎬 Movies'}</ThemedText>
+              <ThemedText style={styles.sourceType}>
+                {`Library ${index + 1} · ${source.contentType === 'tv' ? '📺 TV' : '🎬 Movies'}`}
+              </ThemedText>
               <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
             </View>
             <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>

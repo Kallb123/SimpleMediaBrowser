@@ -324,13 +324,21 @@ export class FileScanner {
         const thumbSemaphore = new Semaphore(MAX_CONCURRENT_THUMBNAILS);
         // Shared progress counter threaded through all collectAllMediaFiles calls
         // so that TV and movie sources contribute to the same running total.
-        const collectProgress = { filesFound: 0 };
+        // currentSourceIndex (1-based) and sourcesTotal are also tracked here so
+        // the throttled dispatches inside recursiveCollect can include them.
+        const sourceIndexByUri = new Map(sources.map((s, i) => [s.uri, i + 1]));
+        const collectProgress = {
+            filesFound: 0,
+            currentSourceIndex: 1,
+            sourcesTotal: sources.length,
+        };
 
         // Collect TV files from all TV sources and merge into one library
         const allTvFiles: IScannedFile[] = [];
         const tvPosterMap = new Map<string, string>();
         for (const src of tvSources) {
-            logger.log('FileScanner', `Scanning TV source: ${src.uri}`);
+            collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
+            logger.log('FileScanner', `Scanning TV source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
             const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv');
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
             allTvFiles.push(...files);
@@ -343,7 +351,8 @@ export class FileScanner {
         const allMovieFiles: IScannedFile[] = [];
         const moviePosterMap = new Map<string, string>();
         for (const src of movieSources) {
-            logger.log('FileScanner', `Scanning Movie source: ${src.uri}`);
+            collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
+            logger.log('FileScanner', `Scanning Movie source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
             const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie');
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
             allMovieFiles.push(...files);
@@ -542,7 +551,7 @@ export class FileScanner {
         const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(
             directory,
             new Semaphore(MAX_CONCURRENT_DIR_READS),
-            { filesFound: 0 },
+            { filesFound: 0, currentSourceIndex: 1, sourcesTotal: 1 },
             'tv',
         );
         const library = this.buildLibrary(allMediaFiles, posterMap);
@@ -556,7 +565,7 @@ export class FileScanner {
     private async collectAllMediaFiles(
         rootDirectory: string,
         dirSemaphore: Semaphore,
-        progress: { filesFound: number },
+        progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
         sourceType: 'tv' | 'movie' = 'tv',
     ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string> }> {
         const result: IScannedFile[] = [];
@@ -580,7 +589,7 @@ export class FileScanner {
         posterMap: Map<string, string>,
         depth: number,
         dirSemaphore: Semaphore,
-        progress: { filesFound: number },
+        progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
         streamState: StreamState,
     ): Promise<void> {
         if (depth > MAX_SCAN_DEPTH) {
@@ -634,7 +643,16 @@ export class FileScanner {
                 // scanAllSources once all sources have been collected.
                 progress.filesFound++;
                 if (progress.filesFound % PROGRESS_DISPATCH_INTERVAL === 0) {
-                    store.dispatch(setScanProgress({ phase: 'collecting', filesFound: progress.filesFound, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
+                    store.dispatch(setScanProgress({
+                        phase: 'collecting',
+                        filesFound: progress.filesFound,
+                        thumbnailsDone: 0,
+                        thumbnailsTotal: 0,
+                        metadataDone: 0,
+                        metadataTotal: 0,
+                        currentSourceIndex: progress.sourcesTotal > 1 ? progress.currentSourceIndex : undefined,
+                        sourcesTotal: progress.sourcesTotal > 1 ? progress.sourcesTotal : undefined,
+                    }));
                     // Flush the stream batch so the UI shows newly discovered items.
                     this.flushStreamBatch(streamState, posterMap);
                 }
