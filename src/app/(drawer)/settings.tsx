@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -73,6 +73,7 @@ export default function SettingsPrompt() {
   const [defaultPage, setLocalDefaultPage] = useState("home" as defaultPages);
   const [enablePosterFetching, setLocalEnablePosterFetching] = useState(true);
   const [enableThumbnailGeneration, setLocalEnableThumbnailGeneration] = useState(false);
+  const [rescanOnStartup, setLocalRescanOnStartup] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
@@ -88,6 +89,7 @@ export default function SettingsPrompt() {
   const settingsDefaultPage = useSelector(selectDefaultPage);
   const settingsEnablePosterFetching = useSelector(selectEnablePosterFetching);
   const settingsEnableThumbnailGeneration = useSelector(selectEnableThumbnailGeneration);
+  const settingsRescanOnStartup = useSelector(selectRescanOnStartup);
 
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
@@ -159,7 +161,7 @@ export default function SettingsPrompt() {
 
   useEffect(() => {
     try {
-      logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${safeMediaSources.length}, posters=${settingsEnablePosterFetching}, thumbnails=${settingsEnableThumbnailGeneration}`);
+      logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${safeMediaSources.length}, posters=${settingsEnablePosterFetching}, thumbnails=${settingsEnableThumbnailGeneration}, rescanOnStartup=${settingsRescanOnStartup}`);
     } catch (e) {
       logger.error('Settings', 'Exception while logging settings mount state', e as Error);
     }
@@ -193,11 +195,12 @@ export default function SettingsPrompt() {
       setLocalViewScale(settingsViewScale);
       setLocalEnablePosterFetching(settingsEnablePosterFetching);
       setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
+      setLocalRescanOnStartup(settingsRescanOnStartup);
       setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup]);
 
   const save = () => {
     try {
@@ -247,6 +250,11 @@ export default function SettingsPrompt() {
       if (enableThumbnailGeneration !== settingsEnableThumbnailGeneration) {
         logger.log('Settings', `Persisting: enableThumbnailGeneration changed ${settingsEnableThumbnailGeneration} → ${enableThumbnailGeneration}`);
         dispatch(setEnableThumbnailGeneration(enableThumbnailGeneration));
+        changeCount++;
+      }
+      if (rescanOnStartup !== settingsRescanOnStartup) {
+        logger.log('Settings', `Persisting: rescanOnStartup changed ${settingsRescanOnStartup} → ${rescanOnStartup}`);
+        dispatch(setRescanOnStartup(rescanOnStartup));
         changeCount++;
       }
       logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
@@ -438,6 +446,22 @@ export default function SettingsPrompt() {
           <Button title={scanning ? 'Scanning…' : 'Rescan now'} onPress={scanNow} disabled={scanning} />
           {!scanning && scanComplete && <ThemedText style={styles.scanStatus}>✓ Scan complete</ThemedText>}
         </View>
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Rescan on startup:</ThemedText>
+          <Switch
+            value={rescanOnStartup}
+            onValueChange={(value) => {
+              try {
+                setLocalRescanOnStartup(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling rescan on startup', e as Error);
+              }
+            }}
+          />
+        </View>
+        <ThemedText style={styles.emptyText}>
+          When on, the library is automatically rescanned each time the app starts. Turn off to keep the existing library until you rescan manually.
+        </ThemedText>
       </View>
 
       {/* Metadata */}
