@@ -2,8 +2,6 @@ import { BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } 
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { Image } from 'expo-image';
-import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector } from 'react-redux';
@@ -16,6 +14,8 @@ import type { IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
 import { useEditMode } from '@/contexts/EditModeContext';
+import { PosterBox } from '@/components/ui/PosterBox';
+import { ListItem } from '@/components/ui/ListItem';
 
 // ── Navigation types ─────────────────────────────────────────────────────────
 
@@ -377,6 +377,10 @@ const LANDSCAPE_MAX_COLUMNS = 10;
 /** Valid range for persisted UI scale setting. */
 const VIEW_SCALE_MIN = 1;
 const VIEW_SCALE_MAX = 10;
+/** List mode: row height at the highest viewScale (most items). */
+const LIST_ROW_MIN_HEIGHT = 40;
+/** List mode: row height at the lowest viewScale (fewest items). */
+const LIST_ROW_MAX_HEIGHT = 80;
 
 function mapScaleToColumns(
   viewScale: number,
@@ -386,6 +390,17 @@ function mapScaleToColumns(
   const clampedScale = Math.max(VIEW_SCALE_MIN, Math.min(VIEW_SCALE_MAX, viewScale));
   const t = (clampedScale - VIEW_SCALE_MIN) / (VIEW_SCALE_MAX - VIEW_SCALE_MIN);
   return Math.round(minColumns + t * (maxColumns - minColumns));
+}
+
+/**
+ * Maps viewScale (1-10) to a row height in pixels for list mode.
+ * Lower viewScale (fewer columns in poster mode = bigger items) → taller rows.
+ */
+function mapScaleToListRowHeight(viewScale: number): number {
+  const clampedScale = Math.max(VIEW_SCALE_MIN, Math.min(VIEW_SCALE_MAX, viewScale));
+  const t = (clampedScale - VIEW_SCALE_MIN) / (VIEW_SCALE_MAX - VIEW_SCALE_MIN);
+  // Invert t so that a low viewScale gives a taller row (consistent with poster mode).
+  return Math.round(LIST_ROW_MAX_HEIGHT - t * (LIST_ROW_MAX_HEIGHT - LIST_ROW_MIN_HEIGHT));
 }
 
 /** Progress bar colour used during the thumbnail generation phase. */
@@ -460,12 +475,14 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const isLandscape = screenWidth > screenHeight;
   const minColumns = isLandscape ? LANDSCAPE_MIN_COLUMNS : PORTRAIT_MIN_COLUMNS;
   const maxColumns = isLandscape ? LANDSCAPE_MAX_COLUMNS : PORTRAIT_MAX_COLUMNS;
-  const numColumns = mapScaleToColumns(viewScale, minColumns, maxColumns);
+  const isListMode = viewOrientation === 'list';
+  // In list mode use a single column; in poster mode use the scale-mapped column count.
+  const numColumns = isListMode ? 1 : mapScaleToColumns(viewScale, minColumns, maxColumns);
   const cardWidth = (screenWidth - CARD_GAP * (numColumns + 1)) / numColumns;
-  // Poster orientation uses a 2:3 portrait ratio; banner/thumbnail orientation uses 16:9 landscape.
-  const thumbnailHeight = viewOrientation === 'poster'
-    ? Math.round(cardWidth * 3 / 2)
-    : Math.round(cardWidth * 9 / 16);
+  // Poster card uses a 2:3 portrait ratio for the thumbnail image.
+  const thumbnailHeight = Math.round(cardWidth * 3 / 2);
+  // List mode row height scales with viewScale (lower scale = taller rows, matching poster behaviour).
+  const listRowHeight = mapScaleToListRowHeight(viewScale);
 
   const displayItems = useMemo(
     () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto),
@@ -574,23 +591,14 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
-            extraData={`${editMode}|${pressedKey ?? ''}`}
+            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}`}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
-              // Both folder (show/season) and file (movie/episode) items can have a poster.
-              const hasPoster = !!item.posterUri;
-              const hasBothImages = hasPoster && !!item.thumbnailUri;
-              const isRevealed = pressedKey === item.key;
-              // Items with a poster show the poster by default; long-press reveals the video thumbnail (unless in edit mode).
-              const displaySource = item.posterUri && !isRevealed
-                ? { uri: item.posterUri }
-                : typeof item.thumbnailUri === 'string'
-                  ? { uri: item.thumbnailUri }
-                  : item.thumbnailUri; // VideoThumbnail (SharedRef) passed directly to expo-image
-
-              // True when the item is displaying a raw video thumbnail (not a poster image).
-              // In poster layout, thumbnails are 16:9 and would be cropped by "cover"; use "contain" instead.
-              const isShowingVideoThumbnail = !hasPoster || isRevealed;
+              const isEditable = (
+                item.mediaType === 'show' ||
+                item.mediaType === 'movie' ||
+                item.mediaType === 'episode'
+              );
 
               const handlePress = isFolder
                 ? item.onPress
@@ -601,68 +609,57 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                     });
                   };
 
-              // In edit mode: long-press opens the edit screen for any editable item.
-              // Otherwise: long-press on items that have both a poster and a thumbnail reveals the thumbnail.
-              const isEditableInEditMode = editMode && (
-                item.mediaType === 'show' ||
-                item.mediaType === 'movie' ||
-                item.mediaType === 'episode'
-              );
-              const handleLongPress = isEditableInEditMode
+              if (isListMode) {
+                const handleLongPress = editMode && isEditable
+                  ? () => openEditScreen(item)
+                  : undefined;
+                return (
+                  <ListItem
+                    kind={item.kind}
+                    mediaType={item.mediaType}
+                    label={item.label}
+                    rowHeight={listRowHeight}
+                    editMode={editMode}
+                    isEditable={isEditable}
+                    count={item.kind === 'folder' ? item.count : undefined}
+                    onPress={handlePress}
+                    onLongPress={handleLongPress}
+                  />
+                );
+              }
+
+              // Poster mode
+              const hasPoster = !!item.posterUri;
+              const hasBothImages = hasPoster && !!item.thumbnailUri;
+              const isRevealed = pressedKey === item.key;
+
+              const handleLongPress = editMode && isEditable
                 ? () => openEditScreen(item)
                 : hasBothImages
                   ? () => setPressedKey(item.key)
                   : undefined;
-              const handlePressOut = isEditableInEditMode
+              const handlePressOut = editMode && isEditable
                 ? undefined
                 : hasBothImages
                   ? () => setPressedKey(null)
                   : undefined;
 
               return (
-                <TouchableOpacity
+                <PosterBox
+                  item={item}
+                  cardWidth={cardWidth}
+                  thumbnailHeight={thumbnailHeight}
+                  viewOrientation={viewOrientation}
+                  editMode={editMode}
+                  isRevealed={isRevealed}
+                  isEditable={isEditable}
                   onPress={handlePress}
                   onLongPress={handleLongPress}
                   onPressOut={handlePressOut}
-                  style={[styles.card, { width: cardWidth }]}
-                >
-                  <View style={[styles.thumbnailBox, { height: thumbnailHeight }]}>
-                    {displaySource ? (
-                      <Image
-                        source={displaySource}
-                        style={styles.thumbnailImage}
-                        contentFit={viewOrientation === 'poster' && isShowingVideoThumbnail ? 'contain' : 'cover'}
-                      />
-                    ) : (
-                      <View style={styles.thumbnailPlaceholder}>
-                        <ThemedText style={styles.placeholderIcon}>
-                          {isFolder ? '📁' : '🎬'}
-                        </ThemedText>
-                      </View>
-                    )}
-                    {/* Edit mode indicator overlay */}
-                    {isEditableInEditMode && (
-                      <View style={styles.editOverlay}>
-                        <ThemedText style={styles.editOverlayIcon}>✏️</ThemedText>
-                      </View>
-                    )}
-                    {/* Entry count badge for show/season folders */}
-                    {item.kind === 'folder' && item.count !== undefined && (
-                      <View
-                        style={styles.countBadge}
-                        accessibilityLabel={`${item.count} ${item.count === 1 ? 'episode' : 'episodes'}`}
-                      >
-                        <ThemedText style={styles.countBadgeText}>{item.count}</ThemedText>
-                      </View>
-                    )}
-                  </View>
-                  <ThemedText style={styles.cardLabel} numberOfLines={2}>
-                    {item.label}
-                  </ThemedText>
-                </TouchableOpacity>
+                />
               );
             }}
-            contentContainerStyle={styles.gridContent}
+            contentContainerStyle={isListMode ? styles.listContent : styles.gridContent}
           />
         </ThemedView>
       ) : isScanning ? (
@@ -775,61 +772,8 @@ const styles = StyleSheet.create({
   gridContent: {
     padding: CARD_GAP,
   },
-  card: {
-    margin: CARD_GAP / 2,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  thumbnailBox: {
-    width: '100%',
-    backgroundColor: '#222',
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  thumbnailImage: {
-    width: '100%',
-    height: '100%',
-  },
-  thumbnailPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderIcon: {
-    fontSize: 32,
-  },
-  cardLabel: {
-    paddingHorizontal: 4,
-    paddingTop: 4,
-    paddingBottom: 6,
-    fontSize: 12,
-  },
-  editOverlay: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 12,
-    padding: 3,
-  },
-  editOverlayIcon: {
-    fontSize: 14,
-  },
-  countBadge: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  countBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
+  listContent: {
+    paddingVertical: 0,
   },
   stepContainer: {
     gap: 8,

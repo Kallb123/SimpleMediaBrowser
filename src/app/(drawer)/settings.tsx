@@ -107,7 +107,7 @@ export default function SettingsPrompt() {
   
   const uiTypeOptions = [
     {id: 'poster', label: 'Poster'},
-    {id: 'banner', label: 'Banner'},
+    {id: 'list', label: 'List'},
   ];
 
   const defaultPageOptions = [

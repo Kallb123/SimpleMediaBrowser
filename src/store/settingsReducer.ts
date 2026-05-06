@@ -4,7 +4,7 @@ import type { RootState } from './store'
 export type contentTypes = 'tv' | 'movie';
 export type dataSources = 'tmdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
-export type viewOrientations = 'poster' | 'banner';
+export type viewOrientations = 'poster' | 'list';
 export type defaultPages = 'home' | 'tv' | 'movies';
 
 export interface IMediaSource {
@@ -89,7 +89,11 @@ export const selectMediaSources = (state: RootState) => state.settingsReducer.me
 export const selectPassword = (state: RootState) => state.settingsReducer.settingsPassword ?? null;
 export const selectDataSource = (state: RootState) => state.settingsReducer.dataSource ?? 'tmdb';
 export const selectMediaStructure = (state: RootState) => state.settingsReducer.viewType ?? 'show/season';
-export const selectViewOrientation = (state: RootState) => state.settingsReducer.viewOrientation ?? 'poster';
+export const selectViewOrientation = (state: RootState): viewOrientations => {
+  const v = state.settingsReducer.viewOrientation;
+  // Coerce legacy 'banner' value (persisted before the Poster/List change) to 'poster'.
+  return (v === 'poster' || v === 'list') ? v : 'poster';
+};
 export const selectViewScale = (state: RootState) => state.settingsReducer.viewScale ?? 5;
 export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdbApiKey ?? null;
 export const selectDefaultPage = (state: RootState) => state.settingsReducer.defaultPage ?? 'home';
