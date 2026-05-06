@@ -616,7 +616,6 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 return (
                   <ListItem
                     kind={item.kind}
-                    mediaType={item.mediaType}
                     label={item.label}
                     rowHeight={listRowHeight}
                     editMode={editMode}

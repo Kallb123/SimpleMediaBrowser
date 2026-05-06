@@ -3,7 +3,6 @@ import { ThemedText } from '@/components/ThemedText';
 
 export type ListItemProps = {
   kind: 'folder' | 'file';
-  mediaType: 'show' | 'season' | 'movie' | 'episode';
   label: string;
   rowHeight: number;
   editMode: boolean;
@@ -15,7 +14,6 @@ export type ListItemProps = {
 
 export function ListItem({
   kind,
-  mediaType,
   label,
   rowHeight,
   editMode,
