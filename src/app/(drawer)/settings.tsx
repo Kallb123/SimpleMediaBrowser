@@ -3,8 +3,9 @@ import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { router, Stack } from 'expo-router';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { router } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearThumbnails, setScanList } from '@/store/libraryReducer';
@@ -255,6 +256,15 @@ export default function SettingsPrompt() {
     }
   };
 
+  const navigation = useNavigation();
+  const saveRef = useRef(save);
+  useEffect(() => { saveRef.current = save; }, [save]);
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => <Button title="Save" onPress={() => saveRef.current()} />,
+    });
+  }, [navigation]);
+
   const deleteSource = useCallback((uri: string) => {
     try {
       logger.log('Settings', `Removing media source: ${uri}`);
@@ -367,7 +377,6 @@ export default function SettingsPrompt() {
   
   return (
     <SettingsErrorBoundary>
-    <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={save} /> }} />
     <ScrollView style={containerStyle} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
       {/* Access */}

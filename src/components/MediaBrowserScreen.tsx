@@ -558,17 +558,17 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             </View>
           )}
 
-          {/* Breadcrumb / back navigation */}
-          <ThemedView style={styles.breadcrumbRow}>
-            {navStack.length > 0 && (
+          {/* Breadcrumb / back navigation – only shown when inside a subfolder */}
+          {navStack.length > 0 && (
+            <ThemedView style={styles.breadcrumbRow}>
               <TouchableOpacity onPress={navigateBack} style={styles.backButton}>
                 <ThemedText style={styles.backButtonText}>‹ Back</ThemedText>
               </TouchableOpacity>
-            )}
-            <ThemedText style={styles.breadcrumb} numberOfLines={1}>
-              {breadcrumb}
-            </ThemedText>
-          </ThemedView>
+              <ThemedText style={styles.breadcrumb} numberOfLines={1}>
+                {breadcrumb}
+              </ThemedText>
+            </ThemedView>
+          )}
 
           <FlashList
             data={displayItems}

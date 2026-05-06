@@ -1,6 +1,5 @@
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { Drawer } from 'expo-router/drawer';
-import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { DrawerContentScrollView, DrawerItemList, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useEditMode } from '@/contexts/EditModeContext';
@@ -75,7 +74,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
   const handleSettingsPress = () => {
     props.navigation.closeDrawer();
-    router.push('/settings');
+    props.navigation.navigate('settings');
   };
 
   const handleLogsPress = () => {
@@ -191,21 +190,21 @@ export default function DrawerLayout() {
             name="index"
             options={{
                 drawerLabel: '🏠 Home',
-                title: "",
+                title: "Home",
             }}
             />
             <Drawer.Screen
             name="tv"
             options={{
                 drawerLabel: '📺 TV',
-                title: "",
+                title: "TV",
             }}
             />
             <Drawer.Screen
             name="movies"
             options={{
                 drawerLabel: '🎬 Movies',
-                title: "",
+                title: "Movies",
             }}
             />
             <Drawer.Screen
@@ -213,6 +212,14 @@ export default function DrawerLayout() {
             options={{
                 drawerLabel: '🪲 Debug Logs',
                 title: "Debug Logs",
+            }}
+            />
+            <Drawer.Screen
+            name="settings"
+            options={{
+                drawerLabel: '⚙️ Settings',
+                title: "Settings",
+                drawerItemStyle: { display: 'none' },
             }}
             />
         </Drawer>
