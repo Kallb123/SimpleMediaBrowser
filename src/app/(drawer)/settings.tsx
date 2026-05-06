@@ -258,7 +258,7 @@ export default function SettingsPrompt() {
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
-  useEffect(() => { saveRef.current = save; });
+  useEffect(() => { saveRef.current = save; }, [save]);
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => <Button title="Save" onPress={() => saveRef.current()} />,
