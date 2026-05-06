@@ -357,6 +357,49 @@ export class FileScanner {
             ...allTvFiles.map((f) => f.path),
             ...allMovieFiles.map((f) => f.path),
         ];
+
+        // Carry over previously-fetched TMDB poster URIs and IDs into the freshly-built
+        // library so that posters remain visible during the upcoming enrichment phase.
+        // Without this, dispatching setMediaLibrary with a new library (which has no TMDB
+        // data) causes all posters to vanish from the UI until enrichment re-downloads them.
+        const prevLibrary = store.getState().libraryReducer.mediaLibrary;
+        for (const [showName, show] of Object.entries(mergedLibrary)) {
+            const prev = prevLibrary[showName];
+            if (prev?.ids.tmdb && prev?.poster) {
+                try {
+                    if (new File(prev.poster).exists) {
+                        // Always restore the TMDB ID so deduplication and the edit screen
+                        // continue to work correctly without requiring a full re-enrichment.
+                        show.ids.tmdb = prev.ids.tmdb;
+                        // Only restore the TMDB poster when the new scan did not find a
+                        // local folder image (folder.jpg / poster.jpg etc.) for this show.
+                        if (!show.poster) {
+                            show.poster = prev.poster;
+                        }
+                    }
+                } catch {
+                    // Ignore file-existence errors; the poster will be re-fetched during enrichment.
+                }
+            }
+        }
+        const prevMovies = store.getState().libraryReducer.movies;
+        const prevMovieByPath = new Map(prevMovies.map((m) => [m.path, m]));
+        for (const movie of movies) {
+            const prev = prevMovieByPath.get(movie.path);
+            if (prev?.ids.tmdb && prev?.poster) {
+                try {
+                    if (new File(prev.poster).exists) {
+                        movie.ids.tmdb = prev.ids.tmdb;
+                        if (!movie.poster) {
+                            movie.poster = prev.poster;
+                        }
+                    }
+                } catch {
+                    // Ignore file-existence errors; the poster will be re-fetched during enrichment.
+                }
+            }
+        }
+
         // Dispatch a final "collecting done" progress update with the exact total before
         // dispatching the library data, so the UI can show the correct file count.
         store.dispatch(setScanProgress({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
