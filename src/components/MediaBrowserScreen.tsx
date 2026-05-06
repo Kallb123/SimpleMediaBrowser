@@ -532,6 +532,35 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     });
   }, []);
 
+  /**
+   * Computes the common item handlers shared by both the list-mode (FlatList)
+   * and grid-mode (FlashList) renderItem callbacks.
+   */
+  const getItemHandlers = useCallback((item: DisplayItem) => {
+    const isEditable = (
+      item.mediaType === 'show' ||
+      item.mediaType === 'movie' ||
+      item.mediaType === 'episode'
+    );
+    const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
+    const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
+
+    let handlePress: () => void;
+    if (item.kind === 'folder') {
+      handlePress = item.onPress;
+    } else {
+      handlePress = () => {
+        logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
+        openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
+          logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
+        });
+      };
+    }
+
+    const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
+    return { isEditable, isShowAtRoot, isSelected, handlePress, onEditPress };
+  }, [editMode, navStack, selectedShows, openEditScreen]);
+
   return (
     <View style={styles.container}>
       {mediaSources.length > 0 && hasLibraryContent ? (
@@ -597,6 +626,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             <FlatList
               data={displayItems}
               keyExtractor={(item: DisplayItem) => item.key}
+              // pressedKey is a poster-mode-only feature (thumbnail reveal), so it is
+              // intentionally excluded from list-mode extraData.
               extraData={`${editMode}|${Array.from(selectedShows).join(',')}`}
               getItemLayout={(_data, index) => ({
                 length: listRowHeight,
@@ -604,27 +635,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 index,
               })}
               renderItem={({ item }: { item: DisplayItem }) => {
-                const isEditable = (
-                  item.mediaType === 'show' ||
-                  item.mediaType === 'movie' ||
-                  item.mediaType === 'episode'
-                );
-                const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
-                const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
-
-                let handlePress: () => void;
-                if (item.kind === 'folder') {
-                  handlePress = item.onPress;
-                } else {
-                  handlePress = () => {
-                    logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
-                    openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
-                      logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
-                    });
-                  };
-                }
-
-                const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
+                const { isEditable, isShowAtRoot, isSelected, handlePress, onEditPress } = getItemHandlers(item);
                 // In edit mode, long press on a show at root selects it for merging.
                 const handleLongPress = editMode && isShowAtRoot
                   ? () => toggleShowSelection(item.key)
@@ -654,27 +665,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               numColumns={numColumns}
               extraData={`${editMode}|${pressedKey ?? ''}|${Array.from(selectedShows).join(',')}`}
               renderItem={({ item }: { item: DisplayItem }) => {
-                const isEditable = (
-                  item.mediaType === 'show' ||
-                  item.mediaType === 'movie' ||
-                  item.mediaType === 'episode'
-                );
-                const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
-                const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
-
-                let handlePress: () => void;
-                if (item.kind === 'folder') {
-                  handlePress = item.onPress;
-                } else {
-                  handlePress = () => {
-                    logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
-                    openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
-                      logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
-                    });
-                  };
-                }
-
-                const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
+                const { isEditable, isShowAtRoot, isSelected, handlePress, onEditPress } = getItemHandlers(item);
 
                 const hasPoster = !!item.posterUri;
                 const hasBothImages = hasPoster && !!item.thumbnailUri;
