@@ -8,7 +8,7 @@ import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration } from '@/store/settingsReducer';
-import { clearLibraryAndMovies, clearPosterOverrides, clearThumbnails, setScanList } from '@/store/libraryReducer';
+import { clearLibraryAndMovies, clearPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -374,6 +374,28 @@ export default function SettingsPrompt() {
       ],
     );
   }, [dispatch]);
+
+  const clearAllOverridesAction = useCallback(() => {
+    Alert.alert(
+      'Clear all overrides',
+      'This will remove all custom overrides including sort titles, display titles, poster selections, and TMDB rematch results. Library data and files on disk are not affected.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            try {
+              dispatch(clearAllOverrides());
+              logger.log('Settings', 'All overrides cleared');
+            } catch (e) {
+              logger.error('Settings', 'Exception while clearing all overrides', e as Error);
+            }
+          },
+        },
+      ],
+    );
+  }, [dispatch]);
   
   return (
     <SettingsErrorBoundary>
@@ -636,6 +658,10 @@ export default function SettingsPrompt() {
             <TouchableOpacity style={styles.troubleshootingButton} onPress={clearScannedData}>
               <ThemedText style={styles.troubleshootingButtonText}>📂 Clear scanned data</ThemedText>
               <ThemedText style={styles.troubleshootingButtonDesc}>Removes all scanned TV and movie data from memory.</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearAllOverridesAction}>
+              <ThemedText style={styles.troubleshootingButtonText}>🔄 Clear all overrides</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Removes all custom overrides such as sort titles, display titles, poster selections, and TMDB rematch results.</ThemedText>
             </TouchableOpacity>
           </View>
         )}

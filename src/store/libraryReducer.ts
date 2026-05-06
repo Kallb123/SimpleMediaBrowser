@@ -321,6 +321,13 @@ export const settingsSlice = createSlice({
       }
     },
     /**
+     * Clears all user-supplied overrides (title, sortTitle, tmdbId, year, poster)
+     * for every show, movie, and episode. Does not touch library data or disk files.
+     */
+    clearAllOverrides: (state) => {
+      state.mediaOverrides = {};
+    },
+    /**
      * Clears all cached poster data:
      * - Removes the `poster` field from every entry in `mediaOverrides`.
      * - Resets the poster URI to an empty string for every show and movie in the library.
@@ -349,7 +356,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearAllOverrides } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
