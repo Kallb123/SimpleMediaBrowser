@@ -29,8 +29,8 @@ type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season'; count?: number }
-  | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
+  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; posterIsLandscape?: boolean; onPress: () => void; mediaType: 'show' | 'season'; count?: number }
+  | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; posterIsLandscape?: boolean; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -114,6 +114,11 @@ function getEpisodePosterUri(ep: IMediaObject, overrides: { [key: string]: IMedi
   return overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined;
 }
 
+/** Returns true when the episode poster is a landscape TMDB still (no user portrait override set). */
+function getEpisodePosterIsLandscape(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }): boolean {
+  return !overrides[`episode:${ep.parsedPath}`]?.poster && !!ep.tmdbThumbnail;
+}
+
 function buildDisplayItems(
   library: IMediaLibrary,
   movies: IMediaObject[],
@@ -143,6 +148,7 @@ function buildDisplayItems(
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
               posterUri: getEpisodePosterUri(ep, overrides),
+              posterIsLandscape: getEpisodePosterIsLandscape(ep, overrides),
               mediaObject: ep,
               mediaType: 'episode',
             });
@@ -222,6 +228,7 @@ function buildDisplayItems(
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
             posterUri: getEpisodePosterUri(ep, overrides),
+            posterIsLandscape: getEpisodePosterIsLandscape(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode',
           });
@@ -284,6 +291,7 @@ function buildDisplayItems(
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
             posterUri: getEpisodePosterUri(ep, overrides),
+            posterIsLandscape: getEpisodePosterIsLandscape(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };
@@ -366,6 +374,7 @@ function buildDisplayItems(
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
             posterUri: getEpisodePosterUri(ep, overrides),
+            posterIsLandscape: getEpisodePosterIsLandscape(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };
