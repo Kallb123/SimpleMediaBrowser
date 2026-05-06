@@ -12,6 +12,8 @@ export type PosterBoxItem = {
   label: string;
   thumbnailUri?: ThumbnailSource;
   posterUri?: string;
+  /** True when posterUri is a TMDB episode still (landscape 16:9) rather than a portrait poster. */
+  posterIsLandscape?: boolean;
   count?: number;
 };
 
@@ -57,6 +59,11 @@ export function PosterBox({
   // In poster layout, thumbnails are 16:9 and would be cropped by "cover"; use "contain" instead.
   const isShowingVideoThumbnail = !hasPoster || isRevealed;
 
+  // TMDB episode stills are landscape (16:9); use the appropriate height for the box.
+  const effectiveThumbnailHeight = item.posterIsLandscape
+    ? Math.round(cardWidth * 9 / 16)
+    : thumbnailHeight;
+
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -66,7 +73,7 @@ export function PosterBox({
     >
       <View style={[
         styles.thumbnailBox,
-        { height: thumbnailHeight },
+        { height: effectiveThumbnailHeight },
         isSelected && styles.thumbnailBoxSelected,
       ]}>
         {displaySource ? (
