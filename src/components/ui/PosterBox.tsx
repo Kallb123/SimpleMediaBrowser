@@ -27,6 +27,7 @@ export type PosterBoxProps = {
   onPress: () => void;
   onLongPress?: () => void;
   onPressOut?: () => void;
+  onEditPress?: () => void;
 };
 
 export function PosterBox({
@@ -41,6 +42,7 @@ export function PosterBox({
   onPress,
   onLongPress,
   onPressOut,
+  onEditPress,
 }: PosterBoxProps) {
   const isFolder = item.kind === 'folder';
   const hasPoster = !!item.posterUri;
@@ -88,11 +90,11 @@ export function PosterBox({
             </View>
           </View>
         )}
-        {/* Edit mode indicator overlay */}
+        {/* Edit mode badge – prominent button to open the edit screen */}
         {editMode && isEditable && !isSelected && (
-          <View style={styles.editOverlay}>
+          <TouchableOpacity style={styles.editOverlay} onPress={onEditPress} activeOpacity={0.7}>
             <ThemedText style={styles.editOverlayIcon}>✏️</ThemedText>
-          </View>
+          </TouchableOpacity>
         )}
         {/* Entry count badge for show/season folders */}
         {item.kind === 'folder' && item.count !== undefined && (
@@ -149,14 +151,17 @@ const styles = StyleSheet.create({
   },
   editOverlay: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 12,
-    padding: 3,
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(10,126,164,0.85)',
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
   },
   editOverlayIcon: {
-    fontSize: 14,
+    fontSize: 18,
   },
   selectedOverlay: {
     position: 'absolute',

@@ -3,7 +3,7 @@
     "name": "SimpleMediaBrowser",
     "owner": "kallb123",
     "slug": "SimpleMediaBrowser",
-    "version": "1.6.0",
+    "version": "1.6.1",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "simplemediabrowser",
@@ -20,7 +20,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "uk.kallum.SimpleMediaBrowser",
-      "versionCode": 30
+      "versionCode": 31
     },
     "web": {
       "output": "static",
