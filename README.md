@@ -1,49 +1,70 @@
-# Welcome to your Expo app 👋
+# SimpleMediaBrowser
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A local media browser for Android. Point it at folders on your device or network storage and it organises your TV shows and movies into a clean, browsable library — with posters and metadata pulled automatically from [TMDB](https://www.themoviedb.org/).
 
-## Get started
+## Features
 
-1. Install dependencies
+- **Automatic library scanning** — Add one or more media source folders via Android's Storage Access Framework (SAF). The scanner recursively discovers TV episodes and movies and streams results into the library as they are found.
+- **TV show & movie views** — Browse all media together or switch to dedicated TV and Movies tabs. TV content is grouped by show → season → episode.
+- **TMDB metadata enrichment** — Enter a TMDB API key in Settings to fetch official titles, years, and poster artwork automatically. Posters are cached locally so the library is usable offline after the first fetch.
+- **Video thumbnail generation** — Thumbnails are generated for episodes and movies that have no poster, persisted to disk, and reused across sessions.
+- **Metadata overrides** — Long-press any item to edit its title, poster, or other metadata and override what was fetched automatically.
+- **Flexible display options** — Choose between grid and list layouts, adjust poster/thumbnail scale, and select landscape or portrait orientation modes.
+- **Dark & light theme** — Follows the system colour scheme automatically.
+- **Debug log viewer** — An in-app log screen captures scan and metadata activity to help diagnose issues without needing a connected debugger.
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | [Expo](https://expo.dev) SDK 55 / React Native 0.83 |
+| Navigation | Expo Router (file-based) with drawer + tab layouts |
+| State | Redux Toolkit + redux-persist |
+| File access | expo-file-system (SAF / Storage Access Framework) |
+| Metadata | TMDB REST API |
+| Video | expo-video (thumbnail generation via expo-image-manipulator) |
+| List rendering | @shopify/flash-list |
+
+## Getting Started (Development)
+
+1. Install dependencies:
 
    ```bash
    npm install
    ```
 
-2. Start the app
+2. Start the Expo dev server:
 
    ```bash
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+From the dev server you can open the app in a [development build](https://docs.expo.dev/develop/development-builds/introduction/) or an [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/).
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+> **Note:** The app targets Android. iOS and web builds are not actively maintained.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Building a Release APK
 
-## Building
+### Prerequisites
 
-### Prequisites
+Full environment setup guide: <https://docs.expo.dev/get-started/set-up-your-environment/?platform=android&device=physical&mode=development-build&buildEnv=local#set-up-an-android-device-with-a-development-build>
 
-Follow guide: https://docs.expo.dev/get-started/set-up-your-environment/?platform=android&device=physical&mode=development-build&buildEnv=local#set-up-an-android-device-with-a-development-build
+Windows quick-start steps:
 
-Windows steps:
-
-1. Install NodeJS
-1. Install `npm i -g eas-cli` (maybe optional if using gradlew)
-1. Install Java JDK `choco install -y microsoft-openjdk17`
-1. Install Android Studio and install specific components
-1. Set up environment variable `ANDROID_HOME` and add the platform tools to PATH
-1. Check `adb --version`
-1. `eas build:configure`
+1. Install [Node.js](https://nodejs.org/)
+1. Install Java JDK 17: `choco install -y microsoft-openjdk17`
+1. Install [Android Studio](https://developer.android.com/studio) and use the SDK Manager to install the required SDK platforms and build tools
+1. Set the `ANDROID_HOME` environment variable and add `%ANDROID_HOME%\platform-tools` to `PATH`
+1. Verify ADB is available: `adb --version`
+1. (Optional) Install EAS CLI if you plan to use Expo's cloud build service: `npm i -g eas-cli` then `eas build:configure`
 
 ### Build
 
-1. `npx expo prebuild`
-1. `cd android`
-1. `.\gradlew assembleRelease`
+```bash
+npx expo prebuild
+cd android
+.\gradlew assembleRelease
+```
+
+The signed APK will be output to `android/app/build/outputs/apk/release/`.
 
