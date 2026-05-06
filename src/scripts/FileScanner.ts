@@ -312,7 +312,7 @@ export function fuzzyKey(name: string): string {
     return stripped
         .toLowerCase()
         .replace(/&/g, 'and')
-        .replace(/['\-:.,!]/g, '')
+        .replace(/[':.,-!]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -333,7 +333,7 @@ export function buildTmdbSearchQuery(title: string): string {
     return title
         .replace(/\s*[\[(]?\d{4}[\])]?\s*$/, '')
         .replace(/&/g, 'and')
-        .replace(/[':,.]/g, '')
+        .replace(/[':.,-]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
