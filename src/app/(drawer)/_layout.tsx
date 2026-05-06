@@ -193,8 +193,13 @@ export default function DrawerLayout() {
       logger.log('DrawerLayout', `Startup scan triggered for ${mediaSources.length} source(s)`);
       import('@/scripts/FileScanner').then(({ FileScanner }) => {
         FileScanner.getInstance().scanAllSources(mediaSources);
+      }).catch((e: Error) => {
+        logger.error('DrawerLayout', 'Exception during startup scan', e);
       });
-    // Intentionally only run once on mount (startup), not on every mediaSources change.
+    // Empty dependency array is intentional: this effect should fire only once on
+    // mount (startup). redux-persist rehydration completes before the drawer layout
+    // renders (guaranteed by the await in _layout.tsx's firstTimeSetupCheck), so
+    // rescanOnStartup and mediaSources are already up-to-date at this point.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
   
