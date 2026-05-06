@@ -598,6 +598,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
             extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
+            overrideItemLayout={isListMode ? (layout) => { layout.size = listRowHeight; } : undefined}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
               const isEditable = (
