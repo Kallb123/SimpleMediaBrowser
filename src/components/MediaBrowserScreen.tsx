@@ -454,8 +454,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   const navigateInto = useCallback((entry: NavLevel) => {
     logger.log('MediaBrowserScreen', `Navigate into: ${entry.label} (showName=${entry.showName ?? '-'}, seasonKey=${entry.seasonKey ?? '-'})`);
+    clearShowSelection();
     setNavStack((prev: NavLevel[]) => [...prev, entry]);
-  }, []);
+  }, [clearShowSelection]);
 
   const navigateBack = useCallback(() => {
     logger.log('MediaBrowserScreen', 'Navigate back');
@@ -608,10 +609,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
               const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
 
+              // Folders always navigate; files always open in player.
               let handlePress: () => void;
-              if (editMode && isShowAtRoot) {
-                handlePress = () => toggleShowSelection(item.key);
-              } else if (item.kind === 'folder') {
+              if (item.kind === 'folder') {
                 handlePress = item.onPress;
               } else {
                 handlePress = () => {
@@ -622,9 +622,13 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 };
               }
 
+              // Edit badge callback – lets the user navigate to the edit screen for this item.
+              const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
+
               if (isListMode) {
-                const handleLongPress = editMode && isEditable
-                  ? () => openEditScreen(item)
+                // In edit mode, long press on a show at root selects it for merging.
+                const handleLongPress = editMode && isShowAtRoot
+                  ? () => toggleShowSelection(item.key)
                   : undefined;
                 return (
                   <ListItem
@@ -637,6 +641,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                     count={item.kind === 'folder' ? item.count : undefined}
                     onPress={handlePress}
                     onLongPress={handleLongPress}
+                    onEditPress={onEditPress}
                   />
                 );
               }
@@ -646,12 +651,15 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const hasBothImages = hasPoster && !!item.thumbnailUri;
               const isRevealed = pressedKey === item.key;
 
-              const handleLongPress = editMode && isEditable
-                ? () => openEditScreen(item)
+              // In edit mode: long press on a show at root selects it for merging;
+              // thumbnail reveal is disabled. Outside edit mode: long press reveals
+              // the video thumbnail when a poster is also available.
+              const handleLongPress = editMode
+                ? (isShowAtRoot ? () => toggleShowSelection(item.key) : undefined)
                 : hasBothImages
                   ? () => setPressedKey(item.key)
                   : undefined;
-              const handlePressOut = editMode && isEditable
+              const handlePressOut = editMode
                 ? undefined
                 : hasBothImages
                   ? () => setPressedKey(null)
@@ -670,6 +678,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                   onPress={handlePress}
                   onLongPress={handleLongPress}
                   onPressOut={handlePressOut}
+                  onEditPress={onEditPress}
                 />
               );
             }}

@@ -11,6 +11,7 @@ export type ListItemProps = {
   count?: number;
   onPress: () => void;
   onLongPress?: () => void;
+  onEditPress?: () => void;
 };
 
 export function ListItem({
@@ -23,6 +24,7 @@ export function ListItem({
   count,
   onPress,
   onLongPress,
+  onEditPress,
 }: ListItemProps) {
   // Choose icon: folder icon for show/season folders; movie icon for video files.
   const icon = kind === 'folder' ? '📁' : '🎬';
@@ -46,7 +48,9 @@ export function ListItem({
       {isSelected ? (
         <ThemedText style={styles.selectedIcon}>✓</ThemedText>
       ) : editMode && isEditable ? (
-        <ThemedText style={styles.editIcon}>✏️</ThemedText>
+        <TouchableOpacity style={styles.editButton} onPress={onEditPress} activeOpacity={0.7}>
+          <ThemedText style={styles.editIcon}>✏️</ThemedText>
+        </TouchableOpacity>
       ) : null}
     </TouchableOpacity>
   );
@@ -81,8 +85,16 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  editButton: {
+    backgroundColor: 'rgba(10,126,164,0.85)',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
   editIcon: {
-    fontSize: 14,
+    fontSize: 16,
   },
   selectedIcon: {
     fontSize: 14,
