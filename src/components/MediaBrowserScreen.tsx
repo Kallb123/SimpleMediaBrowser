@@ -424,7 +424,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const allMovies = useSelector(selectMovies);
   const mediaOverrides = useSelector(selectMediaOverrides);
 
-  const { editMode } = useEditMode();
+  const { editMode, selectedShows, toggleShowSelection, clearShowSelection } = useEditMode();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
   const isScanning = useSelector(selectIsScanning);
@@ -586,7 +586,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
-            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}`}
+            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
               const isEditable = (
@@ -594,15 +594,23 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 item.mediaType === 'movie' ||
                 item.mediaType === 'episode'
               );
+              // Shows at root level get tap-to-select behaviour in edit mode.
+              const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
+              const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
 
-              const handlePress = isFolder
-                ? item.onPress
-                : () => {
-                    logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
-                    openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
-                      logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
-                    });
-                  };
+              let handlePress: () => void;
+              if (editMode && isShowAtRoot) {
+                handlePress = () => toggleShowSelection(item.key);
+              } else if (item.kind === 'folder') {
+                handlePress = item.onPress;
+              } else {
+                handlePress = () => {
+                  logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
+                  openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
+                    logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
+                  });
+                };
+              }
 
               if (isListMode) {
                 const handleLongPress = editMode && isEditable
@@ -615,6 +623,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                     rowHeight={listRowHeight}
                     editMode={editMode}
                     isEditable={isEditable}
+                    isSelected={isSelected}
                     count={item.kind === 'folder' ? item.count : undefined}
                     onPress={handlePress}
                     onLongPress={handleLongPress}
@@ -647,6 +656,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                   editMode={editMode}
                   isRevealed={isRevealed}
                   isEditable={isEditable}
+                  isSelected={isSelected}
                   onPress={handlePress}
                   onLongPress={handleLongPress}
                   onPressOut={handlePressOut}
@@ -655,6 +665,31 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             }}
             contentContainerStyle={isListMode ? styles.listContent : styles.gridContent}
           />
+          {/* Merge toolbar – visible when 2+ shows are selected in edit mode at root level */}
+          {editMode && selectedShows.size >= 2 && navStack.length === 0 && (
+            <View style={styles.mergeToolbar}>
+              <ThemedText style={styles.mergeToolbarText}>
+                {selectedShows.size} shows selected
+              </ThemedText>
+              <TouchableOpacity
+                style={styles.mergeButton}
+                onPress={() => {
+                  router.push({
+                    pathname: '/mergeshows',
+                    params: { showKeys: JSON.stringify(Array.from(selectedShows)) },
+                  });
+                }}
+              >
+                <ThemedText style={styles.mergeButtonText}>Merge</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.mergeCancelButton}
+                onPress={clearShowSelection}
+              >
+                <ThemedText style={styles.mergeCancelText}>Cancel</ThemedText>
+              </TouchableOpacity>
+            </View>
+          )}
         </ThemedView>
       ) : isScanning ? (
         <ThemedView style={styles.stepContainer}>
@@ -809,5 +844,44 @@ const styles = StyleSheet.create({
   scanProgressFill: {
     height: '100%',
     borderRadius: 2,
+  },
+  mergeToolbar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(20,20,20,0.92)',
+    gap: 8,
+  },
+  mergeToolbarText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#fff',
+  },
+  mergeButton: {
+    backgroundColor: '#0a7ea4',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  mergeButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  mergeCancelButton: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  mergeCancelText: {
+    color: '#fff',
+    fontSize: 13,
   },
 });

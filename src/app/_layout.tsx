@@ -121,6 +121,13 @@ export default function RootLayout() {
                 title: 'Edit Item',
               }}
             />
+            <Stack.Screen
+              name="mergeshows"
+              options={{
+                presentation: 'modal',
+                title: 'Merge Shows',
+              }}
+            />
           </Stack>
         </EditModeProvider>
       </Provider>

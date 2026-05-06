@@ -23,6 +23,7 @@ export type PosterBoxProps = {
   editMode: boolean;
   isRevealed: boolean;
   isEditable: boolean;
+  isSelected?: boolean;
   onPress: () => void;
   onLongPress?: () => void;
   onPressOut?: () => void;
@@ -36,6 +37,7 @@ export function PosterBox({
   editMode,
   isRevealed,
   isEditable,
+  isSelected,
   onPress,
   onLongPress,
   onPressOut,
@@ -60,7 +62,11 @@ export function PosterBox({
       onPressOut={onPressOut}
       style={[styles.card, { width: cardWidth }]}
     >
-      <View style={[styles.thumbnailBox, { height: thumbnailHeight }]}>
+      <View style={[
+        styles.thumbnailBox,
+        { height: thumbnailHeight },
+        isSelected && styles.thumbnailBoxSelected,
+      ]}>
         {displaySource ? (
           <Image
             source={displaySource}
@@ -74,8 +80,16 @@ export function PosterBox({
             </ThemedText>
           </View>
         )}
+        {/* Selection indicator overlay – shown in edit mode when the item is selected */}
+        {isSelected && (
+          <View style={styles.selectedOverlay}>
+            <View style={styles.selectedCheckCircle}>
+              <ThemedText style={styles.selectedCheckIcon}>✓</ThemedText>
+            </View>
+          </View>
+        )}
         {/* Edit mode indicator overlay */}
-        {editMode && isEditable && (
+        {editMode && isEditable && !isSelected && (
           <View style={styles.editOverlay}>
             <ThemedText style={styles.editOverlayIcon}>✏️</ThemedText>
           </View>
@@ -111,6 +125,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
   },
+  thumbnailBoxSelected: {
+    borderWidth: 3,
+    borderColor: '#0a7ea4',
+  },
   thumbnailImage: {
     width: '100%',
     height: '100%',
@@ -139,6 +157,30 @@ const styles = StyleSheet.create({
   },
   editOverlayIcon: {
     fontSize: 14,
+  },
+  selectedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(10,126,164,0.25)',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    padding: 6,
+  },
+  selectedCheckCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#0a7ea4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedCheckIcon: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   countBadge: {
     position: 'absolute',

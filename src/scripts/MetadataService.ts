@@ -3,6 +3,7 @@ import { store } from '@/store/store';
 import { updateShowMetadata, updateMovieMetadata, setScanProgress, mergeDuplicateShows } from '@/store/libraryReducer';
 import type { IMediaLibrary, IMediaShow } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
+import { fuzzyKey, buildTmdbSearchQuery } from '@/scripts/FileScanner';
 import { logger } from '@/scripts/Logger';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
@@ -22,15 +23,6 @@ function delay(ms: number): Promise<void> {
  */
 function extractYearFromDate(dateString?: string): number {
     return dateString ? parseInt(dateString.substring(0, 4), 10) : 0;
-}
-
-/**
- * Remove common year suffixes so TMDB can find titles like "Breaking Bad (2008)"
- * or "Movie Title 2008". Strips patterns like "(2008)", "[2008]", or " 2008" at
- * the end of the string.
- */
-function stripYearSuffix(title: string): string {
-    return title.replace(/\s*[\[(]?\d{4}[\])]?\s*$/, '').trim();
 }
 
 async function ensurePostersDir(): Promise<void> {
@@ -71,7 +63,14 @@ export class MetadataService {
 
     /** Enrich both the TV library and the movie list concurrently. */
     async enrichAll(library: IMediaLibrary, movies: IMediaObject[], apiKey: string): Promise<void> {
-        const showNames = Object.keys(library);
+        // First pass: collapse shows whose names differ only in punctuation / capitalisation.
+        // This ensures we don't make separate TMDB requests for e.g. "Grey's Anatomy" and
+        // "Greys Anatomy" that would otherwise remain as two distinct library entries.
+        this.deduplicateByFuzzyName();
+        // Re-read the library after fuzzy dedup so we don't enrich entries that were merged.
+        const dedupedLibrary = store.getState().libraryReducer.mediaLibrary;
+
+        const showNames = Object.keys(dedupedLibrary);
         const metadataTotal = showNames.length + movies.length;
         // Announce the enriching phase so the UI can show a progress banner.
         store.dispatch(setScanProgress({
@@ -101,7 +100,7 @@ export class MetadataService {
             }
         };
         const results = await Promise.allSettled([
-            this.enrichLibrary(library, apiKey, progress, dispatchProgress),
+            this.enrichLibrary(dedupedLibrary, apiKey, progress, dispatchProgress),
             this.enrichMovies(movies, apiKey, progress, dispatchProgress),
         ]);
         for (const result of results) {
@@ -151,7 +150,7 @@ export class MetadataService {
                 const url =
                     `${TMDB_BASE_URL}/search/tv` +
                     `?api_key=${encodeURIComponent(apiKey)}` +
-                    `&query=${encodeURIComponent(stripYearSuffix(showName))}` +
+                    `&query=${encodeURIComponent(buildTmdbSearchQuery(showName))}` +
                     `&language=en-US&page=1`;
 
                 const response = await fetch(url);
@@ -245,7 +244,7 @@ export class MetadataService {
                 const url =
                     `${TMDB_BASE_URL}/search/movie` +
                     `?api_key=${encodeURIComponent(apiKey)}` +
-                    `&query=${encodeURIComponent(stripYearSuffix(searchTitle))}` +
+                    `&query=${encodeURIComponent(buildTmdbSearchQuery(searchTitle))}` +
                     `&language=en-US&page=1`;
 
                 const response = await fetch(url);
@@ -278,6 +277,52 @@ export class MetadataService {
         }
 
         logger.log('MetadataService', 'enrichMovies complete');
+    }
+
+    /**
+     * Scans the current Redux library for shows whose names are equivalent after
+     * fuzzy normalisation (lower-case, punctuation stripped, "&" → "and") and
+     * merges them into a single canonical entry.
+     *
+     * This handles common naming mismatches such as:
+     *   "Grey's Anatomy"  vs  "Greys Anatomy"
+     *   "Tom & Jerry"     vs  "Tom and Jerry"
+     *   "Bluey (2018)"    vs  "Bluey"           (year suffix already handled at
+     *                                             scan time; covered here as defence)
+     *
+     * When multiple keys share the same fuzzy key the canonical entry is chosen
+     * as the one that already has a TMDB ID (from a prior run); if none or
+     * multiple do, the alphabetically first key is used for determinism.
+     */
+    private deduplicateByFuzzyName(): void {
+        const library = store.getState().libraryReducer.mediaLibrary;
+
+        // Group library keys by their normalised fuzzy key.
+        const byFuzzyKey = new Map<string, string[]>();
+        for (const showKey of Object.keys(library)) {
+            const fk = fuzzyKey(showKey);
+            const group = byFuzzyKey.get(fk);
+            if (group) {
+                group.push(showKey);
+            } else {
+                byFuzzyKey.set(fk, [showKey]);
+            }
+        }
+
+        for (const [fk, showKeys] of byFuzzyKey) {
+            if (showKeys.length <= 1) continue;
+            // Sort for deterministic canonical selection.
+            showKeys.sort();
+            // Prefer whichever entry already has a TMDB ID from a previous scan.
+            const withTmdb = showKeys.find((k) => !!library[k]?.ids.tmdb);
+            const keepKey = withTmdb ?? showKeys[0];
+            const removeKeys = showKeys.filter((k) => k !== keepKey);
+            logger.log(
+                'MetadataService',
+                `Deduplicating by fuzzy name "${fk}": keeping "${keepKey}", merging [${removeKeys.map((k) => `"${k}"`).join(', ')}]`,
+            );
+            store.dispatch(mergeDuplicateShows({ keepKey, removeKeys }));
+        }
     }
 
     /**

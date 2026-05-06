@@ -288,6 +288,56 @@ function normalizeShowName(raw: string): { name: string; year: number } {
     return { name, year };
 }
 
+/**
+ * Produces a normalised key used to detect that two differently-named show
+ * folders actually refer to the same series.
+ *
+ * The key is derived by:
+ *   1. Stripping any trailing year suffix (delegates to normalizeShowName).
+ *   2. Lower-casing the result.
+ *   3. Replacing ampersands with "and" so "Tom & Jerry" ≡ "Tom and Jerry".
+ *   4. Removing apostrophes, hyphens, colons, periods, commas and exclamation
+ *      marks so "Grey's Anatomy" ≡ "Greys Anatomy".
+ *   5. Collapsing runs of whitespace to a single space and trimming.
+ *
+ * Examples:
+ *   "Grey's Anatomy"   → "greys anatomy"
+ *   "Greys Anatomy"    → "greys anatomy"
+ *   "Tom & Jerry"      → "tom and jerry"
+ *   "Tom and Jerry"    → "tom and jerry"
+ *   "Bluey (2018)"     → "bluey"
+ */
+export function fuzzyKey(name: string): string {
+    const { name: stripped } = normalizeShowName(name);
+    return stripped
+        .toLowerCase()
+        .replace(/&/g, 'and')
+        .replace(/[':.,!-]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
+ * Builds a sanitised query string suitable for the TMDB search API from a raw
+ * show or movie title.
+ *
+ * Steps applied (order matters):
+ *   1. Strip a trailing year suffix – "Breaking Bad (2008)" → "Breaking Bad".
+ *   2. Replace "&" with "and" – TMDB handles "and" better than bare "&".
+ *   3. Strip apostrophes, colons and commas that can confuse TMDB's tokeniser.
+ *   4. Collapse whitespace and trim.
+ *
+ * The original title is never mutated; only the TMDB query is affected.
+ */
+export function buildTmdbSearchQuery(title: string): string {
+    return title
+        .replace(/\s*[\[(]?\d{4}[\])]?\s*$/, '')
+        .replace(/&/g, 'and')
+        .replace(/[':.,\-]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 export class FileScanner {
 
     static myInstance: FileScanner | null = null;
