@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -74,6 +74,8 @@ export default function SettingsPrompt() {
   const [enablePosterFetching, setLocalEnablePosterFetching] = useState(true);
   const [enableThumbnailGeneration, setLocalEnableThumbnailGeneration] = useState(false);
   const [rescanOnStartup, setLocalRescanOnStartup] = useState(true);
+  const [fetchEpisodeNames, setLocalFetchEpisodeNames] = useState(true);
+  const [fetchEpisodeThumbnails, setLocalFetchEpisodeThumbnails] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
@@ -90,6 +92,8 @@ export default function SettingsPrompt() {
   const settingsEnablePosterFetching = useSelector(selectEnablePosterFetching);
   const settingsEnableThumbnailGeneration = useSelector(selectEnableThumbnailGeneration);
   const settingsRescanOnStartup = useSelector(selectRescanOnStartup);
+  const settingsFetchEpisodeNames = useSelector(selectFetchEpisodeNames);
+  const settingsFetchEpisodeThumbnails = useSelector(selectFetchEpisodeThumbnails);
 
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
@@ -161,7 +165,7 @@ export default function SettingsPrompt() {
 
   useEffect(() => {
     try {
-      logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${safeMediaSources.length}, posters=${settingsEnablePosterFetching}, thumbnails=${settingsEnableThumbnailGeneration}, rescanOnStartup=${settingsRescanOnStartup}`);
+      logger.log('Settings', `Screen mounted. Current state: dataSource=${settingsDataSource}, mediaStructure=${settingsMediaStructure}, viewOrientation=${settingsViewOrientation}, viewScale=${settingsViewScale}, sources=${safeMediaSources.length}, posters=${settingsEnablePosterFetching}, thumbnails=${settingsEnableThumbnailGeneration}, rescanOnStartup=${settingsRescanOnStartup}, fetchEpisodeNames=${settingsFetchEpisodeNames}, fetchEpisodeThumbnails=${settingsFetchEpisodeThumbnails}`);
     } catch (e) {
       logger.error('Settings', 'Exception while logging settings mount state', e as Error);
     }
@@ -196,11 +200,13 @@ export default function SettingsPrompt() {
       setLocalEnablePosterFetching(settingsEnablePosterFetching);
       setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
       setLocalRescanOnStartup(settingsRescanOnStartup);
+      setLocalFetchEpisodeNames(settingsFetchEpisodeNames);
+      setLocalFetchEpisodeThumbnails(settingsFetchEpisodeThumbnails);
       setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails]);
 
   const save = () => {
     try {
@@ -255,6 +261,16 @@ export default function SettingsPrompt() {
       if (rescanOnStartup !== settingsRescanOnStartup) {
         logger.log('Settings', `Persisting: rescanOnStartup changed ${settingsRescanOnStartup} → ${rescanOnStartup}`);
         dispatch(setRescanOnStartup(rescanOnStartup));
+        changeCount++;
+      }
+      if (fetchEpisodeNames !== settingsFetchEpisodeNames) {
+        logger.log('Settings', `Persisting: fetchEpisodeNames changed ${settingsFetchEpisodeNames} → ${fetchEpisodeNames}`);
+        dispatch(setFetchEpisodeNames(fetchEpisodeNames));
+        changeCount++;
+      }
+      if (fetchEpisodeThumbnails !== settingsFetchEpisodeThumbnails) {
+        logger.log('Settings', `Persisting: fetchEpisodeThumbnails changed ${settingsFetchEpisodeThumbnails} → ${fetchEpisodeThumbnails}`);
+        dispatch(setFetchEpisodeThumbnails(fetchEpisodeThumbnails));
         changeCount++;
       }
       logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
@@ -336,7 +352,7 @@ export default function SettingsPrompt() {
   const clearPosterCache = useCallback(() => {
     Alert.alert(
       'Clear poster overrides',
-      'This will delete all downloaded poster images from disk and reset any poster overrides. Posters will be re-fetched on the next scan.',
+      'This will delete all downloaded poster images and episode thumbnails from disk and reset any poster overrides. Poster images and episode thumbnails will be re-fetched on the next scan.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -348,6 +364,10 @@ export default function SettingsPrompt() {
               const postersDir = new Directory(Paths.document, 'smb_posters');
               if (postersDir.exists) {
                 postersDir.delete();
+              }
+              const episodeThumbsDir = new Directory(Paths.document, 'smb_thumbnails_tmdb');
+              if (episodeThumbsDir.exists) {
+                episodeThumbsDir.delete();
               }
               dispatch(clearPosterOverrides());
               logger.log('Settings', 'Poster overrides cleared');
@@ -528,6 +548,38 @@ export default function SettingsPrompt() {
           Enabled by default. When off, scans skip TMDB poster fetching even if an API key is configured.
         </ThemedText>
         <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Fetch episode names:</ThemedText>
+          <Switch
+            value={fetchEpisodeNames}
+            onValueChange={(value) => {
+              try {
+                setLocalFetchEpisodeNames(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling fetch episode names', e as Error);
+              }
+            }}
+          />
+        </View>
+        <ThemedText style={styles.emptyText}>
+          Enabled by default. When on, episode names are fetched from TMDB and displayed in place of locally-scanned titles.
+        </ThemedText>
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Fetch episode thumbnails:</ThemedText>
+          <Switch
+            value={fetchEpisodeThumbnails}
+            onValueChange={(value) => {
+              try {
+                setLocalFetchEpisodeThumbnails(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling fetch episode thumbnails', e as Error);
+              }
+            }}
+          />
+        </View>
+        <ThemedText style={styles.emptyText}>
+          Enabled by default. When on, episode still images are fetched from TMDB and used as episode artwork in the grid.
+        </ThemedText>
+        <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>Generate video thumbnails:</ThemedText>
           <Switch
             value={enableThumbnailGeneration}
@@ -679,7 +731,7 @@ export default function SettingsPrompt() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.troubleshootingButton} onPress={clearPosterCache}>
               <ThemedText style={styles.troubleshootingButtonText}>🖼 Clear poster overrides</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all downloaded posters and resets poster overrides.</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all downloaded posters and episode thumbnails, and resets poster overrides.</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity style={styles.troubleshootingButton} onPress={clearScannedData}>
               <ThemedText style={styles.troubleshootingButtonText}>📂 Clear scanned data</ThemedText>

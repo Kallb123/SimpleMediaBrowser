@@ -1,14 +1,16 @@
 import { File, Directory, Paths } from 'expo-file-system';
 import { store } from '@/store/store';
-import { updateShowMetadata, updateMovieMetadata, setScanProgress, mergeDuplicateShows } from '@/store/libraryReducer';
-import type { IMediaLibrary, IMediaShow } from '@/store/libraryReducer';
+import { updateShowMetadata, updateMovieMetadata, setScanProgress, mergeDuplicateShows, updateSeasonEpisodeMetadata } from '@/store/libraryReducer';
+import type { IMediaLibrary, IMediaShow, IMediaSeason } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { fuzzyKey, buildTmdbSearchQuery } from '@/scripts/FileScanner';
 import { logger } from '@/scripts/Logger';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_BASE_URL = 'https://image.tmdb.org/t/p/w500';
+const EPISODE_THUMB_BASE_URL = 'https://image.tmdb.org/t/p/w780';
 const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
+const EPISODE_THUMBS_DIR = new Directory(Paths.document, 'smb_thumbnails_tmdb');
 
 /** Milliseconds to wait between successive TMDB API requests. */
 const REQUEST_DELAY_MS = 150;
@@ -31,6 +33,12 @@ async function ensurePostersDir(): Promise<void> {
     }
 }
 
+async function ensureEpisodeThumbsDir(): Promise<void> {
+    if (!EPISODE_THUMBS_DIR.exists) {
+        EPISODE_THUMBS_DIR.create({ intermediates: true, idempotent: true });
+    }
+}
+
 /**
  * Download a TMDB poster image to local storage and return the local file URI.
  * If the file already exists locally it is returned immediately without a network
@@ -47,6 +55,25 @@ async function downloadPoster(tmdbId: string, posterPath: string): Promise<strin
     }
     const remoteUrl = POSTER_BASE_URL + posterPath;
     logger.log('MetadataService', `Downloading poster: ${remoteUrl} → ${localFile.uri}`);
+    await File.downloadFileAsync(remoteUrl, localFile);
+    return localFile.uri;
+}
+
+/**
+ * Download a TMDB episode still image to local storage and return the local file URI.
+ * If the file already exists locally it is returned immediately without a network request.
+ * `key` should be a safe string like "12345_S01_E03" that uniquely identifies the episode.
+ */
+async function downloadEpisodeThumbnail(key: string, stillPath: string): Promise<string> {
+    await ensureEpisodeThumbsDir();
+    const safeName = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const localFile = new File(EPISODE_THUMBS_DIR, `${safeName}.jpg`);
+    if (localFile.exists) {
+        logger.log('MetadataService', `Episode thumbnail already cached locally for key ${key}`);
+        return localFile.uri;
+    }
+    const remoteUrl = EPISODE_THUMB_BASE_URL + stillPath;
+    logger.log('MetadataService', `Downloading episode thumbnail: ${remoteUrl} → ${localFile.uri}`);
     await File.downloadFileAsync(remoteUrl, localFile);
     return localFile.uri;
 }
@@ -81,24 +108,25 @@ export class MetadataService {
             metadataDone: 0,
             metadataTotal,
         }));
-        // Shared counter threaded through both enrichment tasks so TV + movie
+        // Shared mutable progress state threaded through both enrichment tasks so TV + movie
         // completions both contribute to the same running total.
         const progress = { done: 0 };
         // Dispatch progress every N items to avoid flooding Redux for large libraries,
         // and always on the final item so the counter reaches 100%.
         const METADATA_PROGRESS_INTERVAL = 5;
-        const dispatchProgress = () => {
-            if (progress.done % METADATA_PROGRESS_INTERVAL === 0 || progress.done === metadataTotal) {
+        const makeDispatchProgress = (currentTotal: number) => () => {
+            if (progress.done % METADATA_PROGRESS_INTERVAL === 0 || progress.done === currentTotal) {
                 store.dispatch(setScanProgress({
                     phase: 'enriching',
                     filesFound: 0,
                     thumbnailsDone: 0,
                     thumbnailsTotal: 0,
                     metadataDone: progress.done,
-                    metadataTotal,
+                    metadataTotal: currentTotal,
                 }));
             }
         };
+        const dispatchProgress = makeDispatchProgress(metadataTotal);
         const results = await Promise.allSettled([
             this.enrichLibrary(dedupedLibrary, apiKey, progress, dispatchProgress),
             this.enrichMovies(movies, apiKey, progress, dispatchProgress),
@@ -111,6 +139,35 @@ export class MetadataService {
         // After both TV and movie enrichment, collapse any shows that TMDB resolved
         // to the same series ID into a single library entry.
         this.deduplicateByTmdbId();
+
+        // Episode-level enrichment (names and stills) – uses the per-season TMDB endpoint
+        // so one API call covers all episodes in a season, minimising total request count.
+        const settings = store.getState().settingsReducer;
+        const fetchEpisodeNames = settings.fetchEpisodeNames ?? true;
+        const fetchEpisodeThumbnails = settings.fetchEpisodeThumbnails ?? true;
+        if (fetchEpisodeNames || fetchEpisodeThumbnails) {
+            const enrichedLibrary = store.getState().libraryReducer.mediaLibrary;
+            // Count seasons for shows that now have a TMDB ID (resolved during enrichLibrary).
+            let seasonCount = 0;
+            for (const show of Object.values(enrichedLibrary) as IMediaShow[]) {
+                if (show.ids.tmdb) {
+                    seasonCount += Object.keys(show.seasons).length;
+                }
+            }
+            if (seasonCount > 0) {
+                const episodeMetadataTotal = progress.done + seasonCount;
+                store.dispatch(setScanProgress({
+                    phase: 'enriching',
+                    filesFound: 0,
+                    thumbnailsDone: 0,
+                    thumbnailsTotal: 0,
+                    metadataDone: progress.done,
+                    metadataTotal: episodeMetadataTotal,
+                }));
+                const dispatchEpisodeProgress = makeDispatchProgress(episodeMetadataTotal);
+                await this.enrichEpisodes(enrichedLibrary, apiKey, fetchEpisodeNames, fetchEpisodeThumbnails, progress, dispatchEpisodeProgress);
+            }
+        }
     }
 
     /** Fetch TMDB posters for every show in the library that does not yet have one cached. */
@@ -277,6 +334,112 @@ export class MetadataService {
         }
 
         logger.log('MetadataService', 'enrichMovies complete');
+    }
+
+    /**
+     * Fetch episode names and/or still images from TMDB for all shows that have
+     * a TMDB ID.  Uses the `/tv/{id}/season/{n}` endpoint which returns the full
+     * episode list for a season in a single API call, making this significantly
+     * more efficient than one request per episode.
+     *
+     * Episodes are matched to their Redux entries by episode number via the
+     * standard `eNN` key format used throughout the library.
+     */
+    async enrichEpisodes(
+        library: IMediaLibrary,
+        apiKey: string,
+        fetchNames: boolean,
+        fetchThumbnails: boolean,
+        progress: { done: number },
+        dispatchProgress: () => void,
+    ): Promise<void> {
+        logger.log('MetadataService', 'enrichEpisodes: starting episode metadata enrichment');
+
+        for (const [showName, show] of Object.entries(library) as Array<[string, IMediaShow]>) {
+            const tmdbId = show.ids.tmdb;
+            if (!tmdbId) continue;
+
+            const sortedSeasons = Object.entries(show.seasons).sort(
+                (a, b) => (a[1] as IMediaSeason).seasonNumber - (b[1] as IMediaSeason).seasonNumber,
+            );
+
+            for (const [seasonKey, season] of sortedSeasons as Array<[string, IMediaSeason]>) {
+                try {
+                    const url =
+                        `${TMDB_BASE_URL}/tv/${encodeURIComponent(tmdbId)}/season/${season.seasonNumber}` +
+                        `?api_key=${encodeURIComponent(apiKey)}&language=en-US`;
+
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        logger.warn('MetadataService', `TMDB season fetch failed for "${showName}" S${season.seasonNumber}: HTTP ${response.status}`);
+                        await delay(REQUEST_DELAY_MS);
+                        continue;
+                    }
+
+                    const data = await response.json();
+                    const tmdbEpisodes: Array<{
+                        episode_number: number;
+                        name?: string;
+                        still_path: string | null;
+                    }> = data.episodes ?? [];
+
+                    const episodeUpdates: { [episodeKey: string]: { tmdbTitle?: string; tmdbThumbnail?: string } } = {};
+
+                    for (const epData of tmdbEpisodes) {
+                        const episodeKey = `e${String(epData.episode_number).padStart(2, '0')}`;
+                        if (!season.episodes[episodeKey]) continue;
+
+                        const update: { tmdbTitle?: string; tmdbThumbnail?: string } = {};
+
+                        if (fetchNames && epData.name) {
+                            update.tmdbTitle = epData.name;
+                        }
+
+                        if (fetchThumbnails && epData.still_path) {
+                            // Reuse cached thumbnail if it already exists on disk.
+                            const existingThumbnail = season.episodes[episodeKey].tmdbThumbnail;
+                            let thumbnailUri: string | undefined;
+                            if (existingThumbnail) {
+                                try {
+                                    if (new File(existingThumbnail).exists) {
+                                        thumbnailUri = existingThumbnail;
+                                    }
+                                } catch {
+                                    // File check failed; will download below.
+                                }
+                            }
+                            if (!thumbnailUri) {
+                                try {
+                                    const thumbKey = `${tmdbId}_S${season.seasonNumber}_E${epData.episode_number}`;
+                                    thumbnailUri = await downloadEpisodeThumbnail(thumbKey, epData.still_path);
+                                } catch (e) {
+                                    logger.warn('MetadataService', `Failed to download thumbnail for "${showName}" S${season.seasonNumber}E${epData.episode_number}`, e);
+                                }
+                            }
+                            if (thumbnailUri) update.tmdbThumbnail = thumbnailUri;
+                        }
+
+                        if (Object.keys(update).length > 0) {
+                            episodeUpdates[episodeKey] = update;
+                        }
+                    }
+
+                    if (Object.keys(episodeUpdates).length > 0) {
+                        store.dispatch(updateSeasonEpisodeMetadata({ showName, seasonKey, episodeUpdates }));
+                        logger.log('MetadataService', `"${showName}" S${season.seasonNumber}: updated ${Object.keys(episodeUpdates).length} episode(s)`);
+                    }
+
+                    await delay(REQUEST_DELAY_MS);
+                } catch (e) {
+                    logger.warn('MetadataService', `Error enriching episodes for "${showName}" S${season.seasonNumber}`, e);
+                } finally {
+                    progress.done++;
+                    dispatchProgress();
+                }
+            }
+        }
+
+        logger.log('MetadataService', 'enrichEpisodes complete');
     }
 
     /**

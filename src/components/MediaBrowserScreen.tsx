@@ -82,12 +82,12 @@ function compareEpisodes(
   const aSortTitle = aO?.sortTitle;
   const bSortTitle = bO?.sortTitle;
   if (aSortTitle || bSortTitle) {
-    const aKey = aSortTitle ?? aO?.title ?? a.title ?? a.filename;
-    const bKey = bSortTitle ?? bO?.title ?? b.title ?? b.filename;
+    const aKey = aSortTitle ?? aO?.title ?? a.tmdbTitle ?? a.title ?? a.filename;
+    const bKey = bSortTitle ?? bO?.title ?? b.tmdbTitle ?? b.title ?? b.filename;
     return aKey.localeCompare(bKey, undefined, NATURAL_SORT_OPTS);
   }
   if (a.episodeNumber !== b.episodeNumber) return a.episodeNumber - b.episodeNumber;
-  return (a.title ?? a.filename).localeCompare(b.title ?? b.filename, undefined, NATURAL_SORT_OPTS);
+  return (a.tmdbTitle ?? a.title ?? a.filename).localeCompare(b.tmdbTitle ?? b.title ?? b.filename, undefined, NATURAL_SORT_OPTS);
 }
 
 /** Locale-compare options that produce natural (numeric-aware) sort order. */
@@ -96,7 +96,8 @@ const NATURAL_SORT_OPTS: Intl.CollatorOptions = { numeric: true, sensitivity: 'b
 /** Returns the effective display label for an episode, applying overrides to the title portion. */
 function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }, prefix: string): string {
   const override = overrides[`episode:${ep.parsedPath}`];
-  const title = override?.title ?? ep.title;
+  // Priority: user override > TMDB title > scanned (local) title
+  const title = override?.title ?? ep.tmdbTitle ?? ep.title;
   if (prefix) {
     return title ? `${prefix} - ${title}` : prefix;
   }
@@ -106,6 +107,11 @@ function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMedi
 /** Returns the effective display label for a movie, applying overrides if present. */
 function movieDisplayLabel(movie: IMediaObject, overrides: { [key: string]: IMediaOverride }): string {
   return overrides[`movie:${movie.parsedPath}`]?.title ?? movie.title ?? movie.filename;
+}
+
+/** Returns the effective poster URI for an episode: user override > TMDB still > none. */
+function getEpisodePosterUri(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }): string | undefined {
+  return overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined;
 }
 
 function buildDisplayItems(
@@ -133,9 +139,10 @@ function buildDisplayItems(
             items.push({
               kind: 'file',
               label: episodeDisplayLabel(ep, overrides, displayPrefix),
-              sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.title || ep.filename,
+              sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.tmdbTitle || ep.title || ep.filename,
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
+              posterUri: getEpisodePosterUri(ep, overrides),
               mediaObject: ep,
               mediaType: 'episode',
             });
@@ -214,6 +221,7 @@ function buildDisplayItems(
             label: episodeDisplayLabel(ep, overrides, prefix),
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
+            posterUri: getEpisodePosterUri(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode',
           });
@@ -275,6 +283,7 @@ function buildDisplayItems(
             label: episodeDisplayLabel(ep, overrides, eNum),
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
+            posterUri: getEpisodePosterUri(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };
@@ -356,6 +365,7 @@ function buildDisplayItems(
             label: episodeDisplayLabel(ep, overrides, eNum),
             key: ep.path,
             thumbnailUri: thumbnailCache.get(ep.path),
+            posterUri: getEpisodePosterUri(ep, overrides),
             mediaObject: ep,
             mediaType: 'episode' as const,
           };

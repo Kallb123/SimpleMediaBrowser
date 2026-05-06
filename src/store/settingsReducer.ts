@@ -25,6 +25,8 @@ interface SettingsState {
   enablePosterFetching: boolean
   enableThumbnailGeneration: boolean
   rescanOnStartup: boolean
+  fetchEpisodeNames: boolean
+  fetchEpisodeThumbnails: boolean
 }
 
 // Define the initial state using that type
@@ -40,6 +42,8 @@ const initialState: SettingsState = {
   enablePosterFetching: true,
   enableThumbnailGeneration: false,
   rescanOnStartup: true,
+  fetchEpisodeNames: true,
+  fetchEpisodeThumbnails: true,
 }
 
 export const settingsSlice = createSlice({
@@ -84,10 +88,16 @@ export const settingsSlice = createSlice({
     setRescanOnStartup: (state, action: PayloadAction<boolean>) => {
       state.rescanOnStartup = action.payload;
     },
+    setFetchEpisodeNames: (state, action: PayloadAction<boolean>) => {
+      state.fetchEpisodeNames = action.payload;
+    },
+    setFetchEpisodeThumbnails: (state, action: PayloadAction<boolean>) => {
+      state.fetchEpisodeThumbnails = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -105,5 +115,7 @@ export const selectDefaultPage = (state: RootState) => state.settingsReducer.def
 export const selectEnablePosterFetching = (state: RootState) => state.settingsReducer.enablePosterFetching ?? true;
 export const selectEnableThumbnailGeneration = (state: RootState) => state.settingsReducer.enableThumbnailGeneration ?? false;
 export const selectRescanOnStartup = (state: RootState) => state.settingsReducer.rescanOnStartup ?? true;
+export const selectFetchEpisodeNames = (state: RootState) => state.settingsReducer.fetchEpisodeNames ?? true;
+export const selectFetchEpisodeThumbnails = (state: RootState) => state.settingsReducer.fetchEpisodeThumbnails ?? true;
 
 export default settingsSlice.reducer
