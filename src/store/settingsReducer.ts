@@ -24,6 +24,7 @@ interface SettingsState {
   defaultPage: defaultPages
   enablePosterFetching: boolean
   enableThumbnailGeneration: boolean
+  rescanOnStartup: boolean
 }
 
 // Define the initial state using that type
@@ -38,6 +39,7 @@ const initialState: SettingsState = {
   defaultPage: 'home',
   enablePosterFetching: true,
   enableThumbnailGeneration: false,
+  rescanOnStartup: true,
 }
 
 export const settingsSlice = createSlice({
@@ -79,10 +81,13 @@ export const settingsSlice = createSlice({
     setEnableThumbnailGeneration: (state, action: PayloadAction<boolean>) => {
       state.enableThumbnailGeneration = action.payload;
     },
+    setRescanOnStartup: (state, action: PayloadAction<boolean>) => {
+      state.rescanOnStartup = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -99,5 +104,6 @@ export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdb
 export const selectDefaultPage = (state: RootState) => state.settingsReducer.defaultPage ?? 'home';
 export const selectEnablePosterFetching = (state: RootState) => state.settingsReducer.enablePosterFetching ?? true;
 export const selectEnableThumbnailGeneration = (state: RootState) => state.settingsReducer.enableThumbnailGeneration ?? false;
+export const selectRescanOnStartup = (state: RootState) => state.settingsReducer.rescanOnStartup ?? true;
 
 export default settingsSlice.reducer

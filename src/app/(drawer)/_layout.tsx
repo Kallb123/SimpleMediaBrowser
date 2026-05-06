@@ -4,8 +4,8 @@ import { Colors } from '@/constants/Colors';
 import { DrawerContentScrollView, DrawerItemList, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { useSelector } from 'react-redux';
-import { selectPassword } from '@/store/settingsReducer';
-import { useState } from 'react';
+import { selectPassword, selectMediaSources, selectRescanOnStartup } from '@/store/settingsReducer';
+import { useState, useEffect } from 'react';
 import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
@@ -178,6 +178,25 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 export default function DrawerLayout() {
     const colorScheme = useColorScheme();
     const theme = (colorScheme ?? 'light') as 'light' | 'dark';
+    const mediaSources = useSelector(selectMediaSources);
+    const rescanOnStartup = useSelector(selectRescanOnStartup);
+
+    useEffect(() => {
+      if (!rescanOnStartup) {
+        logger.log('DrawerLayout', 'Rescan on startup is disabled – skipping startup scan');
+        return;
+      }
+      if (!mediaSources || mediaSources.length === 0) {
+        logger.log('DrawerLayout', 'No media sources configured – skipping startup scan');
+        return;
+      }
+      logger.log('DrawerLayout', `Startup scan triggered for ${mediaSources.length} source(s)`);
+      import('@/scripts/FileScanner').then(({ FileScanner }) => {
+        FileScanner.getInstance().scanAllSources(mediaSources);
+      });
+    // Intentionally only run once on mount (startup), not on every mediaSources change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
   
     return (
         <Drawer

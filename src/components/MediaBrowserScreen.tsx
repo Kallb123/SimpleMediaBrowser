@@ -9,7 +9,7 @@ import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { FlashList } from '@shopify/flash-list';
-import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
+import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
 import type { IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes } from '@/store/settingsReducer';
@@ -436,14 +436,6 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
-  useEffect(() => {
-    if (!mediaSources || mediaSources.length === 0) {
-      logger.log('MediaBrowserScreen', 'No media sources configured – skipping scan');
-      return;
-    }
-    logger.log('MediaBrowserScreen', `Media sources changed (${mediaSources.length} source(s)) – triggering scan`);
-    FileScanner.getInstance().scanAllSources(mediaSources);
-  }, [mediaSources]);
 
   // Reset navigation when viewType changes
   useEffect(() => {
