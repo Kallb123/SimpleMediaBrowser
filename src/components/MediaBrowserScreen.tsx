@@ -617,7 +617,14 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     });
   }, []);
 
-  /** Returns the override key for a selectable display item, or null for non-selectable items (e.g. seasons). */
+  /**
+   * Returns the namespaced override key for a selectable display item, using the same format
+   * as `mediaOverrides`:
+   *   "show:<showName>"      – for a TV show folder
+   *   "movie:<parsedPath>"   – for a movie file
+   *   "episode:<parsedPath>" – for an episode file
+   * Returns null for non-selectable items such as season folders.
+   */
   const getItemOverrideKey = useCallback((item: DisplayItem): string | null => {
     if (item.kind === 'folder' && item.mediaType === 'show') {
       return `show:${item.key}`;
@@ -637,7 +644,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const shouldShowToolbar = editMode && selectedItems.size >= 1;
   const shouldShowMerge = selectedShowKeys.length >= 2;
 
-  /** Hide all currently selected items by setting hidden:true in their overrides. */
+  /**
+   * Marks all currently selected items as hidden by setting `hidden: true` in their
+   * `mediaOverrides` entry.  No files are deleted; the action is fully reversible by
+   * clearing the override (e.g. via Settings → Clear All Overrides).
+   */
   const handleHide = useCallback(() => {
     for (const key of selectedItems) {
       dispatch(setMediaOverride({ key, override: { hidden: true } }));
