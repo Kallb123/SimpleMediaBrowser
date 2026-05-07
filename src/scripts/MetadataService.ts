@@ -1,6 +1,6 @@
 import { File, Directory, Paths } from 'expo-file-system';
 import { store } from '@/store/store';
-import { updateShowMetadata, updateMovieMetadata, setScanProgress, mergeDuplicateShows, updateSeasonEpisodeMetadata } from '@/store/libraryReducer';
+import { updateShowMetadata, updateMovieMetadata, setScanProgress, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary, IMediaShow, IMediaSeason } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { fuzzyKey, buildTmdbSearchQuery } from '@/scripts/FileScanner';
@@ -440,6 +440,41 @@ export class MetadataService {
         }
 
         logger.log('MetadataService', 'enrichEpisodes complete');
+    }
+
+    /**
+     * Re-enriches a single show's episode metadata after a manual TMDB rematch.
+     *
+     * Clears existing TMDB episode titles and thumbnails for the show, then
+     * fetches fresh data from TMDB using the newly confirmed tmdbId.  Respects
+     * the user's fetchEpisodeNames / fetchEpisodeThumbnails settings.
+     */
+    async rematchSingleShow(showName: string, tmdbId: string, apiKey: string): Promise<void> {
+        const settings = store.getState().settingsReducer;
+        const fetchNames = settings.fetchEpisodeNames ?? true;
+        const fetchThumbnails = settings.fetchEpisodeThumbnails ?? true;
+        if (!fetchNames && !fetchThumbnails) return;
+
+        // Clear stale episode data from the previous TMDB match.
+        store.dispatch(clearShowEpisodeMetadata(showName));
+
+        // Read the library after the clear so episodes have a blank slate.
+        const library = store.getState().libraryReducer.mediaLibrary;
+        const show = library[showName];
+        if (!show) return;
+
+        // Build a temporary single-show sub-library that carries the confirmed
+        // new TMDB ID so enrichEpisodes fetches from the correct series.
+        const singleShowLibrary: IMediaLibrary = {
+            [showName]: { ...show, ids: { ...show.ids, tmdb: tmdbId } },
+        };
+
+        const progress = { done: 0 };
+        // No-op progress callback: rematch is a one-off operation; progress is not reported to the UI.
+        const noOpProgress = () => {};
+        logger.log('MetadataService', `rematchSingleShow: re-enriching "${showName}" with TMDB ID ${tmdbId}`);
+        await this.enrichEpisodes(singleShowLibrary, apiKey, fetchNames, fetchThumbnails, progress, noOpProgress);
+        logger.log('MetadataService', `rematchSingleShow: done for "${showName}"`);
     }
 
     /**
