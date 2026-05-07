@@ -28,6 +28,7 @@ import { selectTmdbApiKey } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
 import { File, Directory, Paths } from 'expo-file-system';
 import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
+import { MetadataService } from '@/scripts/MetadataService';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
@@ -140,6 +141,22 @@ export default function EditItemScreen() {
   // Browse-locally state
   const [browsingLocally, setBrowsingLocally] = useState(false);
 
+  // Current TMDB ID for this item (override takes priority, then library data).
+  const currentTmdbId: string | null = (() => {
+    if (existingOverride.tmdbId) return existingOverride.tmdbId;
+    if (itemType === 'show') {
+      const showName = itemKey.replace(/^show:/, '');
+      return mediaLibrary[showName]?.ids.tmdb ?? null;
+    } else if (itemType === 'movie') {
+      const parsedPath = itemKey.replace(/^movie:/, '');
+      return movies.find((m) => m.parsedPath === parsedPath)?.ids.tmdb ?? null;
+    }
+    return null;
+  })();
+
+  // True while episode metadata is being re-fetched after a rematch.
+  const [isRematching, setIsRematching] = useState(false);
+
   const canRematch = (itemType === 'show' || itemType === 'movie') && !!tmdbApiKey;
 
   useEffect(() => {
@@ -164,16 +181,18 @@ export default function EditItemScreen() {
   };
 
   /** Apply a chosen poster URI to the library and persist it in overrides. */
-  const applyPoster = (localUri: string) => {
+  const applyPoster = (localUri: string, newTmdbId?: string) => {
     setActivePosterUri(localUri);
     if (itemType === 'show') {
       const showName = itemKey.replace(/^show:/, '');
-      dispatch(updateShowMetadata({ showName, tmdbId: mediaLibrary[showName]?.ids.tmdb ?? '', poster: localUri }));
+      const tmdbIdToUse = newTmdbId ?? mediaLibrary[showName]?.ids.tmdb ?? '';
+      dispatch(updateShowMetadata({ showName, tmdbId: tmdbIdToUse, poster: localUri }));
     } else if (itemType === 'movie') {
       const parsedPath = itemKey.replace(/^movie:/, '');
       const movie = movies.find((m) => m.parsedPath === parsedPath);
       if (movie) {
-        dispatch(updateMovieMetadata({ path: movie.path, tmdbId: movie.ids.tmdb ?? '', poster: localUri }));
+        const tmdbIdToUse = newTmdbId ?? movie.ids.tmdb ?? '';
+        dispatch(updateMovieMetadata({ path: movie.path, tmdbId: tmdbIdToUse, poster: localUri }));
       }
     }
     // Persist the poster URI in mediaOverrides so it survives rescans.
@@ -280,13 +299,29 @@ export default function EditItemScreen() {
       }
 
       if (localPosterUri) {
-        applyPoster(localPosterUri);
+        applyPoster(localPosterUri, tmdbId);
       }
 
       dispatch(setMediaOverride({ key: itemKey, override: { tmdbId, year } }));
       setMatchApplied(result.id);
       setSelectedPoster({ resultId: result.id, posterPath });
       logger.log('EditItem', `Poster applied: TMDB ID ${tmdbId}, path=${posterPath}, year=${year}`);
+
+      // If this is a show and the TMDB ID has changed, re-enrich episode metadata
+      // so episode names and thumbnails reflect the newly matched series.
+      const tmdbIdChanged = tmdbId !== currentTmdbId;
+      if (itemType === 'show' && tmdbIdChanged) {
+        const showName = itemKey.replace(/^show:/, '');
+        logger.log('EditItem', `TMDB ID changed (${currentTmdbId} → ${tmdbId}), re-enriching episodes for "${showName}"`);
+        setIsRematching(true);
+        try {
+          await MetadataService.getInstance().rematchSingleShow(showName, tmdbId, tmdbApiKey);
+        } catch (e) {
+          logger.error('EditItem', 'Episode re-enrichment failed after rematch', e);
+        } finally {
+          setIsRematching(false);
+        }
+      }
     } catch (e) {
       logger.error('EditItem', 'Failed to apply poster', e);
       setSearchError('Failed to apply poster.');
@@ -404,7 +439,10 @@ export default function EditItemScreen() {
         {canRematch && (
           <View style={styles.section}>
             <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-              Search TMDB for Poster
+              Match to TMDB
+            </ThemedText>
+            <ThemedText style={styles.hint}>
+              Search for this {itemType === 'movie' ? 'movie' : 'show'} on TMDB. The currently matched entry is highlighted. Tap a result to browse its posters — selecting a poster matches the item to that TMDB entry and, for shows, re-fetches episode names and thumbnails.
             </ThemedText>
 
             <View style={styles.searchRow}>
@@ -429,8 +467,14 @@ export default function EditItemScreen() {
             {searchError !== '' && (
               <ThemedText style={styles.errorText}>{searchError}</ThemedText>
             )}
-            {applyingMatch && (
+            {applyingMatch && !isRematching && (
               <ThemedText style={styles.hint}>Applying match…</ThemedText>
+            )}
+            {isRematching && (
+              <View style={styles.rematchingRow}>
+                <ActivityIndicator size="small" />
+                <ThemedText style={styles.hint}>Re-fetching episode data for new match…</ThemedText>
+              </View>
             )}
 
             {searchResults.length > 0 && (
@@ -441,18 +485,22 @@ export default function EditItemScreen() {
                 renderItem={({ item }) => {
                   const title = item.title ?? item.name ?? '';
                   const year = (item.release_date ?? item.first_air_date ?? '').substring(0, 4);
-                  const isMatched = matchApplied === item.id;
+                  // A result is highlighted when its TMDB ID matches the item's current match,
+                  // whether that match was set in this session or carried over from a prior scan.
+                  const isCurrentMatch = String(item.id) === currentTmdbId;
+                  const isJustMatched = matchApplied === item.id;
+                  const isHighlighted = isCurrentMatch || isJustMatched;
                   const isExpanded = expandedResultId === item.id;
                   const isLoadingPosters = loadingPostersForId === item.id;
                   const posters: string[] = postersByResultId[item.id] ?? [];
                   const posterCount = isExpanded && !isLoadingPosters ? posters.length : null;
                   return (
-                    <View style={[styles.resultRow, isMatched && styles.resultRowSelected]}>
+                    <View style={[styles.resultRow, isHighlighted && styles.resultRowSelected]}>
                       {/* Header row: thumbnail + title/year + expand button */}
                       <TouchableOpacity
                         style={styles.resultHeader}
                         onPress={() => fetchAndExpandResult(item)}
-                        disabled={applyingMatch}
+                        disabled={applyingMatch || isRematching}
                       >
                         {item.poster_path ? (
                           <Image
@@ -470,8 +518,10 @@ export default function EditItemScreen() {
                           {year !== '' && (
                             <ThemedText style={styles.resultYear}>{year}</ThemedText>
                           )}
-                          {isMatched && (
-                            <ThemedText style={styles.selectedLabel}>✔ Matched</ThemedText>
+                          {isHighlighted && (
+                            <ThemedText style={styles.selectedLabel}>
+                              {isJustMatched ? '✔ Matched' : '✔ Current Match'}
+                            </ThemedText>
                           )}
                           <ThemedText style={styles.posterCountLabel}>
                             {isLoadingPosters
@@ -504,13 +554,13 @@ export default function EditItemScreen() {
                               contentContainerStyle={styles.posterGalleryContent}
                               renderItem={({ item: posterPath }) => {
                                 const isChosen =
-                                    isMatched &&
+                                    isHighlighted &&
                                     selectedPoster?.resultId === item.id &&
                                     selectedPoster?.posterPath === posterPath;
                                 return (
                                   <TouchableOpacity
                                     onPress={() => handleSelectPoster(item, posterPath)}
-                                    disabled={applyingMatch}
+                                    disabled={applyingMatch || isRematching}
                                     style={[styles.galleryPosterWrapper, isChosen && styles.galleryPosterWrapperChosen]}
                                   >
                                     <Image
@@ -648,6 +698,12 @@ const styles = StyleSheet.create({
   },
   spinner: {
     marginVertical: 8,
+  },
+  rematchingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginVertical: 4,
   },
   errorText: {
     color: '#E55',

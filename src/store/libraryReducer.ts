@@ -335,6 +335,21 @@ export const settingsSlice = createSlice({
       state.mediaOverrides = {};
     },
     /**
+     * Clears the TMDB-sourced episode metadata (tmdbTitle and tmdbThumbnail) for every
+     * episode in every season of the specified show.  Called before re-enriching a show
+     * after a manual TMDB rematch so stale data from the old match does not persist.
+     */
+    clearShowEpisodeMetadata: (state, action: PayloadAction<string>) => {
+      const show = state.mediaLibrary[action.payload];
+      if (!show) return;
+      for (const season of Object.values(show.seasons)) {
+        for (const ep of Object.values(season.episodes)) {
+          ep.tmdbTitle = undefined;
+          ep.tmdbThumbnail = undefined;
+        }
+      }
+    },
+    /**
      * Clears all cached poster data:
      * - Removes the `poster` field from every entry in `mediaOverrides`.
      * - Resets the poster URI to an empty string for every show and movie in the library.
@@ -393,7 +408,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
