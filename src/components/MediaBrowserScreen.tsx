@@ -550,6 +550,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     });
   }, []);
 
+  const shouldShowMergeToolbar = editMode && selectedShows.size >= 2 && navStack.length === 0;
+
   return (
     <View style={styles.container}>
       {mediaSources.length > 0 && hasLibraryContent ? (
@@ -702,11 +704,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             }}
             contentContainerStyle={[
               isListMode ? styles.listContent : styles.gridContent,
-              editMode && selectedShows.size >= 2 && navStack.length === 0 && { paddingBottom: MERGE_TOOLBAR_HEIGHT + insets.bottom },
+              shouldShowMergeToolbar && { paddingBottom: MERGE_TOOLBAR_HEIGHT + insets.bottom },
             ]}
           />
           {/* Merge toolbar – visible when 2+ shows are selected in edit mode at root level */}
-          {editMode && selectedShows.size >= 2 && navStack.length === 0 && (
+          {shouldShowMergeToolbar && (
             <View style={[styles.mergeToolbar, { paddingBottom: MERGE_TOOLBAR_PADDING_VERTICAL + insets.bottom }]}>
               <ThemedText style={styles.mergeToolbarText}>
                 {selectedShows.size} shows selected
