@@ -6,6 +6,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { logger } from '@/scripts/Logger';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useEditMode } from '@/contexts/EditModeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const REFRESH_INTERVAL_MS = 2000;
 
@@ -15,6 +16,7 @@ export default function LogsScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isDark = colorScheme === 'dark';
     const { drawerUnlocked } = useEditMode();
+    const insets = useSafeAreaInsets();
 
     const [lines, setLines] = useState<readonly string[]>([]);
     const [diagnosticsText, setDiagnosticsText] = useState('');
@@ -159,7 +161,7 @@ export default function LogsScreen() {
             <ScrollView
                 ref={scrollRef}
                 style={styles.scroll}
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[styles.scrollContent, { paddingBottom: 16 + insets.bottom }]}
                 onScrollBeginDrag={() => setAutoScroll(false)}
             >
                 {filteredLines.length === 0 ? (

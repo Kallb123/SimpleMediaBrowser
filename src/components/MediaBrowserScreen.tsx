@@ -1,4 +1,5 @@
 import { BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -423,6 +424,13 @@ function mapScaleToListRowHeight(viewScale: number): number {
   return Math.round(LIST_ROW_MAX_HEIGHT - t * (LIST_ROW_MAX_HEIGHT - LIST_ROW_MIN_HEIGHT));
 }
 
+/** Vertical padding applied to the top of the merge toolbar (px). */
+const MERGE_TOOLBAR_PADDING_VERTICAL = 10;
+/** Total static height of the merge toolbar in pixels (top padding + button row + bottom padding),
+ *  used to reserve scroll space below the list. The bottom padding is extended at runtime by the
+ *  safe-area bottom inset, so only the static part is captured here. */
+const MERGE_TOOLBAR_HEIGHT = MERGE_TOOLBAR_PADDING_VERTICAL + 36 + MERGE_TOOLBAR_PADDING_VERTICAL;
+
 /** Progress bar colour used during the thumbnail generation phase. */
 const PROGRESS_COLOR_THUMBNAILS = '#4CAF50';
 /** Progress bar colour used during the TMDB metadata enrichment phase. */
@@ -445,6 +453,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   const { editMode, selectedShows, toggleShowSelection, clearShowSelection } = useEditMode();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const isScanning = useSelector(selectIsScanning);
   const scanProgress = useSelector(selectScanProgress);
@@ -540,6 +549,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       params: { itemType, itemKey, currentTitle: item.label },
     });
   }, []);
+
+  const shouldShowMergeToolbar = editMode && selectedShows.size >= 2 && navStack.length === 0;
 
   return (
     <View style={styles.container}>
@@ -691,11 +702,14 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 />
               );
             }}
-            contentContainerStyle={isListMode ? styles.listContent : styles.gridContent}
+            contentContainerStyle={[
+              isListMode ? styles.listContent : styles.gridContent,
+              shouldShowMergeToolbar && { paddingBottom: MERGE_TOOLBAR_HEIGHT + insets.bottom },
+            ]}
           />
           {/* Merge toolbar – visible when 2+ shows are selected in edit mode at root level */}
-          {editMode && selectedShows.size >= 2 && navStack.length === 0 && (
-            <View style={styles.mergeToolbar}>
+          {shouldShowMergeToolbar && (
+            <View style={[styles.mergeToolbar, { paddingBottom: MERGE_TOOLBAR_PADDING_VERTICAL + insets.bottom }]}>
               <ThemedText style={styles.mergeToolbarText}>
                 {selectedShows.size} shows selected
               </ThemedText>
@@ -881,7 +895,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: MERGE_TOOLBAR_PADDING_VERTICAL,
+    // paddingBottom is set dynamically via inline style to include the safe-area bottom inset.
     backgroundColor: 'rgba(20,20,20,0.92)',
     gap: 8,
   },
