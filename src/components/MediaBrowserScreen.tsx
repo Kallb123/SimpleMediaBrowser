@@ -9,7 +9,7 @@ import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
 import type { IMediaOverride } from '@/store/libraryReducer';
@@ -469,7 +469,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const [pressedKey, setPressedKey] = useState<string | null>(null);
 
   // Ref to the FlashList so we can programmatically scroll it.
-  const flashListRef = useRef<FlashList<DisplayItem>>(null);
+  const flashListRef = useRef<FlashListRef<DisplayItem>>(null);
   // Tracks the most recent scroll offset without causing re-renders.
   const currentScrollOffset = useRef(0);
   // Persists the scroll offset for each nav level, keyed by serialised stack path.
