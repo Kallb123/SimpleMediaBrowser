@@ -17,6 +17,7 @@ import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 import { useEditMode } from '@/contexts/EditModeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 const DESTRUCTIVE_COLOR = '#E55';
@@ -55,6 +56,7 @@ export default function SettingsPrompt() {
   const theme = Colors[colorScheme];
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
   const { drawerUnlocked } = useEditMode();
+  const insets = useSafeAreaInsets();
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
@@ -427,7 +429,7 @@ export default function SettingsPrompt() {
   
   return (
     <SettingsErrorBoundary>
-    <ScrollView style={containerStyle} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView style={containerStyle} contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]} keyboardShouldPersistTaps="handled">
 
       {/* Access */}
       <View style={styles.section}>

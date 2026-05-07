@@ -14,6 +14,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { selectMediaLibrary, selectMediaOverrides, mergeDuplicateShows } from '@/store/libraryReducer';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { logger } from '@/scripts/Logger';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function MergeShowsScreen() {
   const { showKeys: showKeysParam } = useLocalSearchParams<{ showKeys: string }>();
@@ -30,6 +31,7 @@ export default function MergeShowsScreen() {
   const mediaLibrary = useSelector(selectMediaLibrary);
   const mediaOverrides = useSelector(selectMediaOverrides);
   const { clearShowSelection } = useEditMode();
+  const insets = useSafeAreaInsets();
 
   const [keepKey, setKeepKey] = useState<string>(showKeys[0] ?? '');
 
@@ -65,7 +67,7 @@ export default function MergeShowsScreen() {
           ),
         }}
       />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}>
         <ThemedText style={styles.instructions}>
           Select the show entry to keep as the canonical version. All episodes from the other
           entries will be merged into it.

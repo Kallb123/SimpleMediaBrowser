@@ -29,6 +29,7 @@ import { logger } from '@/scripts/Logger';
 import { File, Directory, Paths } from 'expo-file-system';
 import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
 import { MetadataService } from '@/scripts/MetadataService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
@@ -101,6 +102,7 @@ export default function EditItemScreen() {
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
   const tmdbApiKey = useSelector(selectTmdbApiKey);
+  const insets = useSafeAreaInsets();
 
   const existingOverride = mediaOverrides[itemKey] ?? {};
 
@@ -362,7 +364,7 @@ export default function EditItemScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
         <View style={styles.header}>
           <ThemedText type="subtitle">Edit {itemTypeLabel}</ThemedText>
