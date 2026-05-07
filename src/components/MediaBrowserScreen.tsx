@@ -6,8 +6,9 @@ import { ThemedView } from '@/components/ThemedView';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
+import { setMediaOverride } from '@/store/libraryReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
@@ -133,10 +134,14 @@ function buildDisplayItems(
       // All episodes from every show/season in one flat list, plus movies
       const items: DisplayItem[] = [];
       for (const [showName, show] of Object.entries(library)) {
+        // Skip shows that have been hidden
+        if (overrides[`show:${showName}`]?.hidden) continue;
         const sortedSeasons = Object.values(show.seasons).sort((a, b) => a.seasonNumber - b.seasonNumber);
         for (const season of sortedSeasons) {
           const sortedEps = Object.values(season.episodes).sort((a, b) => compareEpisodes(a, b, overrides));
           for (const ep of sortedEps) {
+            // Skip hidden episodes
+            if (overrides[`episode:${ep.parsedPath}`]?.hidden) continue;
             const sNum = `S${String(season.seasonNumber).padStart(2, '0')}`;
             const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
             const displayPrefix = ep.episodeNumber > 0 ? `${showDisplayLabel(showName, overrides)} ${sNum}${eNum}` : '';
@@ -157,6 +162,8 @@ function buildDisplayItems(
         }
       }
       for (const movie of movies) {
+        // Skip hidden movies
+        if (overrides[`movie:${movie.parsedPath}`]?.hidden) continue;
         items.push({
           kind: 'file',
           label: movieDisplayLabel(movie, overrides),
@@ -179,6 +186,7 @@ function buildDisplayItems(
       if (navStack.length === 0) {
         // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
+          .filter((showName) => !overrides[`show:${showName}`]?.hidden)
           .map((showName) => {
             const show = library[showName];
             const episodeCount = Object.values(show.seasons).reduce(
@@ -197,16 +205,18 @@ function buildDisplayItems(
               count: episodeCount,
             };
           });
-        const movieItems: DisplayItem[] = movies.map((movie) => ({
-          kind: 'file' as const,
-          label: movieDisplayLabel(movie, overrides),
-          sortKey: movieSortKey(movie, overrides),
-          key: movie.path,
-          thumbnailUri: thumbnailCache.get(movie.path),
-          posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
-          mediaObject: movie,
-          mediaType: 'movie' as const,
-        }));
+        const movieItems: DisplayItem[] = movies
+          .filter((movie) => !overrides[`movie:${movie.parsedPath}`]?.hidden)
+          .map((movie) => ({
+            kind: 'file' as const,
+            label: movieDisplayLabel(movie, overrides),
+            sortKey: movieSortKey(movie, overrides),
+            key: movie.path,
+            thumbnailUri: thumbnailCache.get(movie.path),
+            posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
+            mediaObject: movie,
+            mediaType: 'movie' as const,
+          }));
         // Interleave shows and movies sorted together by sort key.
         return [...showFolders, ...movieItems].sort(
           (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
@@ -220,6 +230,7 @@ function buildDisplayItems(
       for (const season of sortedSeasons) {
         const sortedEps = Object.values(season.episodes).sort((a, b) => compareEpisodes(a, b, overrides));
         for (const ep of sortedEps) {
+          if (overrides[`episode:${ep.parsedPath}`]?.hidden) continue;
           const sNum = `S${String(season.seasonNumber).padStart(2, '0')}`;
           const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
           const prefix = ep.episodeNumber > 0 ? `${sNum}${eNum}` : '';
@@ -243,6 +254,7 @@ function buildDisplayItems(
         // Root: one folder per show+season combination + movie files, all sorted together by sort key
         const showSeasonItems: DisplayItem[] = [];
         for (const [showName, show] of Object.entries(library)) {
+          if (overrides[`show:${showName}`]?.hidden) continue;
           for (const [seasonKey, season] of Object.entries(show.seasons)) {
             const displayShow = showDisplayLabel(showName, overrides);
             const label = `${displayShow} – Season ${season.seasonNumber}`;
@@ -263,16 +275,18 @@ function buildDisplayItems(
             });
           }
         }
-        const movieItems: DisplayItem[] = movies.map((movie) => ({
-          kind: 'file' as const,
-          label: movieDisplayLabel(movie, overrides),
-          sortKey: movieSortKey(movie, overrides),
-          key: movie.path,
-          thumbnailUri: thumbnailCache.get(movie.path),
-          posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
-          mediaObject: movie,
-          mediaType: 'movie' as const,
-        }));
+        const movieItems: DisplayItem[] = movies
+          .filter((movie) => !overrides[`movie:${movie.parsedPath}`]?.hidden)
+          .map((movie) => ({
+            kind: 'file' as const,
+            label: movieDisplayLabel(movie, overrides),
+            sortKey: movieSortKey(movie, overrides),
+            key: movie.path,
+            thumbnailUri: thumbnailCache.get(movie.path),
+            posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
+            mediaObject: movie,
+            mediaType: 'movie' as const,
+          }));
         // Interleave show+season folders and movies sorted together by sort key.
         return [...showSeasonItems, ...movieItems].sort(
           (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
@@ -284,6 +298,7 @@ function buildDisplayItems(
       if (!season) return [];
       return Object.values(season.episodes)
         .sort((a, b) => compareEpisodes(a, b, overrides))
+        .filter((ep) => !overrides[`episode:${ep.parsedPath}`]?.hidden)
         .map((ep) => {
           const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
           return {
@@ -304,6 +319,7 @@ function buildDisplayItems(
       if (navStack.length === 0) {
         // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
+          .filter((showName) => !overrides[`show:${showName}`]?.hidden)
           .map((showName) => ({
             kind: 'folder' as const,
             label: showDisplayLabel(showName, overrides),
@@ -318,16 +334,18 @@ function buildDisplayItems(
               0,
             ),
           }));
-        const movieItems: DisplayItem[] = movies.map((movie) => ({
-          kind: 'file' as const,
-          label: movieDisplayLabel(movie, overrides),
-          sortKey: movieSortKey(movie, overrides),
-          key: movie.path,
-          thumbnailUri: thumbnailCache.get(movie.path),
-          posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
-          mediaObject: movie,
-          mediaType: 'movie' as const,
-        }));
+        const movieItems: DisplayItem[] = movies
+          .filter((movie) => !overrides[`movie:${movie.parsedPath}`]?.hidden)
+          .map((movie) => ({
+            kind: 'file' as const,
+            label: movieDisplayLabel(movie, overrides),
+            sortKey: movieSortKey(movie, overrides),
+            key: movie.path,
+            thumbnailUri: thumbnailCache.get(movie.path),
+            posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
+            mediaObject: movie,
+            mediaType: 'movie' as const,
+          }));
         // Interleave shows and movies sorted together by sort key.
         return [...showFolders, ...movieItems].sort(
           (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
@@ -367,6 +385,7 @@ function buildDisplayItems(
       if (!season) return [];
       return Object.values(season.episodes)
         .sort((a, b) => compareEpisodes(a, b, overrides))
+        .filter((ep) => !overrides[`episode:${ep.parsedPath}`]?.hidden)
         .map((ep) => {
           const eNum = ep.episodeNumber > 0 ? `E${String(ep.episodeNumber).padStart(2, '0')}` : '';
           return {
@@ -454,7 +473,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const allMovies = useSelector(selectMovies);
   const mediaOverrides = useSelector(selectMediaOverrides);
 
-  const { editMode, selectedShows, toggleShowSelection, clearShowSelection } = useEditMode();
+  const dispatch = useDispatch();
+  const { editMode, selectedItems, toggleItemSelection, clearItemSelection } = useEditMode();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
@@ -483,13 +503,13 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   const navigateInto = useCallback((entry: NavLevel) => {
     logger.log('MediaBrowserScreen', `Navigate into: ${entry.label} (showName=${entry.showName ?? '-'}, seasonKey=${entry.seasonKey ?? '-'})`);
-    clearShowSelection();
+    clearItemSelection();
     setNavStack((prev: NavLevel[]) => {
       // Save the scroll position for the level we are leaving.
       savedScrollOffsets.current.set(navStackKey(prev), currentScrollOffset.current);
       return [...prev, entry];
     });
-  }, [clearShowSelection]);
+  }, [clearItemSelection]);
 
   const navigateBack = useCallback(() => {
     logger.log('MediaBrowserScreen', 'Navigate back');
@@ -597,7 +617,44 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     });
   }, []);
 
-  const shouldShowMergeToolbar = editMode && selectedShows.size >= 2 && navStack.length === 0;
+  /**
+   * Returns the namespaced override key for a selectable display item, using the same format
+   * as `mediaOverrides`:
+   *   "show:<showName>"      – for a TV show folder
+   *   "movie:<parsedPath>"   – for a movie file
+   *   "episode:<parsedPath>" – for an episode file
+   * Returns null for non-selectable items such as season folders.
+   */
+  const getItemOverrideKey = useCallback((item: DisplayItem): string | null => {
+    if (item.kind === 'folder' && item.mediaType === 'show') {
+      return `show:${item.key}`;
+    }
+    if (item.kind === 'file') {
+      return `${item.mediaType}:${item.mediaObject.parsedPath}`;
+    }
+    return null;
+  }, []);
+
+  // Derive the selected show names (without prefix) for the Merge action.
+  const selectedShowKeys = useMemo(
+    () => Array.from(selectedItems).filter((k) => k.startsWith('show:')).map((k) => k.slice(5)),
+    [selectedItems],
+  );
+
+  const shouldShowToolbar = editMode && selectedItems.size >= 1;
+  const shouldShowMerge = selectedShowKeys.length >= 2;
+
+  /**
+   * Marks all currently selected items as hidden by setting `hidden: true` in their
+   * `mediaOverrides` entry.  No files are deleted; the action is fully reversible by
+   * clearing the override (e.g. via Settings → Clear All Overrides).
+   */
+  const handleHide = useCallback(() => {
+    for (const key of selectedItems) {
+      dispatch(setMediaOverride({ key, override: { hidden: true } }));
+    }
+    clearItemSelection();
+  }, [selectedItems, dispatch, clearItemSelection]);
 
   return (
     <View style={styles.container}>
@@ -665,22 +722,21 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
-            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
+            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedItems).join(',')}`}
             onScroll={handleScroll}
             // scrollEventThrottle controls how often the native layer fires scroll
             // events (in ms). 16ms ≈ 60 fps keeps offset tracking accurate without
             // flooding the JS thread.
             scrollEventThrottle={16}
             renderItem={({ item }: { item: DisplayItem }) => {
-              const isFolder = item.kind === 'folder';
               const isEditable = (
                 item.mediaType === 'show' ||
                 item.mediaType === 'movie' ||
                 item.mediaType === 'episode'
               );
-              // Shows at root level get tap-to-select behaviour in edit mode.
-              const isShowAtRoot = item.kind === 'folder' && item.mediaType === 'show' && navStack.length === 0;
-              const isSelected = editMode && isShowAtRoot && selectedShows.has(item.key);
+              // Any editable item can be long-pressed in edit mode to select it.
+              const overrideKey = getItemOverrideKey(item);
+              const isSelected = editMode && overrideKey !== null && selectedItems.has(overrideKey);
 
               // Folders always navigate; files always open in player.
               let handlePress: () => void;
@@ -699,9 +755,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
 
               if (isListMode) {
-                // In edit mode, long press on a show at root selects it for merging.
-                const handleLongPress = editMode && isShowAtRoot
-                  ? () => toggleShowSelection(item.key)
+                // In edit mode, long press on any selectable item toggles its selection.
+                const handleLongPress = editMode && overrideKey !== null
+                  ? () => toggleItemSelection(overrideKey)
                   : undefined;
                 return (
                   <ListItem
@@ -724,11 +780,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const hasBothImages = hasPoster && !!item.thumbnailUri;
               const isRevealed = pressedKey === item.key;
 
-              // In edit mode: long press on a show at root selects it for merging;
+              // In edit mode: long press on any selectable item toggles its selection;
               // thumbnail reveal is disabled. Outside edit mode: long press reveals
               // the video thumbnail when a poster is also available.
               const handleLongPress = editMode
-                ? (isShowAtRoot ? () => toggleShowSelection(item.key) : undefined)
+                ? (overrideKey !== null ? () => toggleItemSelection(overrideKey) : undefined)
                 : hasBothImages
                   ? () => setPressedKey(item.key)
                   : undefined;
@@ -757,29 +813,37 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             }}
             contentContainerStyle={[
               isListMode ? styles.listContent : styles.gridContent,
-              shouldShowMergeToolbar && { paddingBottom: MERGE_TOOLBAR_HEIGHT + insets.bottom },
+              shouldShowToolbar && { paddingBottom: MERGE_TOOLBAR_HEIGHT + insets.bottom },
             ]}
           />
-          {/* Merge toolbar – visible when 2+ shows are selected in edit mode at root level */}
-          {shouldShowMergeToolbar && (
+          {/* Action toolbar – visible when any items are selected in edit mode */}
+          {shouldShowToolbar && (
             <View style={[styles.mergeToolbar, { paddingBottom: MERGE_TOOLBAR_PADDING_VERTICAL + insets.bottom }]}>
               <ThemedText style={styles.mergeToolbarText}>
-                {selectedShows.size} shows selected
+                {selectedItems.size} selected
               </ThemedText>
               <TouchableOpacity
-                style={styles.mergeButton}
-                onPress={() => {
-                  router.push({
-                    pathname: '/mergeshows',
-                    params: { showKeys: JSON.stringify(Array.from(selectedShows)) },
-                  });
-                }}
+                style={styles.hideButton}
+                onPress={handleHide}
               >
-                <ThemedText style={styles.mergeButtonText}>Merge</ThemedText>
+                <ThemedText style={styles.hideButtonText}>Hide</ThemedText>
               </TouchableOpacity>
+              {shouldShowMerge && (
+                <TouchableOpacity
+                  style={styles.mergeButton}
+                  onPress={() => {
+                    router.push({
+                      pathname: '/mergeshows',
+                      params: { showKeys: JSON.stringify(selectedShowKeys) },
+                    });
+                  }}
+                >
+                  <ThemedText style={styles.mergeButtonText}>Merge</ThemedText>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={styles.mergeCancelButton}
-                onPress={clearShowSelection}
+                onPress={clearItemSelection}
               >
                 <ThemedText style={styles.mergeCancelText}>Cancel</ThemedText>
               </TouchableOpacity>
@@ -957,6 +1021,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#fff',
+  },
+  hideButton: {
+    backgroundColor: '#8B0000',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  hideButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
   },
   mergeButton: {
     backgroundColor: '#0a7ea4',
