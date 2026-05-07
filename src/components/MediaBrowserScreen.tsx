@@ -511,6 +511,10 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       currentScrollOffset.current = 0;
       list.scrollToOffset({ offset: 0, animated: false });
     } else {
+      // Restore the offset saved for this level. Because offsets are recorded
+      // in navigateInto at the moment the user leaves a level, the stored value
+      // always reflects exactly where the user was in that list—it cannot be
+      // stale within the same session.
       const saved = savedScrollOffsets.current.get(navStackKey(navStack)) ?? 0;
       currentScrollOffset.current = saved;
       list.scrollToOffset({ offset: saved, animated: false });
@@ -663,6 +667,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             numColumns={numColumns}
             extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
             onScroll={handleScroll}
+            // scrollEventThrottle controls how often the native layer fires scroll
+            // events (in ms). 16ms ≈ 60 fps keeps offset tracking accurate without
+            // flooding the JS thread.
             scrollEventThrottle={16}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
