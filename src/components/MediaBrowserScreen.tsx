@@ -5,7 +5,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
-import { useEffect, useMemo, useCallback, useState } from 'react';
+import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
@@ -465,21 +465,55 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
 
-  // Reset navigation when viewType changes
+  // Ref to the FlashList so we can programmatically scroll it.
+  const flashListRef = useRef<FlashList<DisplayItem>>(null);
+  // Tracks the most recent scroll offset without causing re-renders.
+  const currentScrollOffset = useRef(0);
+  // Persists the scroll offset for each nav level, keyed by serialised stack path.
+  const savedScrollOffsets = useRef<Map<string, number>>(new Map());
+
+  /** Stable key for the current nav-stack position used to save/restore offsets. */
+  const navStackKey = (stack: NavLevel[]) => stack.map((n) => n.label).join('/');
+
+  // Reset navigation and saved offsets when viewType changes.
   useEffect(() => {
+    savedScrollOffsets.current.clear();
     setNavStack([]);
   }, [viewType]);
 
   const navigateInto = useCallback((entry: NavLevel) => {
     logger.log('MediaBrowserScreen', `Navigate into: ${entry.label} (showName=${entry.showName ?? '-'}, seasonKey=${entry.seasonKey ?? '-'})`);
     clearShowSelection();
-    setNavStack((prev: NavLevel[]) => [...prev, entry]);
+    setNavStack((prev: NavLevel[]) => {
+      // Save the scroll position for the level we are leaving.
+      savedScrollOffsets.current.set(navStackKey(prev), currentScrollOffset.current);
+      return [...prev, entry];
+    });
   }, [clearShowSelection]);
 
   const navigateBack = useCallback(() => {
     logger.log('MediaBrowserScreen', 'Navigate back');
     setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
   }, []);
+
+  // After the nav stack changes, scroll to the appropriate position:
+  // - going deeper → reset to top (offset 0)
+  // - going shallower (back) → restore the saved offset for that level
+  const prevNavStackLength = useRef(0);
+  useEffect(() => {
+    const list = flashListRef.current;
+    if (!list) return;
+    const goingDeeper = navStack.length > prevNavStackLength.current;
+    prevNavStackLength.current = navStack.length;
+    if (goingDeeper) {
+      currentScrollOffset.current = 0;
+      list.scrollToOffset({ offset: 0, animated: false });
+    } else {
+      const saved = savedScrollOffsets.current.get(navStackKey(navStack)) ?? 0;
+      currentScrollOffset.current = saved;
+      list.scrollToOffset({ offset: saved, animated: false });
+    }
+  }, [navStack]);
 
   // Intercept the Android hardware back button to pop the nav stack when inside a folder.
   useEffect(() => {
@@ -614,10 +648,15 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           )}
 
           <FlashList
+            ref={flashListRef}
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
             extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
+            onScroll={(event: { nativeEvent: { contentOffset: { y: number } } }) => {
+              currentScrollOffset.current = event.nativeEvent.contentOffset.y;
+            }}
+            scrollEventThrottle={16}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
               const isEditable = (
