@@ -386,6 +386,9 @@ function buildDisplayItems(
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
+/** Serialises a nav stack into a stable string key used to save/restore scroll offsets. */
+const navStackKey = (stack: NavLevel[]) => stack.map((n) => n.label).join('/');
+
 const CARD_GAP = 8;
 /** Portrait mode: minimum number of grid columns shown at the lowest viewScale. */
 const PORTRAIT_MIN_COLUMNS = 2;
@@ -472,9 +475,6 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   // Persists the scroll offset for each nav level, keyed by serialised stack path.
   const savedScrollOffsets = useRef<Map<string, number>>(new Map());
 
-  /** Stable key for the current nav-stack position used to save/restore offsets. */
-  const navStackKey = (stack: NavLevel[]) => stack.map((n) => n.label).join('/');
-
   // Reset navigation and saved offsets when viewType changes.
   useEffect(() => {
     savedScrollOffsets.current.clear();
@@ -499,6 +499,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   // After the nav stack changes, scroll to the appropriate position:
   // - going deeper → reset to top (offset 0)
   // - going shallower (back) → restore the saved offset for that level
+  // Navigation always moves exactly one level at a time (navigateInto pushes one entry,
+  // navigateBack pops one entry), so comparing lengths is sufficient to determine direction.
   const prevNavStackLength = useRef(0);
   useEffect(() => {
     const list = flashListRef.current;
@@ -514,6 +516,13 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       list.scrollToOffset({ offset: saved, animated: false });
     }
   }, [navStack]);
+
+  const handleScroll = useCallback(
+    (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+      currentScrollOffset.current = event.nativeEvent.contentOffset.y;
+    },
+    [],
+  );
 
   // Intercept the Android hardware back button to pop the nav stack when inside a folder.
   useEffect(() => {
@@ -653,9 +662,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
             extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
-            onScroll={(event: { nativeEvent: { contentOffset: { y: number } } }) => {
-              currentScrollOffset.current = event.nativeEvent.contentOffset.y;
-            }}
+            onScroll={handleScroll}
             scrollEventThrottle={16}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
