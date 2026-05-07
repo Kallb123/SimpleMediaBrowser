@@ -5,11 +5,11 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
-import { useEffect, useMemo, useCallback, useState } from 'react';
+import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
 import type { IMediaOverride } from '@/store/libraryReducer';
@@ -386,6 +386,9 @@ function buildDisplayItems(
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
+/** Serialises a nav stack into a stable string key used to save/restore scroll offsets. */
+const navStackKey = (stack: NavLevel[]) => stack.map((n) => n.label).join('/');
+
 const CARD_GAP = 8;
 /** Portrait mode: minimum number of grid columns shown at the lowest viewScale. */
 const PORTRAIT_MIN_COLUMNS = 2;
@@ -465,21 +468,65 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
 
-  // Reset navigation when viewType changes
+  // Ref to the FlashList so we can programmatically scroll it.
+  const flashListRef = useRef<FlashListRef<DisplayItem>>(null);
+  // Tracks the most recent scroll offset without causing re-renders.
+  const currentScrollOffset = useRef(0);
+  // Persists the scroll offset for each nav level, keyed by serialised stack path.
+  const savedScrollOffsets = useRef<Map<string, number>>(new Map());
+
+  // Reset navigation and saved offsets when viewType changes.
   useEffect(() => {
+    savedScrollOffsets.current.clear();
     setNavStack([]);
   }, [viewType]);
 
   const navigateInto = useCallback((entry: NavLevel) => {
     logger.log('MediaBrowserScreen', `Navigate into: ${entry.label} (showName=${entry.showName ?? '-'}, seasonKey=${entry.seasonKey ?? '-'})`);
     clearShowSelection();
-    setNavStack((prev: NavLevel[]) => [...prev, entry]);
+    setNavStack((prev: NavLevel[]) => {
+      // Save the scroll position for the level we are leaving.
+      savedScrollOffsets.current.set(navStackKey(prev), currentScrollOffset.current);
+      return [...prev, entry];
+    });
   }, [clearShowSelection]);
 
   const navigateBack = useCallback(() => {
     logger.log('MediaBrowserScreen', 'Navigate back');
     setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
   }, []);
+
+  // After the nav stack changes, scroll to the appropriate position:
+  // - going deeper → reset to top (offset 0)
+  // - going shallower (back) → restore the saved offset for that level
+  // Navigation always moves exactly one level at a time (navigateInto pushes one entry,
+  // navigateBack pops one entry), so comparing lengths is sufficient to determine direction.
+  const prevNavStackLength = useRef(0);
+  useEffect(() => {
+    const list = flashListRef.current;
+    if (!list) return;
+    const goingDeeper = navStack.length > prevNavStackLength.current;
+    prevNavStackLength.current = navStack.length;
+    if (goingDeeper) {
+      currentScrollOffset.current = 0;
+      list.scrollToOffset({ offset: 0, animated: false });
+    } else {
+      // Restore the offset saved for this level. Because offsets are recorded
+      // in navigateInto at the moment the user leaves a level, the stored value
+      // always reflects exactly where the user was in that list—it cannot be
+      // stale within the same session.
+      const saved = savedScrollOffsets.current.get(navStackKey(navStack)) ?? 0;
+      currentScrollOffset.current = saved;
+      list.scrollToOffset({ offset: saved, animated: false });
+    }
+  }, [navStack]);
+
+  const handleScroll = useCallback(
+    (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+      currentScrollOffset.current = event.nativeEvent.contentOffset.y;
+    },
+    [],
+  );
 
   // Intercept the Android hardware back button to pop the nav stack when inside a folder.
   useEffect(() => {
@@ -614,10 +661,16 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           )}
 
           <FlashList
+            ref={flashListRef}
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
             extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedShows).join(',')}`}
+            onScroll={handleScroll}
+            // scrollEventThrottle controls how often the native layer fires scroll
+            // events (in ms). 16ms ≈ 60 fps keeps offset tracking accurate without
+            // flooding the JS thread.
+            scrollEventThrottle={16}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isFolder = item.kind === 'folder';
               const isEditable = (
