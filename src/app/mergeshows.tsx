@@ -30,7 +30,7 @@ export default function MergeShowsScreen() {
   const dispatch = useDispatch();
   const mediaLibrary = useSelector(selectMediaLibrary);
   const mediaOverrides = useSelector(selectMediaOverrides);
-  const { clearShowSelection } = useEditMode();
+  const { clearItemSelection } = useEditMode();
   const insets = useSafeAreaInsets();
 
   const [keepKey, setKeepKey] = useState<string>(showKeys[0] ?? '');
@@ -40,7 +40,7 @@ export default function MergeShowsScreen() {
     const removeKeys = showKeys.filter((k) => k !== keepKey);
     logger.log('MergeShows', `Merging: keeping "${keepKey}", removing [${removeKeys.map((k) => `"${k}"`).join(', ')}]`);
     dispatch(mergeDuplicateShows({ keepKey, removeKeys }));
-    clearShowSelection();
+    clearItemSelection();
     router.back();
   };
 

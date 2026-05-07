@@ -18,6 +18,11 @@ export interface IMediaOverride {
    * Persisted across rescans so user-chosen posters survive library rebuilds.
    */
   poster?: string;
+  /**
+   * When true, this item is hidden from all library views.
+   * No data is deleted; clearing this override restores the item.
+   */
+  hidden?: boolean;
 }
 
 export interface IMediaLibrary {
