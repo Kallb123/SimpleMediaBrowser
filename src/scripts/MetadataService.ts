@@ -470,8 +470,10 @@ export class MetadataService {
         };
 
         const progress = { done: 0 };
+        // No-op progress callback: rematch is a one-off operation; progress is not reported to the UI.
+        const noOpProgress = () => {};
         logger.log('MetadataService', `rematchSingleShow: re-enriching "${showName}" with TMDB ID ${tmdbId}`);
-        await this.enrichEpisodes(singleShowLibrary, apiKey, fetchNames, fetchThumbnails, progress, () => {});
+        await this.enrichEpisodes(singleShowLibrary, apiKey, fetchNames, fetchThumbnails, progress, noOpProgress);
         logger.log('MetadataService', `rematchSingleShow: done for "${showName}"`);
     }
 

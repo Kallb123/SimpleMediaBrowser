@@ -442,7 +442,9 @@ export default function EditItemScreen() {
               Match to TMDB
             </ThemedText>
             <ThemedText style={styles.hint}>
-              Search for this {itemType === 'movie' ? 'movie' : 'show'} on TMDB. The currently matched entry is highlighted. Tap a result to browse its posters — selecting a poster matches the item to that TMDB entry and, for shows, re-fetches episode names and thumbnails.
+              Search for this {itemType === 'movie' ? 'movie' : 'show'} on TMDB.
+              The currently matched entry is highlighted.
+              Tap a result to browse its posters — selecting a poster matches the item to that TMDB entry{itemType === 'show' ? ' and re-fetches episode names and thumbnails' : ''}.
             </ThemedText>
 
             <View style={styles.searchRow}>
