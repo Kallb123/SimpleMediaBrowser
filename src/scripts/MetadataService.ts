@@ -50,7 +50,7 @@ export class MetadataService {
         };
         const resolveMovieProvider = (movie: IMediaObject): IMetadataProvider | null => {
             const overrideSource = overrides[`movie:${movie.parsedPath}`]?.metadataSourceOverride;
-            const preferred = overrideSource ?? globalSource;
+            const preferred = overrideSource ?? movie.metadataSource ?? globalSource;
             if (preferred === 'tvdb') return tvdbProvider;
             return tmdbProvider;
         };

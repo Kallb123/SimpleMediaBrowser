@@ -44,6 +44,13 @@ export interface IMediaObject {
     parsedPath: string
     isDirectory: boolean
     poster: string;
+    /**
+     * Metadata provider configured on the source folder this item was scanned
+     * from.  Set during collection so MetadataService can select the right
+     * provider without needing a per-item override.  Absent means use the
+     * global setting.
+     */
+    metadataSource?: dataSources;
 }
 
 // Re-export library types so other modules can import them from here
@@ -478,71 +485,81 @@ export class FileScanner {
             ...allMovieFiles.map((f) => f.path),
         ];
 
-        // Carry over previously-fetched TMDB poster URIs and IDs into the freshly-built
+        // Carry over previously-fetched provider poster URIs and IDs into the freshly-built
         // library so that posters remain visible during the upcoming enrichment phase.
-        // Without this, dispatching setMediaLibrary with a new library (which has no TMDB
+        // Without this, dispatching setMediaLibrary with a new library (which has no provider
         // data) causes all posters to vanish from the UI until enrichment re-downloads them.
         const prevLibrary = store.getState().libraryReducer.mediaLibrary;
         for (const [showName, show] of Object.entries(mergedLibrary)) {
             const prev = prevLibrary[showName];
-            if (prev?.ids.tmdb) {
-                try {
+            if (!prev) continue;
+            try {
+                if (prev.ids.tmdb) {
                     // Always restore the TMDB ID so deduplication and the edit screen
                     // continue to work correctly without requiring a full re-enrichment.
                     show.ids.tmdb = prev.ids.tmdb;
-                    if (prev.poster) {
-                        try {
-                            if (new File(prev.poster).exists) {
-                                // Only restore the TMDB poster when the new scan did not find a
-                                // local folder image (folder.jpg / poster.jpg etc.) for this show.
-                                if (!show.poster) {
-                                    show.poster = prev.poster;
-                                }
-                            }
-                        } catch {
-                            // Ignore file-existence errors; the poster will be re-fetched during enrichment.
-                        }
-                    }
-                    // Carry over episode-level TMDB metadata (names + stills) so they
-                    // survive rescans without requiring a full re-enrichment from the API.
-                    for (const [seasonKey, season] of Object.entries(show.seasons)) {
-                        const prevSeason = prev.seasons[seasonKey];
-                        if (!prevSeason) continue;
-                        for (const [epKey, ep] of Object.entries(season.episodes)) {
-                            const prevEp = prevSeason.episodes[epKey];
-                            if (!prevEp) continue;
-                            if (prevEp.tmdbTitle) ep.tmdbTitle = prevEp.tmdbTitle;
-                            if (prevEp.tmdbThumbnail) {
-                                try {
-                                    if (new File(prevEp.tmdbThumbnail).exists) {
-                                        ep.tmdbThumbnail = prevEp.tmdbThumbnail;
-                                    }
-                                } catch {
-                                    // ignore; thumbnail will be re-fetched during enrichment
-                                }
-                            }
-                        }
-                    }
-                } catch {
-                    // Ignore errors; metadata will be re-fetched during enrichment.
                 }
+                if (prev.ids.tvdb) {
+                    // Restore the TVDB ID symmetrically so TVDB episode enrichment works
+                    // on subsequent scans without re-fetching the show search result.
+                    show.ids.tvdb = prev.ids.tvdb;
+                }
+                if (prev.poster) {
+                    try {
+                        if (new File(prev.poster).exists) {
+                            // Only restore the poster when the new scan did not find a
+                            // local folder image (folder.jpg / poster.jpg etc.) for this show.
+                            if (!show.poster) {
+                                show.poster = prev.poster;
+                            }
+                        }
+                    } catch {
+                        // Ignore file-existence errors; the poster will be re-fetched during enrichment.
+                    }
+                }
+                // Carry over episode-level TMDB metadata (names + stills) so they
+                // survive rescans without requiring a full re-enrichment from the API.
+                for (const [seasonKey, season] of Object.entries(show.seasons)) {
+                    const prevSeason = prev.seasons[seasonKey];
+                    if (!prevSeason) continue;
+                    for (const [epKey, ep] of Object.entries(season.episodes)) {
+                        const prevEp = prevSeason.episodes[epKey];
+                        if (!prevEp) continue;
+                        if (prevEp.tmdbTitle) ep.tmdbTitle = prevEp.tmdbTitle;
+                        if (prevEp.tmdbThumbnail) {
+                            try {
+                                if (new File(prevEp.tmdbThumbnail).exists) {
+                                    ep.tmdbThumbnail = prevEp.tmdbThumbnail;
+                                }
+                            } catch {
+                                // ignore; thumbnail will be re-fetched during enrichment
+                            }
+                        }
+                    }
+                }
+            } catch {
+                // Ignore errors; metadata will be re-fetched during enrichment.
             }
         }
         const prevMovies = store.getState().libraryReducer.movies;
         const prevMovieByPath = new Map(prevMovies.map((m) => [m.path, m]));
         for (const movie of movies) {
             const prev = prevMovieByPath.get(movie.path);
-            if (prev?.ids.tmdb && prev?.poster) {
-                try {
-                    if (new File(prev.poster).exists) {
-                        movie.ids.tmdb = prev.ids.tmdb;
-                        if (!movie.poster) {
-                            movie.poster = prev.poster;
-                        }
+            if (!prev) continue;
+            try {
+                // Always carry over provider IDs so enrichment can skip re-searching
+                // and episode enrichment continues to work on subsequent scans.
+                if (prev.ids.tmdb) movie.ids.tmdb = prev.ids.tmdb;
+                if (prev.ids.tvdb) movie.ids.tvdb = prev.ids.tvdb;
+                // Only restore the poster URI when the cached file still exists on disk.
+                const posterPath = prev.poster;
+                if (posterPath && !movie.poster) {
+                    if (new File(posterPath).exists) {
+                        movie.poster = posterPath;
                     }
-                } catch {
-                    // Ignore file-existence errors; the poster will be re-fetched during enrichment.
                 }
+            } catch {
+                // Ignore file-existence errors; the poster will be re-fetched during enrichment.
             }
         }
 
@@ -725,6 +742,11 @@ export class FileScanner {
             metadataSource,
         };
         await this.recursiveCollect(rootDirectory, [], result, posterMap, 0, dirSemaphore, progress, streamState);
+        // Stamp the source-level metadata provider on every collected file so
+        // buildLibrary and buildMovieList can propagate it to show/movie entries.
+        if (metadataSource) {
+            for (const f of result) f.metadataSource = metadataSource;
+        }
         // Flush any remaining buffered items that did not reach the batch threshold
         this.flushStreamBatch(streamState, posterMap);
         return { files: result, posterMap };
@@ -1050,6 +1072,7 @@ export class FileScanner {
                     poster: folderPoster,
                     seasons: {},
                     rawNames: rawShowName !== showName ? [rawShowName] : [],
+                    metadataSource: file.metadataSource,
                 };
             } else {
                 // Back-fill year if not yet recorded for this canonical show
