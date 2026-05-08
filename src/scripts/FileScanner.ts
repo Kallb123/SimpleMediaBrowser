@@ -602,6 +602,9 @@ export class FileScanner {
                 store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal, metadataDone: 0, metadataTotal: 0 }));
                 await Promise.allSettled(
                     uncached.map(async (media) => {
+                        // Skip cancelled items before acquiring the semaphore so we
+                        // don't needlessly hold a concurrency slot.
+                        if (this._cancelRequested) return;
                         // Throttle concurrency so weaker devices are not overwhelmed.
                         await thumbSemaphore.acquire();
                         try {

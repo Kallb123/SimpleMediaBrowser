@@ -484,7 +484,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const handleCancelScan = useCallback(() => {
     import('@/scripts/FileScanner').then(({ FileScanner }) => {
       FileScanner.getInstance().cancelScan();
-    }).catch(() => {});
+    }).catch((e) => {
+      logger.warn('MediaBrowserScreen', 'Failed to request scan cancellation', e);
+    });
   }, []);
 
   // Apply filter
