@@ -249,13 +249,13 @@ export default function EditItemScreen() {
     if (itemType === 'show') {
       const showName = itemKey.replace(/^show:/, '');
       const tmdbIdToUse = newTmdbId ?? mediaLibrary[showName]?.ids.tmdb ?? '';
-      dispatch(updateShowMetadata({ showName, tmdbId: tmdbIdToUse, poster: localUri }));
+      dispatch(updateShowMetadata({ showName, providerId: tmdbIdToUse, poster: localUri }));
     } else if (itemType === 'movie') {
       const parsedPath = itemKey.replace(/^movie:/, '');
       const movie = movies.find((m) => m.parsedPath === parsedPath);
       if (movie) {
         const tmdbIdToUse = newTmdbId ?? movie.ids.tmdb ?? '';
-        dispatch(updateMovieMetadata({ path: movie.path, tmdbId: tmdbIdToUse, poster: localUri }));
+        dispatch(updateMovieMetadata({ path: movie.path, providerId: tmdbIdToUse, poster: localUri }));
       }
     }
     // Persist the poster URI in mediaOverrides so it survives rescans.
@@ -472,12 +472,12 @@ export default function EditItemScreen() {
         setActivePosterUri(localPosterUri);
         if (itemType === 'show') {
           const showName = itemKey.replace(/^show:/, '');
-          dispatch(updateShowMetadata({ showName, tmdbId: tvdbId, source: 'tvdb', poster: localPosterUri }));
+          dispatch(updateShowMetadata({ showName, providerId: tvdbId, source: 'tvdb', poster: localPosterUri }));
         } else if (itemType === 'movie') {
           const parsedPath = itemKey.replace(/^movie:/, '');
           const movie = movies.find((m) => m.parsedPath === parsedPath);
           if (movie) {
-            dispatch(updateMovieMetadata({ path: movie.path, tmdbId: tvdbId, source: 'tvdb', poster: localPosterUri }));
+            dispatch(updateMovieMetadata({ path: movie.path, providerId: tvdbId, source: 'tvdb', poster: localPosterUri }));
           }
         }
         dispatch(setMediaOverride({

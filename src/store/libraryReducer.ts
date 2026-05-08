@@ -209,7 +209,12 @@ export const settingsSlice = createSlice({
     updateShowMetadata: (state, action: PayloadAction<{
       showName: string;
       /** The provider-specific ID string (written to ids.tmdb or ids.tvdb based on source). */
-      tmdbId: string;
+      providerId?: string;
+      /**
+       * @deprecated Use `providerId` instead. Retained for backward compatibility.
+       * When both are provided, `providerId` takes precedence.
+       */
+      tmdbId?: string;
       /** Which provider resolved this metadata. Defaults to 'tmdb' for backward compatibility. */
       source?: dataSources;
       poster: string;
@@ -219,10 +224,11 @@ export const settingsSlice = createSlice({
       const show = state.mediaLibrary[action.payload.showName];
       if (show) {
         const source = action.payload.source ?? 'tmdb';
+        const id = action.payload.providerId ?? action.payload.tmdbId ?? '';
         if (source === 'tvdb') {
-          show.ids.tvdb = action.payload.tmdbId;
+          show.ids.tvdb = id;
         } else {
-          show.ids.tmdb = action.payload.tmdbId;
+          show.ids.tmdb = id;
         }
         show.poster = action.payload.poster;
         if (action.payload.title) show.title = action.payload.title;
@@ -234,7 +240,12 @@ export const settingsSlice = createSlice({
     updateMovieMetadata: (state, action: PayloadAction<{
       path: string;
       /** The provider-specific ID string (written to ids.tmdb or ids.tvdb based on source). */
-      tmdbId: string;
+      providerId?: string;
+      /**
+       * @deprecated Use `providerId` instead. Retained for backward compatibility.
+       * When both are provided, `providerId` takes precedence.
+       */
+      tmdbId?: string;
       /** Which provider resolved this metadata. Defaults to 'tmdb' for backward compatibility. */
       source?: dataSources;
       poster: string;
@@ -242,10 +253,11 @@ export const settingsSlice = createSlice({
       const movie = state.movies.find((m) => m.path === action.payload.path);
       if (movie) {
         const source = action.payload.source ?? 'tmdb';
+        const id = action.payload.providerId ?? action.payload.tmdbId ?? '';
         if (source === 'tvdb') {
-          movie.ids.tvdb = action.payload.tmdbId;
+          movie.ids.tvdb = id;
         } else {
-          movie.ids.tmdb = action.payload.tmdbId;
+          movie.ids.tmdb = id;
         }
         movie.poster = action.payload.poster;
       }
