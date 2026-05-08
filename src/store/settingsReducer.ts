@@ -2,7 +2,7 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { RootState } from './store'
 
 export type contentTypes = 'tv' | 'movie';
-export type dataSources = 'tmdb';
+export type dataSources = 'tmdb' | 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'list';
 export type defaultPages = 'home' | 'tv' | 'movies';
@@ -10,6 +10,11 @@ export type defaultPages = 'home' | 'tv' | 'movies';
 export interface IMediaSource {
   uri: string;
   contentType: contentTypes;
+  /**
+   * Metadata provider to use for this library folder.
+   * When absent the global `dataSource` setting is used.
+   */
+  metadataSource?: dataSources;
 }
 
 // Define a type for the slice state
@@ -21,6 +26,8 @@ interface SettingsState {
   viewScale: number
   viewOrientation: viewOrientations
   tmdbApiKey: string | null
+  tvdbApiKey: string | null
+  tvdbPin: string | null
   defaultPage: defaultPages
   enablePosterFetching: boolean
   enableThumbnailGeneration: boolean
@@ -38,6 +45,8 @@ const initialState: SettingsState = {
   viewScale: 5,
   viewOrientation: 'poster',
   tmdbApiKey: null,
+  tvdbApiKey: null,
+  tvdbPin: null,
   defaultPage: 'home',
   enablePosterFetching: true,
   enableThumbnailGeneration: false,
@@ -76,6 +85,12 @@ export const settingsSlice = createSlice({
     setTmdbApiKey: (state, action: PayloadAction<string | null>) => {
       state.tmdbApiKey = action.payload;
     },
+    setTvdbApiKey: (state, action: PayloadAction<string | null>) => {
+      state.tvdbApiKey = action.payload;
+    },
+    setTvdbPin: (state, action: PayloadAction<string | null>) => {
+      state.tvdbPin = action.payload;
+    },
     setDefaultPage: (state, action: PayloadAction<defaultPages>) => {
       state.defaultPage = action.payload;
     },
@@ -97,7 +112,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -111,6 +126,8 @@ export const selectViewOrientation = (state: RootState): viewOrientations => {
 };
 export const selectViewScale = (state: RootState) => state.settingsReducer.viewScale ?? 5;
 export const selectTmdbApiKey = (state: RootState) => state.settingsReducer.tmdbApiKey ?? null;
+export const selectTvdbApiKey = (state: RootState) => state.settingsReducer.tvdbApiKey ?? null;
+export const selectTvdbPin = (state: RootState) => state.settingsReducer.tvdbPin ?? null;
 export const selectDefaultPage = (state: RootState) => state.settingsReducer.defaultPage ?? 'home';
 export const selectEnablePosterFetching = (state: RootState) => state.settingsReducer.enablePosterFetching ?? true;
 export const selectEnableThumbnailGeneration = (state: RootState) => state.settingsReducer.enableThumbnailGeneration ?? false;

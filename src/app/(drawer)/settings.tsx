@@ -7,8 +7,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails } from '@/store/settingsReducer';
-import { clearLibraryAndMovies, clearPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails } from '@/store/settingsReducer';
+import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -67,6 +67,8 @@ export default function SettingsPrompt() {
 
   const [password, setLocalPassword] = useState(null as string | null);
   const [tmdbApiKey, setLocalTmdbApiKey] = useState(null as string | null);
+  const [tvdbApiKey, setLocalTvdbApiKey] = useState(null as string | null);
+  const [tvdbPin, setLocalTvdbPin] = useState(null as string | null);
   const [dataSource, setLocalDataSource] = useState("" as dataSources);
   const [mediaStructure, setLocalMediaStructure] = useState("" as viewTypes);
   const [structureDescription, setStructureDescription] = useState("");
@@ -87,6 +89,8 @@ export default function SettingsPrompt() {
   const mediaSources = useSelector(selectMediaSources);
   const settingsDataSource = useSelector(selectDataSource);
   const settingsTmdbApiKey = useSelector(selectTmdbApiKey);
+  const settingsTvdbApiKey = useSelector(selectTvdbApiKey);
+  const settingsTvdbPin = useSelector(selectTvdbPin);
   const settingsMediaStructure = useSelector(selectMediaStructure);
   const settingsViewOrientation = useSelector(selectViewOrientation);
   const settingsViewScale = useSelector(selectViewScale);
@@ -104,6 +108,7 @@ export default function SettingsPrompt() {
 
   const dataSourceOptions = [
     {id: 'tmdb', label: 'TMDB'},
+    {id: 'tvdb', label: 'TheTVDB'},
   ];
 
   const viewTypeOptions = [
@@ -178,6 +183,8 @@ export default function SettingsPrompt() {
     try {
       setLocalPassword(settingsPassword);
       setLocalTmdbApiKey(settingsTmdbApiKey);
+      setLocalTvdbApiKey(settingsTvdbApiKey);
+      setLocalTvdbPin(settingsTvdbPin);
       const dataSourceIndex = dataSourceOptions.findIndex(o => o.id === settingsDataSource);
       if (dataSourceRef.current && dataSourceIndex >= 0) {
         (dataSourceRef.current as any).selectIndex(dataSourceIndex);
@@ -208,7 +215,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails]);
 
   const save = () => {
     try {
@@ -243,6 +250,16 @@ export default function SettingsPrompt() {
       if (tmdbApiKey !== settingsTmdbApiKey) {
         logger.log('Settings', 'Persisting: tmdbApiKey changed');
         dispatch(setTmdbApiKey(tmdbApiKey || null));
+        changeCount++;
+      }
+      if (tvdbApiKey !== settingsTvdbApiKey) {
+        logger.log('Settings', 'Persisting: tvdbApiKey changed');
+        dispatch(setTvdbApiKey(tvdbApiKey || null));
+        changeCount++;
+      }
+      if (tvdbPin !== settingsTvdbPin) {
+        logger.log('Settings', 'Persisting: tvdbPin changed');
+        dispatch(setTvdbPin(tvdbPin || null));
         changeCount++;
       }
       if (defaultPage && defaultPage !== settingsDefaultPage) {
@@ -375,6 +392,37 @@ export default function SettingsPrompt() {
               logger.log('Settings', 'Poster overrides cleared');
             } catch (e) {
               logger.error('Settings', 'Exception while clearing poster overrides', e as Error);
+            }
+          },
+        },
+      ],
+    );
+  }, [dispatch]);
+
+  const clearTvdbCache = useCallback(() => {
+    Alert.alert(
+      'Clear TVDB cache',
+      'This will delete all downloaded TVDB poster images and episode thumbnails from disk and reset TVDB poster overrides. Images will be re-fetched on the next scan.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { Directory, Paths } = await import('expo-file-system');
+              const postersTvdbDir = new Directory(Paths.document, 'smb_posters_tvdb');
+              if (postersTvdbDir.exists) {
+                postersTvdbDir.delete();
+              }
+              const episodeThumbsTvdbDir = new Directory(Paths.document, 'smb_thumbnails_tvdb');
+              if (episodeThumbsTvdbDir.exists) {
+                episodeThumbsTvdbDir.delete();
+              }
+              dispatch(clearTvdbPosterOverrides());
+              logger.log('Settings', 'TVDB poster cache cleared');
+            } catch (e) {
+              logger.error('Settings', 'Exception while clearing TVDB poster cache', e as Error);
             }
           },
         },
@@ -533,6 +581,29 @@ export default function SettingsPrompt() {
         <ThemedText style={styles.emptyText}>
           Register for a free key at themoviedb.org. Posters are downloaded and cached locally for offline use.
         </ThemedText>
+
+        <ThemedText style={styles.rowLabel}>TheTVDB API Key:</ThemedText>
+        <ThemedTextInput
+          onChangeText={setLocalTvdbApiKey}
+          value={tvdbApiKey ?? ""}
+          placeholder="Paste your TVDB API key"
+          keyboardType="default"
+          secureTextEntry={false}
+        />
+        <ThemedText style={styles.emptyText}>
+          Optional. Register for a free key at thetvdb.com. Used for TV show metadata when TheTVDB is selected as the data source.
+        </ThemedText>
+        <ThemedText style={styles.rowLabel}>TheTVDB Subscriber PIN:</ThemedText>
+        <ThemedTextInput
+          onChangeText={setLocalTvdbPin}
+          value={tvdbPin ?? ""}
+          placeholder="Optional subscriber PIN"
+          keyboardType="default"
+          secureTextEntry={false}
+        />
+        <ThemedText style={styles.emptyText}>
+          Optional. Required only for subscribers accessing extended metadata on thetvdb.com.
+        </ThemedText>
         <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>Fetch posters during scan:</ThemedText>
           <Switch
@@ -547,7 +618,7 @@ export default function SettingsPrompt() {
           />
         </View>
         <ThemedText style={styles.emptyText}>
-          Enabled by default. When off, scans skip TMDB poster fetching even if an API key is configured.
+          Enabled by default. When off, scans skip metadata poster fetching even if an API key is configured.
         </ThemedText>
         <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>Fetch episode names:</ThemedText>
@@ -732,8 +803,12 @@ export default function SettingsPrompt() {
               <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all generated video thumbnails from disk.</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity style={styles.troubleshootingButton} onPress={clearPosterCache}>
-              <ThemedText style={styles.troubleshootingButtonText}>🖼 Clear poster overrides</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all downloaded posters and episode thumbnails, and resets poster overrides.</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonText}>🖼 Clear TMDB poster cache</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all TMDB-sourced posters and episode thumbnails, and resets poster overrides.</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearTvdbCache}>
+              <ThemedText style={styles.troubleshootingButtonText}>🖼 Clear TVDB poster cache</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all TheTVDB-sourced posters and episode thumbnails.</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity style={styles.troubleshootingButton} onPress={clearScannedData}>
               <ThemedText style={styles.troubleshootingButtonText}>📂 Clear scanned data</ThemedText>
