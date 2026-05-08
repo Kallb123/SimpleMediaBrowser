@@ -5,7 +5,7 @@ import type { VideoThumbnail } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { store } from "@/store/store";
 import { setScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
-import type { IMediaLibrary, IMediaShow, IMediaSeason, MergeEpisodePayload } from "@/store/libraryReducer";
+import type { IMediaLibrary, IMediaShow, IMediaSeason, MergeEpisodePayload, dataSources } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
@@ -284,6 +284,11 @@ interface StreamState {
      * image is discovered after its movie files have already been dispatched.
      */
     moviePathsByFolder: Map<string, string[]>;
+    /**
+     * Metadata provider configured on the source folder being scanned.
+     * Stamped on new show entries so MetadataService can pick the correct provider.
+     */
+    metadataSource?: dataSources;
 }
 
 /**
@@ -410,7 +415,7 @@ export class FileScanner {
         for (const src of tvSources) {
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning TV source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv');
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv', src.metadataSource);
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
             allTvFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!tvPosterMap.has(key)) tvPosterMap.set(key, uri); });
@@ -424,7 +429,7 @@ export class FileScanner {
         for (const src of movieSources) {
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning Movie source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie');
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie', src.metadataSource);
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
             allMovieFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!moviePosterMap.has(key)) moviePosterMap.set(key, uri); });
@@ -514,25 +519,25 @@ export class FileScanner {
         store.dispatch(setMovies(movies));
         logger.log('FileScanner', `Scan complete. Total media files dispatched: ${allScanUris.length}`);
 
-        // Enrich library with TMDB posters if an API key is configured.
+        // Enrich library with metadata posters if any provider key is configured.
         // Awaited so that isScanning stays true (and progress is visible) for the
         // full duration of enrichment; setIsScanning(false) fires in the finally block.
         const settings = store.getState().settingsReducer;
-        const tmdbApiKey = settings.tmdbApiKey;
         const enablePosterFetching = settings.enablePosterFetching ?? true;
-        if (enablePosterFetching && tmdbApiKey) {
-            logger.log('FileScanner', 'TMDB API key found – starting metadata enrichment');
+        const hasAnyProviderKey = !!(settings.tmdbApiKey || settings.tvdbApiKey);
+        if (enablePosterFetching && hasAnyProviderKey) {
+            logger.log('FileScanner', 'Provider API key found – starting metadata enrichment');
             const currentLibrary = store.getState().libraryReducer.mediaLibrary;
             const currentMovies = store.getState().libraryReducer.movies;
             try {
-                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, tmdbApiKey);
+                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies);
             } catch (e) {
                 logger.error('FileScanner', 'Metadata enrichment failed', e);
             }
         } else if (!enablePosterFetching) {
             logger.log('FileScanner', 'Poster fetching disabled in settings – skipping metadata enrichment');
         } else {
-            logger.log('FileScanner', 'No TMDB API key configured – skipping metadata enrichment');
+            logger.log('FileScanner', 'No provider API key configured – skipping metadata enrichment');
         }
 
         // Generate thumbnails for all scanned media files concurrently (skip already-cached paths).
@@ -650,6 +655,7 @@ export class FileScanner {
             new Semaphore(MAX_CONCURRENT_DIR_READS),
             { filesFound: 0, currentSourceIndex: 1, sourcesTotal: 1 },
             'tv',
+            undefined,
         );
         const library = this.buildLibrary(allMediaFiles, posterMap);
         store.dispatch(setMediaLibrary(library));
@@ -664,6 +670,7 @@ export class FileScanner {
         dirSemaphore: Semaphore,
         progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
         sourceType: 'tv' | 'movie' = 'tv',
+        metadataSource?: dataSources,
     ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string> }> {
         const result: IScannedFile[] = [];
         const posterMap = new Map<string, string>();
@@ -672,6 +679,7 @@ export class FileScanner {
             episodeBatch: [],
             movieBatch: [],
             moviePathsByFolder: new Map(),
+            metadataSource,
         };
         await this.recursiveCollect(rootDirectory, [], result, posterMap, 0, dirSemaphore, progress, streamState);
         // Flush any remaining buffered items that did not reach the batch threshold
@@ -847,6 +855,7 @@ export class FileScanner {
                 seasonNumber: season,
                 episodeKey,
                 episode: { ...mediaObj, title: title || file.filename, scannedTitle: title || file.filename, episodeNumber: episode },
+                metadataSource: streamState.metadataSource,
             });
         } else {
             // Movie: derive title the same way buildMovieList does

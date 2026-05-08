@@ -23,18 +23,22 @@ import {
   setMediaOverride,
   updateShowMetadata,
   updateMovieMetadata,
+  type dataSources,
 } from '@/store/libraryReducer';
-import { selectTmdbApiKey } from '@/store/settingsReducer';
+import { selectTmdbApiKey, selectTvdbApiKey, selectTvdbPin, selectDataSource } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
 import { File, Directory, Paths } from 'expo-file-system';
 import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
 import { MetadataService } from '@/scripts/MetadataService';
+import { TvdbProvider } from '@/scripts/providers/TvdbProvider';
+import type { ProviderShowResult, ProviderMovieResult } from '@/scripts/providers/IMetadataProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const POSTER_THUMB_URL = 'https://image.tmdb.org/t/p/w185';
 const POSTER_FULL_URL = 'https://image.tmdb.org/t/p/w500';
 const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
+const POSTERS_TVDB_DIR = new Directory(Paths.document, 'smb_posters_tvdb');
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 
 interface TmdbResult {
@@ -49,6 +53,12 @@ interface TmdbResult {
 function ensurePostersDir(): void {
   if (!POSTERS_DIR.exists) {
     POSTERS_DIR.create({ intermediates: true, idempotent: true });
+  }
+}
+
+function ensurePostersTvdbDir(): void {
+  if (!POSTERS_TVDB_DIR.exists) {
+    POSTERS_TVDB_DIR.create({ intermediates: true, idempotent: true });
   }
 }
 
@@ -67,6 +77,21 @@ async function downloadPoster(cacheKey: string, posterPath: string): Promise<str
   }
   const remoteUrl = POSTER_FULL_URL + posterPath;
   await File.downloadFileAsync(remoteUrl, localFile);
+  return localFile.uri;
+}
+
+/**
+ * Download a TVDB poster image (full URL) to local storage and return the local file URI.
+ * Files are stored in smb_posters_tvdb/, separate from TMDB posters.
+ */
+async function downloadTvdbPoster(tvdbId: string, fullUrl: string): Promise<string> {
+  ensurePostersTvdbDir();
+  const safeName = tvdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const localFile = new File(POSTERS_TVDB_DIR, `${safeName}.jpg`);
+  if (localFile.exists) {
+    return localFile.uri;
+  }
+  await File.downloadFileAsync(fullUrl, localFile);
   return localFile.uri;
 }
 
@@ -102,6 +127,9 @@ export default function EditItemScreen() {
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
   const tmdbApiKey = useSelector(selectTmdbApiKey);
+  const tvdbApiKey = useSelector(selectTvdbApiKey);
+  const tvdbPin = useSelector(selectTvdbPin);
+  const globalDataSource = useSelector(selectDataSource);
   const insets = useSafeAreaInsets();
 
   const existingOverride = mediaOverrides[itemKey] ?? {};
@@ -140,6 +168,26 @@ export default function EditItemScreen() {
   const [postersByResultId, setPostersByResultId] = useState<Record<number, string[]>>({});
   const [loadingPostersForId, setLoadingPostersForId] = useState<number | null>(null);
 
+  // TVDB search state
+  const [tvdbResults, setTvdbResults] = useState<ProviderShowResult[]>([]);
+  const [tvdbSearchError, setTvdbSearchError] = useState('');
+  const [tvdbApplied, setTvdbApplied] = useState<string | null>(null);
+  const [tvdbExpandedId, setTvdbExpandedId] = useState<string | null>(null);
+  const [tvdbPostersByShowId, setTvdbPostersByShowId] = useState<Record<string, string[]>>({});
+  const [tvdbLoadingPostersForId, setTvdbLoadingPostersForId] = useState<string | null>(null);
+  const [tvdbSelectedPoster, setTvdbSelectedPoster] = useState<{ showId: string; posterUrl: string } | null>(null);
+
+  // Provider picker – defaulting to the item's current resolved provider.
+  const resolvedItemProvider: dataSources = (() => {
+    if (existingOverride.metadataSourceOverride) return existingOverride.metadataSourceOverride;
+    if (itemType === 'show') {
+      const showName = itemKey.replace(/^show:/, '');
+      return mediaLibrary[showName]?.metadataSource ?? globalDataSource;
+    }
+    return globalDataSource;
+  })();
+  const [selectedProvider, setSelectedProvider] = useState<dataSources>(resolvedItemProvider);
+
   // Browse-locally state
   const [browsingLocally, setBrowsingLocally] = useState(false);
 
@@ -156,10 +204,23 @@ export default function EditItemScreen() {
     return null;
   })();
 
+  // Current TVDB ID for this item (override takes priority, then library data).
+  const currentTvdbId: string | null = (() => {
+    if (existingOverride.tvdbId) return existingOverride.tvdbId;
+    if (itemType === 'show') {
+      const showName = itemKey.replace(/^show:/, '');
+      return mediaLibrary[showName]?.ids.tvdb ?? null;
+    } else if (itemType === 'movie') {
+      const parsedPath = itemKey.replace(/^movie:/, '');
+      return movies.find((m) => m.parsedPath === parsedPath)?.ids.tvdb ?? null;
+    }
+    return null;
+  })();
+
   // True while episode metadata is being re-fetched after a rematch.
   const [isRematching, setIsRematching] = useState(false);
 
-  const canRematch = (itemType === 'show' || itemType === 'movie') && !!tmdbApiKey;
+  const canRematch = (itemType === 'show' || itemType === 'movie') && (!!tmdbApiKey || !!tvdbApiKey);
 
   useEffect(() => {
     const overridesSummary = Object.keys(existingOverride).length > 0
@@ -202,10 +263,15 @@ export default function EditItemScreen() {
   };
 
   const handleSearch = async () => {
+    if (selectedProvider === 'tvdb') {
+      await handleTvdbSearch();
+      return;
+    }
     if (!tmdbApiKey || !searchQuery.trim()) return;
     setSearching(true);
     setSearchError('');
     setSearchResults([]);
+    setTvdbResults([]);
     // Reset expanded state so stale galleries from prior searches are cleared.
     setExpandedResultId(null);
     setPostersByResultId({});
@@ -317,7 +383,7 @@ export default function EditItemScreen() {
         logger.log('EditItem', `TMDB ID changed (${currentTmdbId} → ${tmdbId}), re-enriching episodes for "${showName}"`);
         setIsRematching(true);
         try {
-          await MetadataService.getInstance().rematchSingleShow(showName, tmdbId, tmdbApiKey);
+          await MetadataService.getInstance().rematchSingleShow(showName, tmdbId, 'tmdb');
         } catch (e) {
           logger.error('EditItem', 'Episode re-enrichment failed after rematch', e);
         } finally {
@@ -327,6 +393,119 @@ export default function EditItemScreen() {
     } catch (e) {
       logger.error('EditItem', 'Failed to apply poster', e);
       setSearchError('Failed to apply poster.');
+    } finally {
+      setApplyingMatch(false);
+    }
+  };
+
+  /** Search TVDB for the current query. */
+  const handleTvdbSearch = async () => {
+    if (!tvdbApiKey || !searchQuery.trim()) return;
+    setSearching(true);
+    setTvdbSearchError('');
+    setTvdbResults([]);
+    setSearchResults([]);
+    setTvdbExpandedId(null);
+    setTvdbPostersByShowId({});
+    setTvdbLoadingPostersForId(null);
+    try {
+      const tvdb = new TvdbProvider(tvdbApiKey, tvdbPin ?? undefined);
+      await tvdb.authenticate();
+      logger.log('EditItem', `TVDB search: query="${searchQuery.trim()}"`);
+      const results = await tvdb.searchShow(searchQuery.trim());
+      setTvdbResults(results);
+      if (results.length === 0) {
+        setTvdbSearchError('No results found.');
+      }
+    } catch (e) {
+      logger.error('EditItem', 'TVDB search failed', e);
+      setTvdbSearchError('Search failed. Check your TVDB API key and connection.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  /** Expand/collapse the TVDB poster gallery for a result, fetching posters on first expand. */
+  const fetchAndExpandTvdbResult = async (result: ProviderShowResult) => {
+    if (!tvdbApiKey) return;
+    const id = result.id;
+    if (tvdbExpandedId === id) {
+      setTvdbExpandedId(null);
+      return;
+    }
+    setTvdbExpandedId(id);
+    if (tvdbPostersByShowId[id] !== undefined) return;
+
+    setTvdbLoadingPostersForId(id);
+    try {
+      const tvdb = new TvdbProvider(tvdbApiKey, tvdbPin ?? undefined);
+      await tvdb.authenticate();
+      const posters = await tvdb.fetchSeriesPosters(id);
+      const resolved = posters.length > 0 ? posters : (result.posterUrl ? [result.posterUrl] : []);
+      if (resolved.length > 0) {
+        setTvdbPostersByShowId((prev) => ({ ...prev, [id]: resolved }));
+      }
+    } catch (e) {
+      logger.warn('EditItem', 'Failed to fetch TVDB posters', e);
+      setTvdbExpandedId(null);
+    } finally {
+      setTvdbLoadingPostersForId(null);
+    }
+  };
+
+  /** Apply a TVDB poster URL to the item and persist the TVDB match. */
+  const handleSelectTvdbPoster = async (result: ProviderShowResult, posterUrl: string) => {
+    if (!tvdbApiKey) return;
+    setApplyingMatch(true);
+    try {
+      const tvdbId = result.id;
+      const year = result.year > 0 ? result.year : undefined;
+
+      let localPosterUri: string | undefined;
+      try {
+        localPosterUri = await downloadTvdbPoster(tvdbId, posterUrl);
+      } catch (e) {
+        logger.warn('EditItem', 'TVDB poster download failed', e);
+      }
+
+      if (localPosterUri) {
+        setActivePosterUri(localPosterUri);
+        if (itemType === 'show') {
+          const showName = itemKey.replace(/^show:/, '');
+          dispatch(updateShowMetadata({ showName, tmdbId: tvdbId, source: 'tvdb', poster: localPosterUri }));
+        } else if (itemType === 'movie') {
+          const parsedPath = itemKey.replace(/^movie:/, '');
+          const movie = movies.find((m) => m.parsedPath === parsedPath);
+          if (movie) {
+            dispatch(updateMovieMetadata({ path: movie.path, tmdbId: tvdbId, source: 'tvdb', poster: localPosterUri }));
+          }
+        }
+        dispatch(setMediaOverride({
+          key: itemKey,
+          override: { tvdbId, year, metadataSourceOverride: 'tvdb', poster: localPosterUri },
+        }));
+      }
+
+      setTvdbApplied(result.id);
+      setTvdbSelectedPoster({ showId: result.id, posterUrl });
+      logger.log('EditItem', `TVDB poster applied: TVDB ID ${tvdbId}, year=${year}`);
+
+      const tvdbIdChanged = tvdbId !== currentTvdbId;
+      if (itemType === 'show' && tvdbIdChanged) {
+        const showName = itemKey.replace(/^show:/, '');
+        logger.log('EditItem', `TVDB ID changed (${currentTvdbId} → ${tvdbId}), re-enriching episodes for "${showName}"`);
+        setIsRematching(true);
+        try {
+          await MetadataService.getInstance().rematchSingleShow(showName, tvdbId, 'tvdb');
+        } catch (e) {
+          logger.error('EditItem', 'Episode re-enrichment failed after TVDB rematch', e);
+        } finally {
+          setIsRematching(false);
+        }
+      }
+    } catch (e) {
+      logger.error('EditItem', 'Failed to apply TVDB poster', e);
+      setTvdbSearchError('Failed to apply poster.');
     } finally {
       setApplyingMatch(false);
     }
@@ -437,23 +616,57 @@ export default function EditItemScreen() {
           </View>
         )}
 
-        {/* TMDB Rematch (shows and movies only) */}
+        {/* Metadata Rematch (shows and movies only) */}
         {canRematch && (
           <View style={styles.section}>
             <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-              Match to TMDB
+              Match to Metadata Provider
             </ThemedText>
             <ThemedText style={styles.hint}>
-              Search for this {itemType === 'movie' ? 'movie' : 'show'} on TMDB.
+              Search for this {itemType === 'movie' ? 'movie' : 'show'} on your chosen provider.
               The currently matched entry is highlighted.
-              Tap a result to browse its posters — selecting a poster matches the item to that TMDB entry{itemType === 'show' ? ' and re-fetches episode names and thumbnails' : ''}.
+              Tap a result to browse its posters — selecting a poster matches the item to that entry{itemType === 'show' ? ' and re-fetches episode names and thumbnails' : ''}.
             </ThemedText>
+
+            {/* Provider picker */}
+            {!!(tmdbApiKey && tvdbApiKey) && (
+              <View style={styles.providerRow}>
+                <TouchableOpacity
+                  style={[styles.providerButton, selectedProvider === 'tmdb' && styles.providerButtonActive]}
+                  onPress={() => setSelectedProvider('tmdb')}
+                  disabled={applyingMatch || isRematching}
+                >
+                  <ThemedText style={[styles.providerButtonText, selectedProvider === 'tmdb' && styles.providerButtonTextActive]}>TMDB</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.providerButton, selectedProvider === 'tvdb' && styles.providerButtonActive]}
+                  onPress={() => setSelectedProvider('tvdb')}
+                  disabled={applyingMatch || isRematching}
+                >
+                  <ThemedText style={[styles.providerButtonText, selectedProvider === 'tvdb' && styles.providerButtonTextActive]}>TheTVDB</ThemedText>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Active provider badge */}
+            <View style={styles.providerBadgeRow}>
+              {currentTmdbId && (
+                <View style={styles.providerBadge}>
+                  <ThemedText style={styles.providerBadgeText}>TMDB ID: {currentTmdbId}</ThemedText>
+                </View>
+              )}
+              {currentTvdbId && (
+                <View style={[styles.providerBadge, styles.providerBadgeTvdb]}>
+                  <ThemedText style={styles.providerBadgeText}>TVDB ID: {currentTvdbId}</ThemedText>
+                </View>
+              )}
+            </View>
 
             <View style={styles.searchRow}>
               <ThemedTextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                placeholder="Search TMDB…"
+                placeholder={selectedProvider === 'tvdb' ? 'Search TheTVDB…' : 'Search TMDB…'}
                 style={styles.searchInput}
                 onSubmitEditing={handleSearch}
                 returnKeyType="search"
@@ -594,10 +807,122 @@ export default function EditItemScreen() {
           </View>
         )}
 
-        {!tmdbApiKey && (itemType === 'show' || itemType === 'movie') && (
+        {/* TVDB results section (rendered below TMDB results, only when TVDB provider selected) */}
+        {canRematch && selectedProvider === 'tvdb' && (
+          <View style={styles.tvdbSection}>
+            {tvdbSearchError !== '' && (
+              <ThemedText style={styles.errorText}>{tvdbSearchError}</ThemedText>
+            )}
+            {tvdbResults.length > 0 && (
+              <FlatList
+                data={tvdbResults}
+                keyExtractor={(item) => item.id}
+                scrollEnabled={false}
+                renderItem={({ item }) => {
+                  const isCurrentMatch = item.id === currentTvdbId;
+                  const isJustMatched = tvdbApplied === item.id;
+                  const isHighlighted = isCurrentMatch || isJustMatched;
+                  const isExpanded = tvdbExpandedId === item.id;
+                  const isLoadingPosters = tvdbLoadingPostersForId === item.id;
+                  const posters: string[] = tvdbPostersByShowId[item.id] ?? [];
+                  const posterCount = isExpanded && !isLoadingPosters ? posters.length : null;
+                  return (
+                    <View style={[styles.resultRow, isHighlighted && styles.resultRowSelected]}>
+                      <TouchableOpacity
+                        style={styles.resultHeader}
+                        onPress={() => fetchAndExpandTvdbResult(item)}
+                        disabled={applyingMatch || isRematching}
+                      >
+                        {item.posterThumbUrl ? (
+                          <Image
+                            source={{ uri: item.posterThumbUrl }}
+                            style={styles.resultPoster}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <View style={[styles.resultPoster, styles.resultPosterPlaceholder]}>
+                            <ThemedText style={styles.placeholderIcon}>📺</ThemedText>
+                          </View>
+                        )}
+                        <View style={styles.resultInfo}>
+                          <ThemedText style={styles.resultTitle}>{item.title}</ThemedText>
+                          {item.year > 0 && (
+                            <ThemedText style={styles.resultYear}>{item.year}</ThemedText>
+                          )}
+                          {isHighlighted && (
+                            <ThemedText style={styles.selectedLabel}>
+                              {isJustMatched ? '✔ Matched' : '✔ Current Match'}
+                            </ThemedText>
+                          )}
+                          <ThemedText style={styles.posterCountLabel}>
+                            {isLoadingPosters
+                              ? 'Loading posters…'
+                              : posterCount !== null
+                                ? posterCount === 0
+                                  ? 'No posters available'
+                                  : `${posterCount} poster${posterCount !== 1 ? 's' : ''} available`
+                                : isExpanded
+                                  ? '…'
+                                  : 'Tap to browse posters'}
+                          </ThemedText>
+                        </View>
+                        <ThemedText style={styles.expandChevron}>
+                          {isExpanded ? '▲' : '▼'}
+                        </ThemedText>
+                      </TouchableOpacity>
+                      {isExpanded && (
+                        <View style={styles.posterGallery}>
+                          {isLoadingPosters ? (
+                            <ActivityIndicator style={styles.spinner} />
+                          ) : posters.length > 0 ? (
+                            <FlatList
+                              data={posters}
+                              keyExtractor={(url) => url}
+                              horizontal
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={styles.posterGalleryContent}
+                              renderItem={({ item: posterUrl }) => {
+                                const isChosen =
+                                  isHighlighted &&
+                                  tvdbSelectedPoster?.showId === item.id &&
+                                  tvdbSelectedPoster?.posterUrl === posterUrl;
+                                return (
+                                  <TouchableOpacity
+                                    onPress={() => handleSelectTvdbPoster(item, posterUrl)}
+                                    disabled={applyingMatch || isRematching}
+                                    style={[styles.galleryPosterWrapper, isChosen && styles.galleryPosterWrapperChosen]}
+                                  >
+                                    <Image
+                                      source={{ uri: posterUrl }}
+                                      style={styles.galleryPoster}
+                                      contentFit="cover"
+                                    />
+                                    {isChosen && (
+                                      <View style={styles.galleryCheckOverlay}>
+                                        <ThemedText style={styles.galleryCheckIcon}>✔</ThemedText>
+                                      </View>
+                                    )}
+                                  </TouchableOpacity>
+                                );
+                              }}
+                            />
+                          ) : (
+                            <ThemedText style={styles.hint}>No posters available.</ThemedText>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  );
+                }}
+              />
+            )}
+          </View>
+        )}
+
+        {!tmdbApiKey && !tvdbApiKey && (itemType === 'show' || itemType === 'movie') && (
           <View style={styles.section}>
             <ThemedText style={styles.hint}>
-              Add a TMDB API key in Settings to enable TMDB poster search.
+              Add a TMDB or TVDB API key in Settings to enable metadata poster search.
             </ThemedText>
           </View>
         )}
@@ -805,5 +1130,49 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '700',
+  },
+  providerRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  providerButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#0a7ea4',
+  },
+  providerButtonActive: {
+    backgroundColor: '#0a7ea4',
+  },
+  providerButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0a7ea4',
+  },
+  providerButtonTextActive: {
+    color: '#fff',
+  },
+  providerBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  providerBadge: {
+    backgroundColor: 'rgba(10,126,164,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  providerBadgeTvdb: {
+    backgroundColor: 'rgba(0,180,120,0.15)',
+  },
+  providerBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    opacity: 0.8,
+  },
+  tvdbSection: {
+    marginTop: 4,
   },
 });

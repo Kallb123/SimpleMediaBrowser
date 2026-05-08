@@ -9,12 +9,14 @@ export interface IMediaOverride {
   title?: string;
   /** Sort key used to order the item (falls back to title override, then original name). */
   sortTitle?: string;
-  /** TMDB numeric ID stored as a string after a rematch. */
+  /** TMDB numeric ID stored as a string after a TMDB rematch. */
   tmdbId?: string;
-  /** Release year stored after a successful TMDB match/rematch. */
+  /** TVDB numeric ID stored as a string after a TVDB rematch. */
+  tvdbId?: string;
+  /** Release year stored after a successful metadata match/rematch. */
   year?: number;
   /**
-   * Local file URI for a manually selected poster image (browse locally or TMDB rematch).
+   * Local file URI for a manually selected poster image (browse locally or metadata rematch).
    * Persisted across rescans so user-chosen posters survive library rebuilds.
    */
   poster?: string;
@@ -23,6 +25,11 @@ export interface IMediaOverride {
    * No data is deleted; clearing this override restores the item.
    */
   hidden?: boolean;
+  /**
+   * Forces a specific metadata provider for this item, overriding both the library-level
+   * and global data-source settings.
+   */
+  metadataSourceOverride?: dataSources;
 }
 
 export interface IMediaLibrary {
@@ -45,6 +52,12 @@ export interface IMediaShow {
      * Populated during scanning; useful for debugging and the edit screen.
      */
     rawNames?: string[];
+    /**
+     * The metadata provider that was configured on the source folder when this
+     * show was scanned.  Used by MetadataService to pick the right provider
+     * without needing a per-item override.  Absent means use the global setting.
+     */
+    metadataSource?: dataSources;
 }
 
 export interface IMediaSeason {
@@ -81,6 +94,12 @@ export interface MergeEpisodePayload {
   seasonNumber: number;
   episodeKey: string;
   episode: IMediaObject;
+  /**
+   * Metadata provider configured on the source folder that produced this episode.
+   * Stamped on the show entry so MetadataService can pick the right provider.
+   * Absent means use the global setting.
+   */
+  metadataSource?: dataSources;
 }
 
 /** Progress information for an in-progress scan. */
@@ -107,7 +126,7 @@ export interface ScanProgress {
 }
 
 export type contentTypes = 'tv' | 'movie';
-export type dataSources = 'tmdb';
+export type dataSources = 'tmdb' | 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
 
@@ -187,10 +206,24 @@ export const settingsSlice = createSlice({
     clearThumbnails: (state) => {
       state.thumbnails = {};
     },
-    updateShowMetadata: (state, action: PayloadAction<{ showName: string; tmdbId: string; poster: string; title?: string; year?: number }>) => {
+    updateShowMetadata: (state, action: PayloadAction<{
+      showName: string;
+      /** The provider-specific ID string (written to ids.tmdb or ids.tvdb based on source). */
+      tmdbId: string;
+      /** Which provider resolved this metadata. Defaults to 'tmdb' for backward compatibility. */
+      source?: dataSources;
+      poster: string;
+      title?: string;
+      year?: number;
+    }>) => {
       const show = state.mediaLibrary[action.payload.showName];
       if (show) {
-        show.ids.tmdb = action.payload.tmdbId;
+        const source = action.payload.source ?? 'tmdb';
+        if (source === 'tvdb') {
+          show.ids.tvdb = action.payload.tmdbId;
+        } else {
+          show.ids.tmdb = action.payload.tmdbId;
+        }
         show.poster = action.payload.poster;
         if (action.payload.title) show.title = action.payload.title;
         if (action.payload.year) show.year = action.payload.year;
@@ -198,10 +231,22 @@ export const settingsSlice = createSlice({
         console.warn(`[libraryReducer] updateShowMetadata: show "${action.payload.showName}" not found`);
       }
     },
-    updateMovieMetadata: (state, action: PayloadAction<{ path: string; tmdbId: string; poster: string }>) => {
+    updateMovieMetadata: (state, action: PayloadAction<{
+      path: string;
+      /** The provider-specific ID string (written to ids.tmdb or ids.tvdb based on source). */
+      tmdbId: string;
+      /** Which provider resolved this metadata. Defaults to 'tmdb' for backward compatibility. */
+      source?: dataSources;
+      poster: string;
+    }>) => {
       const movie = state.movies.find((m) => m.path === action.payload.path);
       if (movie) {
-        movie.ids.tmdb = action.payload.tmdbId;
+        const source = action.payload.source ?? 'tmdb';
+        if (source === 'tvdb') {
+          movie.ids.tvdb = action.payload.tmdbId;
+        } else {
+          movie.ids.tmdb = action.payload.tmdbId;
+        }
         movie.poster = action.payload.poster;
       }
     },
@@ -228,7 +273,7 @@ export const settingsSlice = createSlice({
      * Used to stream discovered episodes to the UI during scanning.
      */
     mergeEpisodeBatch: (state, action: PayloadAction<MergeEpisodePayload[]>) => {
-      for (const { showName, rawShowName, folderYear, folderPoster, seasonKey, seasonNumber, episodeKey, episode } of action.payload) {
+      for (const { showName, rawShowName, folderYear, folderPoster, seasonKey, seasonNumber, episodeKey, episode, metadataSource } of action.payload) {
         if (!state.mediaLibrary[showName]) {
           state.mediaLibrary[showName] = {
             ids: { tvdb: null, imdb: null, tmdb: null },
@@ -237,6 +282,7 @@ export const settingsSlice = createSlice({
             poster: folderPoster,
             seasons: {},
             rawNames: rawShowName !== showName ? [rawShowName] : [],
+            metadataSource,
           };
         } else {
           if (folderPoster && !state.mediaLibrary[showName].poster) {
@@ -401,6 +447,24 @@ export const settingsSlice = createSlice({
         if (update.tmdbThumbnail !== undefined) ep.tmdbThumbnail = update.tmdbThumbnail;
       }
     },
+    /**
+     * Clears all cached TVDB poster and episode thumbnail data:
+     * - Resets the poster URI to empty for shows whose metadata source is 'tvdb'.
+     * - Clears tmdbThumbnail from every episode for TVDB-sourced shows.
+     * Call this after deleting the smb_posters_tvdb and smb_thumbnails_tvdb directories from disk.
+     */
+    clearTvdbPosterOverrides: (state) => {
+      for (const show of Object.values(state.mediaLibrary) as IMediaShow[]) {
+        if (show.metadataSource === 'tvdb') {
+          show.poster = '';
+          for (const season of Object.values(show.seasons)) {
+            for (const ep of Object.values(season.episodes)) {
+              ep.tmdbThumbnail = undefined;
+            }
+          }
+        }
+      }
+    },
   },
   extraReducers: (builder) => {
     // Reset transient scan state when redux-persist rehydrates the store.
@@ -413,7 +477,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
