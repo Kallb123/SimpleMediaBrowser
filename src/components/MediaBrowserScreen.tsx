@@ -481,6 +481,12 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const isScanning = useSelector(selectIsScanning);
   const scanProgress = useSelector(selectScanProgress);
 
+  const handleCancelScan = useCallback(() => {
+    import('@/scripts/FileScanner').then(({ FileScanner }) => {
+      FileScanner.getInstance().cancelScan();
+    }).catch(() => {});
+  }, []);
+
   // Apply filter
   const mediaLibrary: IMediaLibrary = mediaFilter === 'movies' ? {} : allLibrary;
   const movies: IMediaObject[] = mediaFilter === 'tv' ? [] : allMovies;
@@ -663,15 +669,20 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           {/* Scan progress banner – shown at the top of the grid while any scan phase is active */}
           {isScanning && scanProgress.phase !== 'idle' && (
             <View style={styles.scanBanner}>
-              <ThemedText style={styles.scanBannerText}>
-                {scanProgress.phase === 'collecting'
-                  ? scanProgress.sourcesTotal && scanProgress.sourcesTotal > 1 && scanProgress.currentSourceIndex
-                    ? `Scanning library ${scanProgress.currentSourceIndex} of ${scanProgress.sourcesTotal}… (${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''} found)`
-                    : `Scanning… found ${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''}`
-                  : scanProgress.phase === 'thumbnails'
-                    ? `Generating thumbnails (${scanProgress.thumbnailsDone} / ${scanProgress.thumbnailsTotal})`
-                    : `Fetching metadata… (${scanProgress.metadataDone} / ${scanProgress.metadataTotal})`}
-              </ThemedText>
+              <View style={styles.scanBannerRow}>
+                <ThemedText style={styles.scanBannerText}>
+                  {scanProgress.phase === 'collecting'
+                    ? scanProgress.sourcesTotal && scanProgress.sourcesTotal > 1 && scanProgress.currentSourceIndex
+                      ? `Scanning library ${scanProgress.currentSourceIndex} of ${scanProgress.sourcesTotal}… (${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''} found)`
+                      : `Scanning… found ${scanProgress.filesFound} file${scanProgress.filesFound !== 1 ? 's' : ''}`
+                    : scanProgress.phase === 'thumbnails'
+                      ? `Generating thumbnails (${scanProgress.thumbnailsDone} / ${scanProgress.thumbnailsTotal})`
+                      : `Fetching metadata… (${scanProgress.metadataDone} / ${scanProgress.metadataTotal})`}
+                </ThemedText>
+                <TouchableOpacity onPress={handleCancelScan} style={styles.scanCancelButton}>
+                  <ThemedText style={styles.scanCancelText}>Stop</ThemedText>
+                </TouchableOpacity>
+              </View>
               {scanProgress.phase === 'thumbnails' && (
                 <View style={styles.scanProgressTrack}>
                   <View
@@ -904,6 +915,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                   : 'Scanning your library, please wait.'}
             </ThemedText>
           )}
+          <TouchableOpacity onPress={handleCancelScan} style={styles.stopScanButton}>
+            <ThemedText style={styles.stopScanText}>Stop Scan</ThemedText>
+          </TouchableOpacity>
         </ThemedView>
       ) : (
         <ThemedView style={styles.stepContainer}>
@@ -989,9 +1003,42 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     gap: 4,
   },
+  scanBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   scanBannerText: {
+    flex: 1,
     fontSize: 12,
     opacity: 0.75,
+  },
+  scanCancelButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#E55',
+    marginLeft: 8,
+  },
+  scanCancelText: {
+    fontSize: 11,
+    color: '#E55',
+    fontWeight: '600',
+  },
+  stopScanButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E55',
+    marginTop: 4,
+  },
+  stopScanText: {
+    fontSize: 13,
+    color: '#E55',
+    fontWeight: '600',
   },
   scanProgressTrack: {
     width: '100%',

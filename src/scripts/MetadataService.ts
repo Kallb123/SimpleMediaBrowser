@@ -20,7 +20,7 @@ export class MetadataService {
     }
 
     /** Enrich both the TV library and the movie list concurrently. */
-    async enrichAll(library: IMediaLibrary, movies: IMediaObject[]): Promise<void> {
+    async enrichAll(library: IMediaLibrary, movies: IMediaObject[], isCancelled: () => boolean = () => false): Promise<void> {
         // Read credentials and global settings from the Redux store.
         const settings = store.getState().settingsReducer;
         const globalSource: dataSources = settings.dataSource ?? 'tmdb';
@@ -37,6 +37,8 @@ export class MetadataService {
         if (tvdbProvider) {
             await tvdbProvider.authenticate();
         }
+
+        if (isCancelled()) return;
 
         // Provider resolver: checks per-item override → per-show source → global setting.
         const overrides = store.getState().libraryReducer.mediaOverrides;
@@ -91,14 +93,17 @@ export class MetadataService {
         };
         const dispatchProgress = makeDispatchProgress(metadataTotal);
         const results = await Promise.allSettled([
-            this.enrichLibrary(dedupedLibrary, resolveShowProvider, progress, dispatchProgress),
-            this.enrichMovies(movies, resolveMovieProvider, progress, dispatchProgress),
+            this.enrichLibrary(dedupedLibrary, resolveShowProvider, progress, dispatchProgress, isCancelled),
+            this.enrichMovies(movies, resolveMovieProvider, progress, dispatchProgress, isCancelled),
         ]);
         for (const result of results) {
             if (result.status === 'rejected') {
                 logger.error('MetadataService', 'enrichAll: a task was rejected', result.reason);
             }
         }
+
+        if (isCancelled()) return;
+
         // After both TV and movie enrichment, collapse any shows that share the same
         // provider ID into a single library entry.
         this.deduplicateByProviderIds();
@@ -126,7 +131,7 @@ export class MetadataService {
                     metadataTotal: episodeMetadataTotal,
                 }));
                 const dispatchEpisodeProgress = makeDispatchProgress(episodeMetadataTotal);
-                await this.enrichEpisodes(enrichedLibrary, resolveShowProvider, fetchEpisodeNames, fetchEpisodeThumbnails, progress, dispatchEpisodeProgress);
+                await this.enrichEpisodes(enrichedLibrary, resolveShowProvider, fetchEpisodeNames, fetchEpisodeThumbnails, progress, dispatchEpisodeProgress, isCancelled);
             }
         }
     }
@@ -137,6 +142,7 @@ export class MetadataService {
         resolveProvider: (showName: string, show: IMediaShow) => IMetadataProvider | null,
         progress: { done: number },
         dispatchProgress: () => void,
+        isCancelled: () => boolean = () => false,
     ): Promise<void> {
         const showNames = Object.keys(library);
         logger.log('MetadataService', `enrichLibrary: ${showNames.length} show(s) to process`);
@@ -144,6 +150,10 @@ export class MetadataService {
         const overrides = store.getState().libraryReducer.mediaOverrides;
 
         for (const showName of showNames) {
+            if (isCancelled()) {
+                logger.log('MetadataService', 'enrichLibrary: cancelled');
+                break;
+            }
             const show = library[showName];
 
             try {
@@ -217,12 +227,17 @@ export class MetadataService {
         resolveProvider: (movie: IMediaObject) => IMetadataProvider | null,
         progress: { done: number },
         dispatchProgress: () => void,
+        isCancelled: () => boolean = () => false,
     ): Promise<void> {
         logger.log('MetadataService', `enrichMovies: ${movies.length} movie(s) to process`);
 
         const overrides = store.getState().libraryReducer.mediaOverrides;
 
         for (const movie of movies) {
+            if (isCancelled()) {
+                logger.log('MetadataService', 'enrichMovies: cancelled');
+                break;
+            }
             const searchTitle = movie.title || movie.filename.replace(/\.[^.]+$/, '');
             try {
                 // Honour a user-set poster override (from manual rematch or local browse).
@@ -283,10 +298,15 @@ export class MetadataService {
         fetchThumbnails: boolean,
         progress: { done: number },
         dispatchProgress: () => void,
+        isCancelled: () => boolean = () => false,
     ): Promise<void> {
         logger.log('MetadataService', 'enrichEpisodes: starting episode metadata enrichment');
 
         for (const [showName, show] of Object.entries(library) as Array<[string, IMediaShow]>) {
+            if (isCancelled()) {
+                logger.log('MetadataService', 'enrichEpisodes: cancelled');
+                break;
+            }
             const provider = resolveProvider(showName, show);
             if (!provider) continue;
 
@@ -299,6 +319,7 @@ export class MetadataService {
             );
 
             for (const [seasonKey, season] of sortedSeasons as Array<[string, IMediaSeason]>) {
+                if (isCancelled()) break;
                 try {
                     const providerEpisodes = await provider.fetchSeasonEpisodes(showProviderId, season.seasonNumber);
 

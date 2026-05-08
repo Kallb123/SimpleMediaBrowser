@@ -370,6 +370,9 @@ export class FileScanner {
 
     _userID = "";
 
+    /** Set to true by {@link cancelScan} to request an early abort of the active scan. */
+    private _cancelRequested = false;
+
     /**
      * @returns {FileScanner}
      */
@@ -381,10 +384,22 @@ export class FileScanner {
         return this.myInstance;
     }
 
+    /**
+     * Requests cancellation of the currently-running scan.
+     * The scan will stop at the next cancellation checkpoint; the Redux store
+     * will be left in whatever partial state has been written so far and
+     * `isScanning` will be reset to `false`.
+     */
+    cancelScan(): void {
+        logger.log('FileScanner', 'cancelScan() called – requesting scan abort');
+        this._cancelRequested = true;
+    }
+
     /** Scan all configured sources and update the Redux store with merged results. */
     async scanAllSources(sources: IMediaSource[]) {
         logger.log('FileScanner', `scanAllSources called with ${sources.length} source(s)`);
         sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
+        this._cancelRequested = false;
         store.dispatch(setIsScanning(true));
         store.dispatch(setScanProgress({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
         try {
@@ -413,6 +428,10 @@ export class FileScanner {
         const allTvFiles: IScannedFile[] = [];
         const tvPosterMap = new Map<string, string>();
         for (const src of tvSources) {
+            if (this._cancelRequested) {
+                logger.log('FileScanner', 'Scan cancelled before TV source');
+                return;
+            }
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning TV source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
             const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv', src.metadataSource);
@@ -420,6 +439,12 @@ export class FileScanner {
             allTvFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!tvPosterMap.has(key)) tvPosterMap.set(key, uri); });
         }
+
+        if (this._cancelRequested) {
+            logger.log('FileScanner', 'Scan cancelled after TV collection');
+            return;
+        }
+
         const mergedLibrary = this.buildLibrary(allTvFiles, tvPosterMap);
         logger.log('FileScanner', `Built TV library with ${Object.keys(mergedLibrary).length} show(s) from ${allTvFiles.length} file(s)`);
 
@@ -427,6 +452,10 @@ export class FileScanner {
         const allMovieFiles: IScannedFile[] = [];
         const moviePosterMap = new Map<string, string>();
         for (const src of movieSources) {
+            if (this._cancelRequested) {
+                logger.log('FileScanner', 'Scan cancelled before movie source');
+                return;
+            }
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning Movie source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
             const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie', src.metadataSource);
@@ -434,6 +463,12 @@ export class FileScanner {
             allMovieFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!moviePosterMap.has(key)) moviePosterMap.set(key, uri); });
         }
+
+        if (this._cancelRequested) {
+            logger.log('FileScanner', 'Scan cancelled after movie collection');
+            return;
+        }
+
         const movies = this.buildMovieList(allMovieFiles, moviePosterMap);
         logger.log('FileScanner', `Built movie list with ${movies.length} movie(s)`);
 
@@ -525,15 +560,17 @@ export class FileScanner {
         const settings = store.getState().settingsReducer;
         const enablePosterFetching = settings.enablePosterFetching ?? true;
         const hasAnyProviderKey = !!(settings.tmdbApiKey || settings.tvdbApiKey);
-        if (enablePosterFetching && hasAnyProviderKey) {
+        if (!this._cancelRequested && enablePosterFetching && hasAnyProviderKey) {
             logger.log('FileScanner', 'Provider API key found – starting metadata enrichment');
             const currentLibrary = store.getState().libraryReducer.mediaLibrary;
             const currentMovies = store.getState().libraryReducer.movies;
             try {
-                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies);
+                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, () => this._cancelRequested);
             } catch (e) {
                 logger.error('FileScanner', 'Metadata enrichment failed', e);
             }
+        } else if (this._cancelRequested) {
+            logger.log('FileScanner', 'Scan cancelled before metadata enrichment');
         } else if (!enablePosterFetching) {
             logger.log('FileScanner', 'Poster fetching disabled in settings – skipping metadata enrichment');
         } else {
@@ -547,7 +584,7 @@ export class FileScanner {
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
         ];
         const enableThumbnailGeneration = store.getState().settingsReducer.enableThumbnailGeneration ?? false;
-        if (enableThumbnailGeneration) {
+        if (!this._cancelRequested && enableThumbnailGeneration) {
             // Load the on-disk thumbnail index and pre-populate the cache with persistent URIs.
             // This must run before filtering uncached files so already-persisted thumbnails
             // are treated as cached and skipped.
@@ -568,6 +605,10 @@ export class FileScanner {
                         // Throttle concurrency so weaker devices are not overwhelmed.
                         await thumbSemaphore.acquire();
                         try {
+                            if (this._cancelRequested) {
+                                thumbFail++;
+                                return;
+                            }
                             const thumbnail = await this.generateThumbnail(media.path);
                             if (!thumbnail) {
                                 throw new Error('No thumbnail returned by expo-video');
@@ -699,6 +740,10 @@ export class FileScanner {
     ): Promise<void> {
         if (depth > MAX_SCAN_DEPTH) {
             logger.warn('FileScanner', `Max scan depth (${MAX_SCAN_DEPTH}) reached at: ${directory}`);
+            return;
+        }
+
+        if (this._cancelRequested) {
             return;
         }
 
