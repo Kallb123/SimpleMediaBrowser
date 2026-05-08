@@ -606,7 +606,6 @@ export class FileScanner {
                         await thumbSemaphore.acquire();
                         try {
                             if (this._cancelRequested) {
-                                thumbFail++;
                                 return;
                             }
                             const thumbnail = await this.generateThumbnail(media.path);
