@@ -1,5 +1,4 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { REHYDRATE } from 'redux-persist';
 import type { RootState } from './store';
 import { IMediaObject } from '@/scripts/FileScanner';
 
@@ -148,7 +147,7 @@ interface LibraryState {
   scanProgress: ScanProgress;
 }
 
-const INITIAL_SCAN_PROGRESS: ScanProgress = {
+export const INITIAL_SCAN_PROGRESS: ScanProgress = {
   phase: 'idle',
   filesFound: 0,
   thumbnailsDone: 0,
@@ -477,15 +476,6 @@ export const settingsSlice = createSlice({
         }
       }
     },
-  },
-  extraReducers: (builder) => {
-    // Reset transient scan state when redux-persist rehydrates the store.
-    // This prevents a scan that was in progress when the app was killed from
-    // rehydrating with isScanning=true or stale progress values on next launch.
-    builder.addCase(REHYDRATE, (state) => {
-      state.isScanning = false;
-      state.scanProgress = INITIAL_SCAN_PROGRESS;
-    });
   },
 })
 
