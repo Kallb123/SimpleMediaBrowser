@@ -251,12 +251,12 @@ export class MetadataService {
                 }
 
                 const results = await provider.searchMovie(searchTitle);
-                if (results.length === 0 || !results[0].posterUrl) {
+                const best = results[0];
+                if (!best || !best.posterUrl) {
                     logger.log('MetadataService', `No poster found for movie "${searchTitle}" via ${provider.source}`);
                     continue;
                 }
 
-                const best = results[0];
                 const localUri = await provider.downloadMoviePoster(best.id, best.posterUrl);
                 store.dispatch(updateMovieMetadata({ path: movie.path, providerId: best.id, source: provider.source, poster: localUri }));
                 logger.log('MetadataService', `Movie "${searchTitle}" → ${provider.source} ID ${best.id}, poster cached at ${localUri}`);
