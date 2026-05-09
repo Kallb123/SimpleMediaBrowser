@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -109,6 +109,12 @@ export default function SettingsPrompt() {
   const dataSourceOptions = [
     {id: 'tmdb', label: 'TMDB'},
     {id: 'tvdb', label: 'TheTVDB'},
+  ];
+
+  const metadataSourceOptions: { id: dataSources | 'auto'; label: string }[] = [
+    { id: 'auto', label: '🌐 Auto' },
+    { id: 'tmdb', label: 'TMDB' },
+    { id: 'tvdb', label: 'TheTVDB' },
   ];
 
   const viewTypeOptions = [
@@ -508,6 +514,35 @@ export default function SettingsPrompt() {
               </ThemedText>
               <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
             </View>
+            <SelectDropdown
+              data={metadataSourceOptions}
+              defaultValue={metadataSourceOptions.find(o => o.id === (source.metadataSource ?? 'auto'))}
+              onSelect={(item) => {
+                try {
+                  dispatch(updateMediaSourceMetadata({
+                    uri: source.uri,
+                    metadataSource: item.id === 'auto' ? undefined : item.id as dataSources,
+                  }));
+                } catch (e) {
+                  logger.error('Settings', 'Exception while updating media source metadata source', e as Error);
+                }
+              }}
+              renderButton={(selectedItem, isOpened) => (
+                <View style={[styles.sourceMetaDropdownButton, { backgroundColor: dropdownBg }]}>
+                  <Text style={[styles.sourceMetaDropdownText, { color: theme.text }]}>
+                    {selectedItem ? selectedItem.label : '🌐 Auto'}
+                  </Text>
+                  <Text>{isOpened ? '🔼' : '🔽'}</Text>
+                </View>
+              )}
+              renderItem={(item, _index, isSelected) => (
+                <View style={[styles.sourceMetaDropdownItem, { backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg }]}>
+                  <Text style={[styles.sourceMetaDropdownItemText, { color: theme.text }]}>{item.label}</Text>
+                </View>
+              )}
+              showsVerticalScrollIndicator={false}
+              dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+            />
             <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>
               <ThemedText style={styles.deleteButtonText}>✕</ThemedText>
             </TouchableOpacity>
@@ -896,6 +931,29 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     fontSize: 16,
     color: DESTRUCTIVE_COLOR,
+  },
+  sourceMetaDropdownButton: {
+    height: 36,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    gap: 4,
+  },
+  sourceMetaDropdownText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  sourceMetaDropdownItem: {
+    width: '100%',
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  sourceMetaDropdownItemText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   dropdownButtonStyle: {
     width: 220,

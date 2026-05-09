@@ -67,6 +67,12 @@ export const settingsSlice = createSlice({
     removeMediaSource: (state, action: PayloadAction<string>) => {
       state.mediaSources = state.mediaSources.filter((s) => s.uri !== action.payload);
     },
+    updateMediaSourceMetadata: (state, action: PayloadAction<{ uri: string; metadataSource: dataSources | undefined }>) => {
+      const source = state.mediaSources.find((s) => s.uri === action.payload.uri);
+      if (source) {
+        source.metadataSource = action.payload.metadataSource;
+      }
+    },
     setPassword: (state, action: PayloadAction<string | null>) => {
       state.settingsPassword = action.payload;
     },
@@ -112,7 +118,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addMediaSource, removeMediaSource, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
