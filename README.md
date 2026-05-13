@@ -5,13 +5,21 @@ A local media browser for Android. Point it at folders on your device or network
 ## Features
 
 - **Automatic library scanning** — Add one or more media source folders via Android's Storage Access Framework (SAF). The scanner recursively discovers TV episodes and movies and streams results into the library as they are found.
-- **TV show & movie views** — Browse all media together or switch to dedicated TV and Movies tabs. TV content is grouped by show → season → episode.
-- **TMDB metadata enrichment** — Enter a TMDB API key in Settings to fetch official titles, years, and poster artwork automatically. Posters are cached locally so the library is usable offline after the first fetch.
+- **TV show & movie views** — Browse all media together or switch to dedicated TV and Movies tabs. TV content can be viewed structurally in different ways (shows/seasons/episodes or all seasons flattened etc.).
+- **Local metadata enrichment** — Standard metadata (folder.png etc.) will automatically be consumed as the library is scanned.
+- **Cloud metadata enrichment** — Enter a TMDB or TheTVDB API key in Settings to fetch official titles, years, and poster artwork automatically. Posters are cached locally so the library is usable offline after the first fetch.
 - **Video thumbnail generation** — Thumbnails are generated for episodes and movies that have no poster, persisted to disk, and reused across sessions.
-- **Metadata overrides** — Long-press any item to edit its title, poster, or other metadata and override what was fetched automatically.
+- **Metadata overrides** — An edit-mode allows changes to any items title, poster, or other metadata and override what was fetched automatically.
 - **Flexible display options** — Choose between grid and list layouts, adjust poster/thumbnail scale, and select landscape or portrait orientation modes.
+- **Parent-mode** — Includes password-protection for all settings pages, so that the usual user is limited to selecting media to watch.
 - **Dark & light theme** — Follows the system colour scheme automatically.
 - **Debug log viewer** — An in-app log screen captures scan and metadata activity to help diagnose issues without needing a connected debugger.
+
+![Library Comparison](docs/library-comparison.png)
+The library can be enriched with metadata to ensure the best possible user experience.
+
+![Library Episodes](docs/library-episodes.png)
+Enrichment includes per-episode images, so the user can see which one they are selecting.
 
 ## Tech Stack
 
