@@ -19,7 +19,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "uk.kallum.SimpleMediaBrowser",
+      "package": "net.nawt.simplemediabrowser",
       "versionCode": 40
     },
     "web": {
