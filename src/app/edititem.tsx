@@ -233,7 +233,7 @@ export default function EditItemScreen() {
   // True while episode metadata is being re-fetched after a rematch.
   const [isRematching, setIsRematching] = useState(false);
 
-  const canSearch = (itemType === 'show' || itemType === 'movie') && (!!tmdbApiKey || !!tvdbApiKey);
+  const hasApiKey = (itemType === 'show' || itemType === 'movie') && (!!tmdbApiKey || !!tvdbApiKey);
 
   useEffect(() => {
     const overridesSummary = Object.keys(existingOverride).length > 0
@@ -705,7 +705,7 @@ export default function EditItemScreen() {
         )}
 
         {/* Poster Search (shows and movies only, requires API key) */}
-        {canSearch && (
+        {hasApiKey && (
           <View style={styles.section}>
             <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
               Poster Search
@@ -984,7 +984,7 @@ export default function EditItemScreen() {
         )}
 
         {/* Metadata Re-match (shows and movies only, requires API key) */}
-        {canSearch && (
+        {hasApiKey && (
           <View style={styles.section}>
             <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
               Metadata Re-match
