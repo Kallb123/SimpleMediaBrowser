@@ -216,7 +216,8 @@ export const settingsSlice = createSlice({
       tmdbId?: string;
       /** Which provider resolved this metadata. Defaults to 'tmdb' for backward compatibility. */
       source?: dataSources;
-      poster: string;
+      /** When omitted the existing poster is left unchanged. */
+      poster?: string;
       title?: string;
       year?: number;
     }>) => {
@@ -229,7 +230,7 @@ export const settingsSlice = createSlice({
         } else {
           show.ids.tmdb = id;
         }
-        show.poster = action.payload.poster;
+        if (action.payload.poster !== undefined) show.poster = action.payload.poster;
         if (action.payload.title) show.title = action.payload.title;
         if (action.payload.year) show.year = action.payload.year;
       } else {
@@ -247,7 +248,8 @@ export const settingsSlice = createSlice({
       tmdbId?: string;
       /** Which provider resolved this metadata. Defaults to 'tmdb' for backward compatibility. */
       source?: dataSources;
-      poster: string;
+      /** When omitted the existing poster is left unchanged. */
+      poster?: string;
     }>) => {
       const movie = state.movies.find((m) => m.path === action.payload.path);
       if (movie) {
@@ -258,7 +260,7 @@ export const settingsSlice = createSlice({
         } else {
           movie.ids.tmdb = id;
         }
-        movie.poster = action.payload.poster;
+        if (action.payload.poster !== undefined) movie.poster = action.payload.poster;
       }
     },
     setMediaOverride: (state, action: PayloadAction<{ key: string; override: IMediaOverride }>) => {
