@@ -294,7 +294,9 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   modalInput: {
+    flex: 0,
     paddingVertical: 12,
+    minHeight: 44,
   },
   errorText: {
     color: '#E55',

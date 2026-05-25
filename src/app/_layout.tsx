@@ -4,15 +4,16 @@ import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import { useColorScheme as useNativeColorScheme } from 'react-native';
 import 'react-native-reanimated';
 import '@/global.css';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';
-import { Provider } from 'react-redux';
+import { Provider, useSelector } from 'react-redux';
 import { store, persistor } from '@/store/store';
 import { logger } from '@/scripts/Logger';
 import { EditModeProvider } from '@/contexts/EditModeContext';
+import { selectAppColorScheme } from '@/store/settingsReducer';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -20,9 +21,20 @@ SplashScreen.preventAutoHideAsync();
 logger.log('RootLayout', 'App starting up');
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  return (
+    <Provider store={store}>
+      <AppRoot />
+    </Provider>
+  );
+}
+
+function AppRoot() {
+  const nativeColorScheme = useNativeColorScheme() ?? 'light';
+  const appColorScheme = useSelector(selectAppColorScheme);
+  const effectiveScheme = appColorScheme === 'system' ? nativeColorScheme : appColorScheme;
+
   const [loaded, setLoaded] = useState(false);
-  
+
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../../assets/fonts/SpaceMono-Regular.ttf'),
   });
@@ -100,37 +112,35 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-      <Provider store={store}>
-        <EditModeProvider>
-          <Stack>
-            <Stack.Screen name="firsttime" options={{ headerShown: false }} />
-            <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
-            <Stack.Screen name="+not-found" />
-            <Stack.Screen
-              name="modal"
-              options={{
-                presentation: 'modal',
-              }}
-            />
-            <Stack.Screen
-              name="edititem"
-              options={{
-                presentation: 'modal',
-                title: 'Edit Item',
-              }}
-            />
-            <Stack.Screen
-              name="mergeshows"
-              options={{
-                presentation: 'modal',
-                title: 'Merge Shows',
-              }}
-            />
-          </Stack>
-        </EditModeProvider>
-      </Provider>
+    <ThemeProvider value={effectiveScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <StatusBar style={effectiveScheme === 'dark' ? 'light' : 'dark'} />
+      <EditModeProvider>
+        <Stack>
+          <Stack.Screen name="firsttime" options={{ headerShown: false }} />
+          <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
+          <Stack.Screen
+            name="modal"
+            options={{
+              presentation: 'modal',
+            }}
+          />
+          <Stack.Screen
+            name="edititem"
+            options={{
+              presentation: 'modal',
+              title: 'Edit Item',
+            }}
+          />
+          <Stack.Screen
+            name="mergeshows"
+            options={{
+              presentation: 'modal',
+              title: 'Merge Shows',
+            }}
+          />
+        </Stack>
+      </EditModeProvider>
     </ThemeProvider>
   );
 }

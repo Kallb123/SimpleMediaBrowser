@@ -722,7 +722,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           {navStack.length > 0 && (
             <ThemedView style={styles.breadcrumbRow}>
               <TouchableOpacity onPress={navigateBack} style={styles.backButton}>
-                <ThemedText style={styles.backButtonText}>‹ Back</ThemedText>
+                <ThemedText style={styles.backButtonArrow}>‹</ThemedText>
+                <ThemedText style={styles.backButtonText}>Back</ThemedText>
               </TouchableOpacity>
               <ThemedText style={styles.breadcrumb} numberOfLines={1}>
                 {breadcrumb}
@@ -826,7 +827,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             }}
             contentContainerStyle={[
               isListMode ? styles.listContent : styles.gridContent,
-              shouldShowToolbar && { paddingBottom: MERGE_TOOLBAR_HEIGHT + insets.bottom },
+              { paddingBottom: shouldShowToolbar ? MERGE_TOOLBAR_HEIGHT + insets.bottom : insets.bottom },
             ]}
           />
           {/* Action toolbar – visible when any items are selected in edit mode */}
@@ -963,11 +964,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   backButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 2,
+  },
+  backButtonArrow: {
+    fontSize: 28,
+    fontWeight: '300',
   },
   backButtonText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
   },
   breadcrumb: {

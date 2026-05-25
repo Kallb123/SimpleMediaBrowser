@@ -6,6 +6,7 @@ export type dataSources = 'tmdb' | 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'list';
 export type defaultPages = 'home' | 'tv' | 'movies';
+export type appColorSchemes = 'light' | 'dark' | 'system';
 
 export interface IMediaSource {
   uri: string;
@@ -34,6 +35,7 @@ interface SettingsState {
   rescanOnStartup: boolean
   fetchEpisodeNames: boolean
   fetchEpisodeThumbnails: boolean
+  appColorScheme: appColorSchemes
 }
 
 // Define the initial state using that type
@@ -53,6 +55,7 @@ const initialState: SettingsState = {
   rescanOnStartup: true,
   fetchEpisodeNames: true,
   fetchEpisodeThumbnails: true,
+  appColorScheme: 'system',
 }
 
 export const settingsSlice = createSlice({
@@ -115,10 +118,13 @@ export const settingsSlice = createSlice({
     setFetchEpisodeThumbnails: (state, action: PayloadAction<boolean>) => {
       state.fetchEpisodeThumbnails = action.payload;
     },
+    setAppColorScheme: (state, action: PayloadAction<appColorSchemes>) => {
+      state.appColorScheme = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -140,5 +146,7 @@ export const selectEnableThumbnailGeneration = (state: RootState) => state.setti
 export const selectRescanOnStartup = (state: RootState) => state.settingsReducer.rescanOnStartup ?? true;
 export const selectFetchEpisodeNames = (state: RootState) => state.settingsReducer.fetchEpisodeNames ?? true;
 export const selectFetchEpisodeThumbnails = (state: RootState) => state.settingsReducer.fetchEpisodeThumbnails ?? true;
+export const selectAppColorScheme = (state: RootState): appColorSchemes =>
+  (state.settingsReducer.appColorScheme ?? 'system') as appColorSchemes;
 
 export default settingsSlice.reducer
