@@ -64,3 +64,21 @@ export interface SmbJsonMovieData {
 }
 
 export type SmbJsonData = SmbJsonShowData | SmbJsonMovieData;
+
+/**
+ * Returns the smb_thumb filename for a given season and episode key.
+ * Kept here so that both FileScanner (reader) and ImportExportService (writer)
+ * use an identical pattern and stay in sync.
+ *
+ * @param seasonKey - e.g. "s01"
+ * @param epKey - e.g. "e01" or "e001"
+ */
+export function smbThumbFilename(seasonKey: string, epKey: string): string {
+    return `smb_thumb_${seasonKey}${epKey}.jpg`;
+}
+
+/**
+ * Regex that matches a smb_thumb filename produced by smbThumbFilename().
+ * Captures season key (group 1) and episode key (group 2).
+ */
+export const SMB_THUMB_REGEX = /^smb_thumb_(s\d{2})(e\d{2,3})\.jpg$/i;

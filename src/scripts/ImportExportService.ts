@@ -38,12 +38,27 @@ import {
 import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
 import type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData } from '@/scripts/SmbTypes';
+import { smbThumbFilename } from '@/scripts/SmbTypes';
 
 // Re-export smb.json types so callers can import them from this module.
 export type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData };
 export type { SmbJsonEpisodeData, SmbJsonSeasonData } from '@/scripts/SmbTypes';
 
 const { StorageAccessFramework } = LegacyFileSystem;
+
+/**
+ * StorageAccessFramework.writeAsStringAsync accepts an encoding option at runtime,
+ * but the TypeScript declaration omits it. This typed wrapper encapsulates the cast
+ * in one place so callers stay clean.
+ */
+async function writeSafBase64(uri: string, base64Content: string): Promise<void> {
+    const writeFn = StorageAccessFramework.writeAsStringAsync as (
+        uri: string,
+        content: string,
+        options: { encoding: string },
+    ) => Promise<void>;
+    await writeFn(uri, base64Content, { encoding: 'base64' });
+}
 
 // ─── SAF helpers ─────────────────────────────────────────────────────────────
 
@@ -147,9 +162,7 @@ async function writeToSafDir(
         fileUri = await StorageAccessFramework.createFileAsync(dirUri, filename, mimeType);
     }
     if (encoding === 'base64') {
-        // Type-assert to access the optional encoding parameter that expo-file-system
-        // supports at runtime even if the TypeScript declaration doesn't surface it.
-        await (StorageAccessFramework.writeAsStringAsync as (uri: string, content: string, options: { encoding: string }) => Promise<void>)(fileUri, content, { encoding: 'base64' });
+        await writeSafBase64(fileUri, content);
     } else {
         await StorageAccessFramework.writeAsStringAsync(fileUri, content);
     }
@@ -485,7 +498,7 @@ export async function exportToFilesystem(mediaSources: IMediaSource[]): Promise<
                 let hasEpData = false;
                 for (const [epKey, ep] of Object.entries(season.episodes)) {
                     const epTitle = ep.tmdbTitle;
-                    const thumbName = ep.tmdbThumbnail ? `smb_thumb_${seasonKey}${epKey}.jpg` : undefined;
+                    const thumbName = ep.tmdbThumbnail ? smbThumbFilename(seasonKey, epKey) : undefined;
                     if (epTitle || thumbName) {
                         episodes[epKey] = {};
                         if (epTitle) episodes[epKey].title = epTitle;
@@ -525,7 +538,7 @@ export async function exportToFilesystem(mediaSources: IMediaSource[]): Promise<
                     if (!ep.tmdbThumbnail?.startsWith('file://')) continue;
                     const seasonDirUri = getSafParentDirUri(ep.path);
                     if (!seasonDirUri) continue;
-                    const thumbName = `smb_thumb_${seasonKey}${epKey}.jpg`;
+                    const thumbName = smbThumbFilename(seasonKey, epKey);
                     try {
                         const base64 = await LegacyFileSystem.readAsStringAsync(ep.tmdbThumbnail, { encoding: 'base64' });
                         await writeToSafDir(seasonDirUri, thumbName, base64, 'image/jpeg', 'base64');

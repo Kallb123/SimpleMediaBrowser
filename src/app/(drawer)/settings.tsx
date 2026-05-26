@@ -945,7 +945,7 @@ export default function SettingsPrompt() {
         {importExportExpanded && (
           <View style={styles.troubleshootingContent}>
             {/* JSON export options */}
-            <ThemedText style={styles.importExportLabel}>Export to JSON file — select what to include:</ThemedText>
+            <ThemedText style={styles.importExportLabel}>Export to JSON file: select what to include:</ThemedText>
             <View style={styles.row}>
               <Switch value={exportIncludeSettings} onValueChange={setExportIncludeSettings} />
               <ThemedText style={styles.rowLabel}>Settings (API keys, view options)</ThemedText>

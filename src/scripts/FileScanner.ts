@@ -11,6 +11,7 @@ import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
 import type { SmbJsonData } from "@/scripts/SmbTypes";
+import { SMB_THUMB_REGEX, smbThumbFilename } from "@/scripts/SmbTypes";
 
 export interface IMediaObject {
     ids: {
@@ -921,7 +922,7 @@ export class FileScanner {
 
                 // Detect smb_thumb_s01e01.jpg files written by the filesystem export.
                 if (relativePathParts.length >= 1 && ext === '.jpg') {
-                    const thumbMatch = filename.toLowerCase().match(/^smb_thumb_(s\d{2})(e\d{2,3})\.jpg$/);
+                    const thumbMatch = filename.toLowerCase().match(SMB_THUMB_REGEX);
                     if (thumbMatch) {
                         const folderKey = relativePathParts[0];
                         const seasonKey = thumbMatch[1];
@@ -933,9 +934,9 @@ export class FileScanner {
                         const folderThumbMap = streamState.smbThumbnails.get(folderKey)!;
                         if (!folderThumbMap.has(thumbMapKey)) {
                             try {
-                                if (!SMB_THUMBNAILS_FS_DIR.exists) {
-                                    SMB_THUMBNAILS_FS_DIR.create({ intermediates: true, idempotent: true });
-                                }
+                                // Always attempt idempotent creation to avoid a race between
+                                // an exists-check and a create in concurrent async scan loops.
+                                SMB_THUMBNAILS_FS_DIR.create({ intermediates: true, idempotent: true });
                                 const safeName = `${folderKey.replace(/[^a-zA-Z0-9_-]/g, '_')}_${seasonKey}${episodeKey}.jpg`;
                                 const localFile = new File(SMB_THUMBNAILS_FS_DIR, safeName);
                                 if (!localFile.exists) {
