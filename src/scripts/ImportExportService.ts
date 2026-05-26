@@ -325,7 +325,7 @@ export async function importJson(): Promise<{ applied: string[] }> {
         throw new Error('No file selected');
     }
 
-    const jsonText = new File(result.assets[0].uri).textSync();
+    const jsonText = await new File(result.assets[0].uri).text();
     const data = JSON.parse(jsonText) as SmbExportJson;
 
     if (!data || typeof data !== 'object' || data.smbVersion !== 1) {
