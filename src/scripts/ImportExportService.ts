@@ -8,7 +8,8 @@
  *                          alongside the media files in the configured SAF directories.
  */
 
-import * as LegacyFileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
+import { StorageAccessFramework } from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import { store } from '@/store/store';
 import {
@@ -43,8 +44,6 @@ import { smbThumbFilename } from '@/scripts/SmbTypes';
 // Re-export smb.json types so callers can import them from this module.
 export type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData };
 export type { SmbJsonEpisodeData, SmbJsonSeasonData } from '@/scripts/SmbTypes';
-
-const { StorageAccessFramework } = LegacyFileSystem;
 
 /**
  * StorageAccessFramework.writeAsStringAsync accepts an encoding option at runtime,
@@ -197,7 +196,7 @@ interface ShowMatchExport {
     ids: { tmdb: string | null; tvdb: string | null; imdb: string | null };
     title: string;
     year: number;
-    seasons: Record<string, { episodes: Record<string, { tmdbTitle?: string }> }>;
+    seasons: Record<string, { episodes: Record<string, { episodeTitle?: string }> }>;
 }
 
 interface MovieMatchExport {
@@ -267,11 +266,11 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             if (!show.ids.tmdb && !show.ids.tvdb && !show.ids.imdb) continue;
             const seasons: ShowMatchExport['seasons'] = {};
             for (const [seasonKey, season] of Object.entries(show.seasons)) {
-                const episodes: Record<string, { tmdbTitle?: string }> = {};
+                const episodes: Record<string, { episodeTitle?: string }> = {};
                 let hasEpData = false;
                 for (const [epKey, ep] of Object.entries(season.episodes)) {
                     if (ep.tmdbTitle) {
-                        episodes[epKey] = { tmdbTitle: ep.tmdbTitle };
+                        episodes[epKey] = { episodeTitle: ep.tmdbTitle };
                         hasEpData = true;
                     }
                 }
@@ -326,7 +325,7 @@ export async function importJson(): Promise<{ applied: string[] }> {
         throw new Error('No file selected');
     }
 
-    const jsonText = await LegacyFileSystem.readAsStringAsync(result.assets[0].uri);
+    const jsonText = new File(result.assets[0].uri).textSync();
     const data = JSON.parse(jsonText) as SmbExportJson;
 
     if (!data || typeof data !== 'object' || data.smbVersion !== 1) {
@@ -390,7 +389,7 @@ export async function importJson(): Promise<{ applied: string[] }> {
                     if (!season?.episodes) continue;
                     const episodeUpdates: Record<string, { tmdbTitle?: string }> = {};
                     for (const [epKey, ep] of Object.entries(season.episodes)) {
-                        if (ep?.tmdbTitle) episodeUpdates[epKey] = { tmdbTitle: ep.tmdbTitle };
+                        if (ep?.episodeTitle) episodeUpdates[epKey] = { tmdbTitle: ep.episodeTitle };
                     }
                     if (Object.keys(episodeUpdates).length > 0) {
                         store.dispatch(updateSeasonEpisodeMetadata({ showName, seasonKey, episodeUpdates }));
@@ -525,7 +524,7 @@ export async function exportToFilesystem(mediaSources: IMediaSource[]): Promise<
             // Copy provider poster to show folder
             if (show.poster?.startsWith('file://')) {
                 try {
-                    const base64 = await LegacyFileSystem.readAsStringAsync(show.poster, { encoding: 'base64' });
+                    const base64 = await new File(show.poster).base64();
                     await writeToSafDir(showFolderUri, 'poster.jpg', base64, 'image/jpeg', 'base64');
                 } catch (e) {
                     logger.warn('ImportExport', `Could not copy poster for "${showName}"`, e);
@@ -540,7 +539,7 @@ export async function exportToFilesystem(mediaSources: IMediaSource[]): Promise<
                     if (!seasonDirUri) continue;
                     const thumbName = smbThumbFilename(seasonKey, epKey);
                     try {
-                        const base64 = await LegacyFileSystem.readAsStringAsync(ep.tmdbThumbnail, { encoding: 'base64' });
+                        const base64 = await new File(ep.tmdbThumbnail).base64();
                         await writeToSafDir(seasonDirUri, thumbName, base64, 'image/jpeg', 'base64');
                     } catch (e) {
                         logger.warn('ImportExport', `Could not copy thumbnail ${thumbName} for "${showName}"`, e);
@@ -598,7 +597,7 @@ export async function exportToFilesystem(mediaSources: IMediaSource[]): Promise<
             // Copy provider poster to movie folder
             if (movie.poster?.startsWith('file://')) {
                 try {
-                    const base64 = await LegacyFileSystem.readAsStringAsync(movie.poster, { encoding: 'base64' });
+                    const base64 = await new File(movie.poster).base64();
                     await writeToSafDir(movieFolderUri, 'poster.jpg', base64, 'image/jpeg', 'base64');
                 } catch (e) {
                     logger.warn('ImportExport', `Could not copy poster for movie "${movie.title}"`, e);

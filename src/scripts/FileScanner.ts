@@ -1,6 +1,5 @@
 import { Directory, File, Paths } from "expo-file-system";
 import { StorageAccessFramework } from "expo-file-system/legacy";
-import * as LegacyFileSystem from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
@@ -907,7 +906,7 @@ export class FileScanner {
                     const folderKey = relativePathParts[0];
                     if (!streamState.smbData.has(folderKey)) {
                         try {
-                            const jsonText = await LegacyFileSystem.readAsStringAsync(resolvedUri);
+                            const jsonText = await StorageAccessFramework.readAsStringAsync(resolvedUri);
                             const parsed = JSON.parse(jsonText) as SmbJsonData;
                             if (parsed && typeof parsed === 'object' && parsed.smbVersion === 1) {
                                 streamState.smbData.set(folderKey, parsed);
