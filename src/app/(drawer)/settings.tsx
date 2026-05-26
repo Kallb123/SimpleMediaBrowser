@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -80,6 +80,7 @@ export default function SettingsPrompt() {
   const [rescanOnStartup, setLocalRescanOnStartup] = useState(true);
   const [fetchEpisodeNames, setLocalFetchEpisodeNames] = useState(true);
   const [fetchEpisodeThumbnails, setLocalFetchEpisodeThumbnails] = useState(true);
+  const [appColorScheme, setLocalAppColorScheme] = useState('system' as appColorSchemes);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
@@ -100,11 +101,13 @@ export default function SettingsPrompt() {
   const settingsRescanOnStartup = useSelector(selectRescanOnStartup);
   const settingsFetchEpisodeNames = useSelector(selectFetchEpisodeNames);
   const settingsFetchEpisodeThumbnails = useSelector(selectFetchEpisodeThumbnails);
+  const settingsAppColorScheme = useSelector(selectAppColorScheme);
 
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
   const viewOrientationRef = useRef(null);
   const defaultPageRef = useRef(null);
+  const appColorSchemeRef = useRef(null);
 
   const dataSourceOptions = [
     {id: 'tmdb', label: 'TMDB'},
@@ -133,6 +136,12 @@ export default function SettingsPrompt() {
     {id: 'home', label: 'Home (TV + Movies)'},
     {id: 'tv', label: 'TV'},
     {id: 'movies', label: 'Movies'},
+  ];
+
+  const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
+    {id: 'system', label: 'System'},
+    {id: 'light', label: 'Light'},
+    {id: 'dark', label: 'Dark'},
   ];
 
   const safeDecodeUri = useCallback((uri: string) => {
@@ -217,11 +226,17 @@ export default function SettingsPrompt() {
       setLocalRescanOnStartup(settingsRescanOnStartup);
       setLocalFetchEpisodeNames(settingsFetchEpisodeNames);
       setLocalFetchEpisodeThumbnails(settingsFetchEpisodeThumbnails);
+
+      const appColorSchemeIndex = appColorSchemeOptions.findIndex(o => o.id === settingsAppColorScheme);
+      if (appColorSchemeRef.current && appColorSchemeIndex >= 0) {
+        (appColorSchemeRef.current as any).selectIndex(appColorSchemeIndex);
+      }
+      setLocalAppColorScheme(settingsAppColorScheme);
       setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme]);
 
   const save = () => {
     try {
@@ -296,6 +311,11 @@ export default function SettingsPrompt() {
       if (fetchEpisodeThumbnails !== settingsFetchEpisodeThumbnails) {
         logger.log('Settings', `Persisting: fetchEpisodeThumbnails changed ${settingsFetchEpisodeThumbnails} → ${fetchEpisodeThumbnails}`);
         dispatch(setFetchEpisodeThumbnails(fetchEpisodeThumbnails));
+        changeCount++;
+      }
+      if (appColorScheme && appColorScheme !== settingsAppColorScheme) {
+        logger.log('Settings', `Persisting: appColorScheme changed ${settingsAppColorScheme} → ${appColorScheme}`);
+        dispatch(setAppColorScheme(appColorScheme));
         changeCount++;
       }
       logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
@@ -708,6 +728,37 @@ export default function SettingsPrompt() {
       {/* Appearance */}
       <View style={styles.section}>
         <ThemedText type="subtitle" style={styles.sectionTitle}>Appearance and Layout</ThemedText>
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Color scheme:</ThemedText>
+          <SelectDropdown
+            ref={appColorSchemeRef}
+            data={appColorSchemeOptions}
+            defaultValue={appColorSchemeOptions.find(o => o.id === settingsAppColorScheme)}
+            onSelect={(selectedItem) => {
+              try {
+                setLocalAppColorScheme(selectedItem.id as appColorSchemes);
+              } catch (e) {
+                logger.error('Settings', 'Exception while selecting color scheme', e as Error);
+              }
+            }}
+            renderButton={(selectedItem, isOpened) => (
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                  {(selectedItem && selectedItem.label) || 'Please select...'}
+                </Text>
+                <Text>{isOpened ? "🔼" : "🔽"}</Text>
+              </View>
+            )}
+            renderItem={(item, index, isSelected) => (
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+          />
+        </View>
+
         <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>TV Show Navigation Structure:</ThemedText>
           <SelectDropdown
