@@ -18,6 +18,8 @@ import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { exportJson, importJson, exportToFilesystem } from '@/scripts/ImportExportService';
+import type { JsonExportOptions } from '@/scripts/ImportExportService';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 const DESTRUCTIVE_COLOR = '#E55';
@@ -84,6 +86,10 @@ export default function SettingsPrompt() {
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
+  const [importExportExpanded, setImportExportExpanded] = useState(false);
+  const [exportIncludeSettings, setExportIncludeSettings] = useState(true);
+  const [exportIncludeOverrides, setExportIncludeOverrides] = useState(true);
+  const [exportIncludeMatches, setExportIncludeMatches] = useState(true);
 
   const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
@@ -500,7 +506,61 @@ export default function SettingsPrompt() {
       ],
     );
   }, [dispatch]);
-  
+
+  const handleExportJson = useCallback(async () => {
+    try {
+      const options: JsonExportOptions = {
+        includeSettings: exportIncludeSettings,
+        includeOverrides: exportIncludeOverrides,
+        includeMatches: exportIncludeMatches,
+      };
+      if (!options.includeSettings && !options.includeOverrides && !options.includeMatches) {
+        Alert.alert('Nothing to export', 'Please select at least one section to include in the export.');
+        return;
+      }
+      await exportJson(options);
+      Alert.alert('Export complete', 'Settings and metadata have been saved to the selected folder.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('denied') && !msg.includes('selected')) {
+        Alert.alert('Export failed', msg);
+      }
+      logger.warn('Settings', 'JSON export failed', e);
+    }
+  }, [exportIncludeSettings, exportIncludeOverrides, exportIncludeMatches]);
+
+  const handleImportJson = useCallback(async () => {
+    try {
+      const { applied } = await importJson();
+      Alert.alert('Import complete', `Applied: ${applied.join(', ')}.`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('No file') && !msg.includes('cancel')) {
+        Alert.alert('Import failed', msg);
+      }
+      logger.warn('Settings', 'JSON import failed', e);
+    }
+  }, []);
+
+  const handleExportToFilesystem = useCallback(async () => {
+    try {
+      const { showsExported, moviesExported, failed, skipped } = await exportToFilesystem(safeMediaSources);
+      const parts: string[] = [];
+      if (showsExported > 0) parts.push(`${showsExported} show(s)`);
+      if (moviesExported > 0) parts.push(`${moviesExported} movie(s)`);
+      const summary = parts.length > 0 ? parts.join(' and ') : 'nothing';
+      const extra: string[] = [];
+      if (skipped > 0) extra.push(`${skipped} skipped (no data or no subfolder)`);
+      if (failed > 0) extra.push(`${failed} failed`);
+      const detail = extra.length > 0 ? `\n\n${extra.join(', ')}.` : '';
+      Alert.alert('Export complete', `Exported metadata alongside ${summary}.${detail}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Export failed', msg);
+      logger.warn('Settings', 'Filesystem export failed', e);
+    }
+  }, [safeMediaSources]);
+
   return (
     <SettingsErrorBoundary>
     <ScrollView style={containerStyle} contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]} keyboardShouldPersistTaps="handled">
@@ -871,6 +931,50 @@ export default function SettingsPrompt() {
         </View>
       </View>
 
+      {/* Import / Export */}
+      <View style={styles.section}>
+        <TouchableOpacity
+          style={styles.troubleshootingHeader}
+          onPress={() => setImportExportExpanded(prev => !prev)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: importExportExpanded }}
+        >
+          <ThemedText type="subtitle" style={styles.sectionTitle}>Import / Export</ThemedText>
+          <ThemedText style={styles.troubleshootingChevron}>{importExportExpanded ? '▲' : '▼'}</ThemedText>
+        </TouchableOpacity>
+        {importExportExpanded && (
+          <View style={styles.troubleshootingContent}>
+            {/* JSON export options */}
+            <ThemedText style={styles.importExportLabel}>Export to JSON file — select what to include:</ThemedText>
+            <View style={styles.row}>
+              <Switch value={exportIncludeSettings} onValueChange={setExportIncludeSettings} />
+              <ThemedText style={styles.rowLabel}>Settings (API keys, view options)</ThemedText>
+            </View>
+            <View style={styles.row}>
+              <Switch value={exportIncludeOverrides} onValueChange={setExportIncludeOverrides} />
+              <ThemedText style={styles.rowLabel}>Overrides (custom titles, sort titles)</ThemedText>
+            </View>
+            <View style={styles.row}>
+              <Switch value={exportIncludeMatches} onValueChange={setExportIncludeMatches} />
+              <ThemedText style={styles.rowLabel}>Matches (TMDB/TVDB IDs, episode names)</ThemedText>
+            </View>
+            <TouchableOpacity style={styles.importExportButton} onPress={handleExportJson}>
+              <ThemedText style={styles.importExportButtonText}>📤 Export app state to JSON</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Saves selected data to a JSON file in a folder you choose.</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.importExportButton} onPress={handleImportJson}>
+              <ThemedText style={styles.importExportButtonText}>📥 Import app state from JSON</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Restores settings, overrides and/or matches from a previously exported JSON file.</ThemedText>
+            </TouchableOpacity>
+            {/* Filesystem export */}
+            <TouchableOpacity style={styles.importExportButton} onPress={handleExportToFilesystem}>
+              <ThemedText style={styles.importExportButtonText}>💾 Export metadata to media folders</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Writes smb.json, poster.jpg and episode thumbnails alongside your media files. These are picked up automatically during the next library scan.</ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
       {/* Troubleshooting */}
       <View style={styles.section}>
         <TouchableOpacity
@@ -1084,6 +1188,23 @@ const styles = StyleSheet.create({
   troubleshootingButtonDesc: {
     fontSize: 12,
     opacity: 0.55,
+    fontStyle: 'italic',
+  },
+  importExportButton: {
+    gap: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: DIVIDER_COLOR,
+  },
+  importExportButtonText: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  importExportLabel: {
+    fontSize: 13,
+    opacity: 0.7,
     fontStyle: 'italic',
   },
 });
