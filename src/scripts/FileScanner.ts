@@ -9,6 +9,8 @@ import type { IMediaLibrary, IMediaShow, IMediaSeason, MergeEpisodePayload, data
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
+import type { SmbJsonData } from "@/scripts/SmbTypes";
+import { SMB_THUMB_REGEX, smbThumbFilename } from "@/scripts/SmbTypes";
 
 export interface IMediaObject {
     ids: {
@@ -164,6 +166,12 @@ const MAX_SCAN_DEPTH = 8;
 /** Local directory where poster images are persisted for offline use. */
 const POSTERS_DIR = new Directory(Paths.document, 'smb_posters');
 
+/**
+ * Local directory where episode thumbnail images found alongside media files
+ * (smb_thumb_*.jpg) are copied during scanning for offline access.
+ */
+const SMB_THUMBNAILS_FS_DIR = new Directory(Paths.document, 'smb_thumbnails_fs');
+
 // ─── Concurrency helpers ─────────────────────────────────────────────────────
 
 /**
@@ -296,6 +304,17 @@ interface StreamState {
      * Stamped on new show entries so MetadataService can pick the correct provider.
      */
     metadataSource?: dataSources;
+    /**
+     * smb.json data keyed by raw folder name (relativePathParts[0]).
+     * Populated when an smb.json file is found during recursive collection.
+     */
+    smbData: Map<string, SmbJsonData>;
+    /**
+     * Episode thumbnails exported by ImportExportService and found during
+     * scanning.  Keyed by folderKey → `${seasonKey}:${episodeKey}` →
+     * local file:// URI inside smb_thumbnails_fs/.
+     */
+    smbThumbnails: Map<string, Map<string, string>>;
 }
 
 /**
@@ -434,6 +453,8 @@ export class FileScanner {
         // Collect TV files from all TV sources and merge into one library
         const allTvFiles: IScannedFile[] = [];
         const tvPosterMap = new Map<string, string>();
+        const allTvSmbData = new Map<string, SmbJsonData>();
+        const allTvSmbThumbnails = new Map<string, Map<string, string>>();
         for (const src of tvSources) {
             if (this._cancelRequested) {
                 logger.log('FileScanner', 'Scan cancelled before TV source');
@@ -441,10 +462,12 @@ export class FileScanner {
             }
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning TV source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv', src.metadataSource);
+            const { files, posterMap, smbData, smbThumbnails } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv', src.metadataSource);
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
             allTvFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!tvPosterMap.has(key)) tvPosterMap.set(key, uri); });
+            smbData.forEach((v, k) => { if (!allTvSmbData.has(k)) allTvSmbData.set(k, v); });
+            smbThumbnails.forEach((v, k) => { if (!allTvSmbThumbnails.has(k)) allTvSmbThumbnails.set(k, v); });
         }
 
         if (this._cancelRequested) {
@@ -452,12 +475,13 @@ export class FileScanner {
             return;
         }
 
-        const mergedLibrary = this.buildLibrary(allTvFiles, tvPosterMap);
+        const mergedLibrary = this.buildLibrary(allTvFiles, tvPosterMap, allTvSmbData, allTvSmbThumbnails);
         logger.log('FileScanner', `Built TV library with ${Object.keys(mergedLibrary).length} show(s) from ${allTvFiles.length} file(s)`);
 
         // Collect movie files from all movie sources
         const allMovieFiles: IScannedFile[] = [];
         const moviePosterMap = new Map<string, string>();
+        const allMovieSmbData = new Map<string, SmbJsonData>();
         for (const src of movieSources) {
             if (this._cancelRequested) {
                 logger.log('FileScanner', 'Scan cancelled before movie source');
@@ -465,10 +489,11 @@ export class FileScanner {
             }
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning Movie source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie', src.metadataSource);
+            const { files, posterMap, smbData } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie', src.metadataSource);
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
             allMovieFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!moviePosterMap.has(key)) moviePosterMap.set(key, uri); });
+            smbData.forEach((v, k) => { if (!allMovieSmbData.has(k)) allMovieSmbData.set(k, v); });
         }
 
         if (this._cancelRequested) {
@@ -476,7 +501,7 @@ export class FileScanner {
             return;
         }
 
-        const movies = this.buildMovieList(allMovieFiles, moviePosterMap);
+        const movies = this.buildMovieList(allMovieFiles, moviePosterMap, allMovieSmbData);
         logger.log('FileScanner', `Built movie list with ${movies.length} movie(s)`);
 
         // Build a combined scan list for diagnostic purposes
@@ -710,14 +735,14 @@ export class FileScanner {
         logger.log('FileScanner', `scanFolder filtered to ${filtered.length} item(s)`);
 
         // Recursively collect all media files and build the library
-        const { files: allMediaFiles, posterMap } = await this.collectAllMediaFiles(
+        const { files: allMediaFiles, posterMap, smbData, smbThumbnails } = await this.collectAllMediaFiles(
             directory,
             new Semaphore(MAX_CONCURRENT_DIR_READS),
             { filesFound: 0, currentSourceIndex: 1, sourcesTotal: 1 },
             'tv',
             undefined,
         );
-        const library = this.buildLibrary(allMediaFiles, posterMap);
+        const library = this.buildLibrary(allMediaFiles, posterMap, smbData, smbThumbnails);
         store.dispatch(setMediaLibrary(library));
 
         return filtered;
@@ -731,7 +756,7 @@ export class FileScanner {
         progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
         sourceType: 'tv' | 'movie' = 'tv',
         metadataSource?: dataSources,
-    ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string> }> {
+    ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string>; smbData: Map<string, SmbJsonData>; smbThumbnails: Map<string, Map<string, string>> }> {
         const result: IScannedFile[] = [];
         const posterMap = new Map<string, string>();
         const streamState: StreamState = {
@@ -740,6 +765,8 @@ export class FileScanner {
             movieBatch: [],
             moviePathsByFolder: new Map(),
             metadataSource,
+            smbData: new Map(),
+            smbThumbnails: new Map(),
         };
         await this.recursiveCollect(rootDirectory, [], result, posterMap, 0, dirSemaphore, progress, streamState);
         // Stamp the source-level metadata provider on every collected file so
@@ -749,7 +776,7 @@ export class FileScanner {
         }
         // Flush any remaining buffered items that did not reach the batch threshold
         this.flushStreamBatch(streamState, posterMap);
-        return { files: result, posterMap };
+        return { files: result, posterMap, smbData: streamState.smbData, smbThumbnails: streamState.smbThumbnails };
     }
 
     private async recursiveCollect(
@@ -874,6 +901,57 @@ export class FileScanner {
                 // Skip files with known non-directory extensions (subtitles,
                 // images, metadata side-cars, etc.) to avoid the overhead of
                 // an always-failing readDirectoryAsync call for each one.
+                // We check for smb.json and smb_thumb_* before this guard.
+                if (relativePathParts.length >= 1 && ext === '.json' && filename.toLowerCase() === 'smb.json') {
+                    const folderKey = relativePathParts[0];
+                    if (!streamState.smbData.has(folderKey)) {
+                        try {
+                            const jsonText = await StorageAccessFramework.readAsStringAsync(resolvedUri);
+                            const parsed = JSON.parse(jsonText) as SmbJsonData;
+                            if (parsed && typeof parsed === 'object' && parsed.smbVersion === 1) {
+                                streamState.smbData.set(folderKey, parsed);
+                                logger.log('FileScanner', `Found smb.json for "${folderKey}"`);
+                            }
+                        } catch (e) {
+                            logger.warn('FileScanner', `Failed to read smb.json in "${folderKey}"`, e);
+                        }
+                    }
+                    continue;
+                }
+
+                // Detect smb_thumb_s01e01.jpg files written by the filesystem export.
+                if (relativePathParts.length >= 1 && ext === '.jpg') {
+                    const thumbMatch = filename.toLowerCase().match(SMB_THUMB_REGEX);
+                    if (thumbMatch) {
+                        const folderKey = relativePathParts[0];
+                        const seasonKey = thumbMatch[1];
+                        const episodeKey = thumbMatch[2];
+                        const thumbMapKey = `${seasonKey}:${episodeKey}`;
+                        if (!streamState.smbThumbnails.has(folderKey)) {
+                            streamState.smbThumbnails.set(folderKey, new Map());
+                        }
+                        const folderThumbMap = streamState.smbThumbnails.get(folderKey)!;
+                        if (!folderThumbMap.has(thumbMapKey)) {
+                            try {
+                                // Always attempt idempotent creation to avoid a race between
+                                // an exists-check and a create in concurrent async scan loops.
+                                SMB_THUMBNAILS_FS_DIR.create({ intermediates: true, idempotent: true });
+                                const safeName = `${folderKey.replace(/[^a-zA-Z0-9_-]/g, '_')}_${seasonKey}${episodeKey}.jpg`;
+                                const localFile = new File(SMB_THUMBNAILS_FS_DIR, safeName);
+                                if (!localFile.exists) {
+                                    const base64 = await StorageAccessFramework.readAsStringAsync(resolvedUri, { encoding: 'base64' });
+                                    localFile.write(base64, { encoding: 'base64' });
+                                }
+                                folderThumbMap.set(thumbMapKey, localFile.uri);
+                                logger.log('FileScanner', `Found smb_thumb for "${folderKey}" ${seasonKey}${episodeKey}`);
+                            } catch (e) {
+                                logger.warn('FileScanner', `Failed to copy smb_thumb for "${folderKey}" ${seasonKey}${episodeKey}`, e);
+                            }
+                        }
+                        continue;
+                    }
+                }
+
                 if (NON_DIRECTORY_EXTENSIONS.has(ext)) continue;
 
                 // Collect as a potential subdirectory to recurse into in parallel.
@@ -1027,7 +1105,7 @@ export class FileScanner {
 
     // ─── Movie list building ─────────────────────────────────────────────────
 
-    buildMovieList(files: IScannedFile[], posterMap?: Map<string, string>): IMediaObject[] {
+    buildMovieList(files: IScannedFile[], posterMap?: Map<string, string>, smbData?: Map<string, SmbJsonData>): IMediaObject[] {
         return files.map((file) => {
             // Destructure out relativePathParts so it is not included in the stored IMediaObject
             const { relativePathParts, ...mediaObj } = file;
@@ -1044,13 +1122,25 @@ export class FileScanner {
             const poster = relativePathParts.length > 0
                 ? (posterMap?.get(relativePathParts[0]) ?? '')
                 : '';
-            return { ...mediaObj, title, poster };
+            const movie: IMediaObject = { ...mediaObj, title, poster };
+            // Apply IDs from smb.json when present and not already set.
+            // These IDs will be overwritten by API-fetched IDs on the next enrichment.
+            if (smbData && relativePathParts.length > 0) {
+                const folderKey = relativePathParts[0];
+                const smb = smbData.get(folderKey);
+                if (smb && smb.type === 'movie' && smb.ids) {
+                    if (!movie.ids.tmdb && smb.ids.tmdb) movie.ids.tmdb = smb.ids.tmdb;
+                    if (!movie.ids.tvdb && smb.ids.tvdb) movie.ids.tvdb = smb.ids.tvdb;
+                    if (!movie.ids.imdb && smb.ids.imdb) movie.ids.imdb = smb.ids.imdb;
+                }
+            }
+            return movie;
         });
     }
 
     // ─── Library building ────────────────────────────────────────────────────
 
-    buildLibrary(files: IScannedFile[], posterMap?: Map<string, string>): IMediaLibrary {
+    buildLibrary(files: IScannedFile[], posterMap?: Map<string, string>, smbData?: Map<string, SmbJsonData>, smbThumbnails?: Map<string, Map<string, string>>): IMediaLibrary {
         const library: IMediaLibrary = {};
 
         for (const file of files) {
@@ -1074,6 +1164,19 @@ export class FileScanner {
                     rawNames: rawShowName !== showName ? [rawShowName] : [],
                     metadataSource: file.metadataSource,
                 };
+                // Apply IDs and metadata source from smb.json when present.
+                // These are overwritten by API-fetched IDs during enrichment.
+                if (smbData && folderKey) {
+                    const smb = smbData.get(folderKey);
+                    if (smb && smb.type === 'show' && smb.ids) {
+                        if (!library[showName].ids.tmdb && smb.ids.tmdb) library[showName].ids.tmdb = smb.ids.tmdb;
+                        if (!library[showName].ids.tvdb && smb.ids.tvdb) library[showName].ids.tvdb = smb.ids.tvdb;
+                        if (!library[showName].ids.imdb && smb.ids.imdb) library[showName].ids.imdb = smb.ids.imdb;
+                        if (!library[showName].metadataSource && smb.metadataSource) {
+                            library[showName].metadataSource = smb.metadataSource;
+                        }
+                    }
+                }
             } else {
                 // Back-fill year if not yet recorded for this canonical show
                 if (showYear > 0 && !library[showName].year) {
@@ -1103,12 +1206,28 @@ export class FileScanner {
                 // Strip the internal relativePathParts field before storing
                 const { relativePathParts, ...mediaObj } = file;
                 const resolvedTitle = title || file.filename;
-                library[showName].seasons[seasonKey].episodes[episodeKey] = {
+                const ep: IMediaObject = {
                     ...mediaObj,
                     title: resolvedTitle,
                     scannedTitle: resolvedTitle,
                     episodeNumber: episode,
                 };
+                // Apply episode title from smb.json when not derived from filename.
+                const folderKey = relativePathParts[0];
+                if (smbData && folderKey) {
+                    const smb = smbData.get(folderKey);
+                    if (smb && smb.type === 'show' && smb.seasons) {
+                        const smbEp = smb.seasons[seasonKey]?.episodes[episodeKey];
+                        if (smbEp?.title && !ep.tmdbTitle) ep.tmdbTitle = smbEp.title;
+                    }
+                }
+                // Apply episode thumbnail from smb_thumb files found during scan.
+                if (smbThumbnails && folderKey) {
+                    const thumbMap = smbThumbnails.get(folderKey);
+                    const thumbUri = thumbMap?.get(`${seasonKey}:${episodeKey}`);
+                    if (thumbUri && !ep.tmdbThumbnail) ep.tmdbThumbnail = thumbUri;
+                }
+                library[showName].seasons[seasonKey].episodes[episodeKey] = ep;
             }
         }
 
