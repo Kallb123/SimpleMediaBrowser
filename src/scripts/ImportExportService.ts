@@ -8,8 +8,7 @@
  *                          alongside the media files in the configured SAF directories.
  */
 
-import { File } from 'expo-file-system';
-import { StorageAccessFramework } from 'expo-file-system/legacy';
+import { File, Directory } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { store } from '@/store/store';
 import {
@@ -44,20 +43,6 @@ import { smbThumbFilename } from '@/scripts/SmbTypes';
 // Re-export smb.json types so callers can import them from this module.
 export type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData };
 export type { SmbJsonEpisodeData, SmbJsonSeasonData } from '@/scripts/SmbTypes';
-
-/**
- * StorageAccessFramework.writeAsStringAsync accepts an encoding option at runtime,
- * but the TypeScript declaration omits it. This typed wrapper encapsulates the cast
- * in one place so callers stay clean.
- */
-async function writeSafBase64(uri: string, base64Content: string): Promise<void> {
-    const writeFn = StorageAccessFramework.writeAsStringAsync as (
-        uri: string,
-        content: string,
-        options: { encoding: string },
-    ) => Promise<void>;
-    await writeFn(uri, base64Content, { encoding: 'base64' });
-}
 
 // ─── SAF helpers ─────────────────────────────────────────────────────────────
 
@@ -144,27 +129,18 @@ async function writeToSafDir(
     mimeType: string,
     encoding: 'utf8' | 'base64' = 'utf8',
 ): Promise<void> {
-    let fileUri: string | null = null;
+    const dir = new Directory(dirUri);
+    let file: File;
     try {
-        const entries = await StorageAccessFramework.readDirectoryAsync(dirUri);
-        for (const uri of entries) {
-            const decoded = decodeURIComponent(uri);
-            if (decoded.endsWith('/' + filename)) {
-                fileUri = uri;
-                break;
-            }
-        }
+        const existing = dir.list().find(
+            (item): item is File => item instanceof File && decodeURIComponent(item.uri).endsWith('/' + filename)
+        );
+        file = existing ?? dir.createFile(filename, mimeType);
     } catch {
         // Proceed to create; listing may fail on some SAF providers.
+        file = dir.createFile(filename, mimeType);
     }
-    if (!fileUri) {
-        fileUri = await StorageAccessFramework.createFileAsync(dirUri, filename, mimeType);
-    }
-    if (encoding === 'base64') {
-        await writeSafBase64(fileUri, content);
-    } else {
-        await StorageAccessFramework.writeAsStringAsync(fileUri, content);
-    }
+    file.write(content, { encoding });
 }
 
 /**
@@ -295,14 +271,16 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
         payload.matches = { shows, movies: movieMatches };
     }
 
-    const dirResult = await StorageAccessFramework.requestDirectoryPermissionsAsync();
-    if (!dirResult.granted) {
+    let dir: Directory;
+    try {
+        dir = await Directory.pickDirectoryAsync();
+    } catch {
         throw new Error('Directory permission denied');
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const filename = `smb_export_${timestamp}.json`;
-    await writeToSafDir(dirResult.directoryUri, filename, JSON.stringify(payload, null, 2), 'application/json');
+    await writeToSafDir(dir.uri, filename, JSON.stringify(payload, null, 2), 'application/json');
 
     logger.log('ImportExport', `Exported JSON state to ${filename}`);
 }
