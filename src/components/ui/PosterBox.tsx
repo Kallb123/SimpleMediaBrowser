@@ -56,11 +56,10 @@ export function PosterBox({
       ? { uri: item.thumbnailUri }
       : item.thumbnailUri; // VideoThumbnail (SharedRef) passed directly to expo-image
 
-  // In poster layout, thumbnails are 16:9 and would be cropped by "cover"; use "contain" instead.
+  // In poster layout, video thumbnails are wider than portrait posters and should use a 16:9 box.
   const isShowingVideoThumbnail = !hasPoster || isRevealed;
 
-  // TMDB episode stills are landscape (16:9); use the appropriate height for the box.
-  const effectiveThumbnailHeight = item.posterIsLandscape
+  const effectiveThumbnailHeight = item.posterIsLandscape || isShowingVideoThumbnail
     ? Math.round(cardWidth * 9 / 16)
     : thumbnailHeight;
 
