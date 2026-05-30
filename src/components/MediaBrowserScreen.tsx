@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { useThemeColor } from '@/hooks/useThemeColor';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
@@ -477,6 +478,14 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const { editMode, selectedItems, toggleItemSelection, clearItemSelection } = useEditMode();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const backButtonBorderColor = useThemeColor(
+    { light: 'rgba(0,0,0,0.12)', dark: 'rgba(255,255,255,0.18)' },
+    'text',
+  );
+  const backButtonBackgroundColor = useThemeColor(
+    { light: 'rgba(0,0,0,0.04)', dark: 'rgba(255,255,255,0.08)' },
+    'background',
+  );
 
   const isScanning = useSelector(selectIsScanning);
   const scanProgress = useSelector(selectScanProgress);
@@ -721,7 +730,13 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
           {/* Breadcrumb / back navigation – only shown when inside a subfolder */}
           {navStack.length > 0 && (
             <ThemedView style={styles.breadcrumbRow}>
-              <TouchableOpacity onPress={navigateBack} style={styles.backButton}>
+              <TouchableOpacity
+                onPress={navigateBack}
+                style={[styles.backButton, {
+                  borderColor: backButtonBorderColor,
+                  backgroundColor: backButtonBackgroundColor,
+                }]}
+              >
                 <ThemedText style={styles.backButtonArrow}>‹</ThemedText>
                 <ThemedText style={styles.backButtonText}>Back</ThemedText>
               </TouchableOpacity>
@@ -966,9 +981,15 @@ const styles = StyleSheet.create({
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    gap: 2,
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    minHeight: 42,
   },
   backButtonArrow: {
     fontSize: 28,
