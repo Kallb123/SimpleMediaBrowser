@@ -585,7 +585,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   // In list mode use a single column; in poster mode use the scale-mapped column count.
   const numColumns = isListMode ? 1 : mapScaleToColumns(viewScale, minColumns, maxColumns);
   const cardWidth = (screenWidth - CARD_GAP * (numColumns + 1)) / numColumns;
-  // Poster card uses a 2:3 portrait ratio for the thumbnail image.
+  // Poster card uses a 2:3 portrait ratio for posters; video thumbnails may render wider
+  // later in PosterBox if they are being shown instead of a portrait poster.
   const thumbnailHeight = Math.round(cardWidth * 3 / 2);
   // List mode row height scales with viewScale (lower scale = taller rows, matching poster behaviour).
   const listRowHeight = mapScaleToListRowHeight(viewScale);
