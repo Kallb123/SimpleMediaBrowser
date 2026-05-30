@@ -224,11 +224,14 @@ export const settingsSlice = createSlice({
       const show = state.mediaLibrary[action.payload.showName];
       if (show) {
         const source = action.payload.source ?? 'tmdb';
-        const id = action.payload.providerId ?? action.payload.tmdbId ?? '';
+        const rawId = action.payload.providerId ?? action.payload.tmdbId;
+        const id = rawId === undefined || rawId === '' ? null : rawId;
         if (source === 'tvdb') {
           show.ids.tvdb = id;
+          show.ids.tmdb = null;
         } else {
           show.ids.tmdb = id;
+          show.ids.tvdb = null;
         }
         if (action.payload.poster !== undefined) show.poster = action.payload.poster;
         if (action.payload.title) show.title = action.payload.title;
@@ -254,20 +257,30 @@ export const settingsSlice = createSlice({
       const movie = state.movies.find((m) => m.path === action.payload.path);
       if (movie) {
         const source = action.payload.source ?? 'tmdb';
-        const id = action.payload.providerId ?? action.payload.tmdbId ?? '';
+        const rawId = action.payload.providerId ?? action.payload.tmdbId;
+        const id = rawId === undefined || rawId === '' ? null : rawId;
         if (source === 'tvdb') {
           movie.ids.tvdb = id;
+          movie.ids.tmdb = null;
         } else {
           movie.ids.tmdb = id;
+          movie.ids.tvdb = null;
         }
         if (action.payload.poster !== undefined) movie.poster = action.payload.poster;
       }
     },
     setMediaOverride: (state, action: PayloadAction<{ key: string; override: IMediaOverride }>) => {
-      state.mediaOverrides[action.payload.key] = {
-        ...(state.mediaOverrides[action.payload.key] ?? {}),
+      const existingOverride = state.mediaOverrides[action.payload.key] ?? {};
+      const mergedOverride: IMediaOverride = {
+        ...existingOverride,
         ...action.payload.override,
       };
+      if ('tmdbId' in action.payload.override && action.payload.override.tmdbId !== undefined) {
+        mergedOverride.tvdbId = undefined;
+      } else if ('tvdbId' in action.payload.override && action.payload.override.tvdbId !== undefined) {
+        mergedOverride.tmdbId = undefined;
+      }
+      state.mediaOverrides[action.payload.key] = mergedOverride;
     },
     clearMediaOverride: (state, action: PayloadAction<string>) => {
       delete state.mediaOverrides[action.payload];
