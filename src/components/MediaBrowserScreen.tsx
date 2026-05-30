@@ -20,7 +20,7 @@ import { logger } from '@/scripts/Logger';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { PosterBox } from '@/components/ui/PosterBox';
 import { ListItem } from '@/components/ui/ListItem';
-import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, PORTRAIT_MIN_COLUMNS, mapScaleToColumns } from '@/utils/viewScale';
+import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, PORTRAIT_MIN_COLUMNS, VIEW_SCALE_MAX, VIEW_SCALE_MIN, mapScaleToColumns } from '@/utils/viewScale';
 
 // ── Navigation types ─────────────────────────────────────────────────────────
 
