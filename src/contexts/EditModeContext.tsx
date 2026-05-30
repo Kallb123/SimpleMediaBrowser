@@ -22,7 +22,7 @@ const EditModeContext = createContext<EditModeContextType>({
   setEditMode: () => {},
   drawerUnlocked: false,
   setDrawerUnlocked: () => {},
-  selectedItems: new Set(),
+  selectedItems: new Set<string>(),
   toggleItemSelection: () => {},
   clearItemSelection: () => {},
 });
