@@ -20,6 +20,7 @@ import { useEditMode } from '@/contexts/EditModeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { exportJson, importJson, exportToFilesystem } from '@/scripts/ImportExportService';
 import type { JsonExportOptions } from '@/scripts/ImportExportService';
+import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, PORTRAIT_MIN_COLUMNS, mapScaleToColumns } from '@/utils/viewScale';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 const DESTRUCTIVE_COLOR = '#E55';
@@ -892,12 +893,15 @@ export default function SettingsPrompt() {
             minimumValue={1}
             maximumValue={10}
             step={1}
-            value={11-settingsViewScale}
+            value={11-viewScale}
             onSlidingComplete={handleUIScaleChange}
             minimumTrackTintColor={colorScheme === 'dark' ? '#ECEDEE' : '#11181C'}
             maximumTrackTintColor={colorScheme === 'dark' ? '#687076' : '#9BA1A6'}
           />
         </View>
+        <ThemedText style={styles.emptyText}>
+          {`Poster view will show about ${mapScaleToColumns(viewScale, PORTRAIT_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS)} columns in portrait and ${mapScaleToColumns(viewScale, LANDSCAPE_MIN_COLUMNS, LANDSCAPE_MAX_COLUMNS)} columns in landscape.`}
+        </ThemedText>
 
         <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>Default page:</ThemedText>

@@ -20,6 +20,7 @@ import { logger } from '@/scripts/Logger';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { PosterBox } from '@/components/ui/PosterBox';
 import { ListItem } from '@/components/ui/ListItem';
+import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, PORTRAIT_MIN_COLUMNS, mapScaleToColumns } from '@/utils/viewScale';
 
 // ── Navigation types ─────────────────────────────────────────────────────────
 
@@ -411,30 +412,9 @@ const navStackKey = (stack: NavLevel[]) => stack.map((n) => n.label).join('/');
 
 const CARD_GAP = 8;
 /** Portrait mode: minimum number of grid columns shown at the lowest viewScale. */
-const PORTRAIT_MIN_COLUMNS = 2;
-/** Portrait mode: maximum number of grid columns shown at the highest viewScale. */
-const PORTRAIT_MAX_COLUMNS = 5;
-/** Landscape mode: minimum number of grid columns shown at the lowest viewScale. */
-const LANDSCAPE_MIN_COLUMNS = 4;
-/** Landscape mode: maximum number of grid columns shown at the highest viewScale. */
-const LANDSCAPE_MAX_COLUMNS = 10;
-/** Valid range for persisted UI scale setting. */
-const VIEW_SCALE_MIN = 1;
-const VIEW_SCALE_MAX = 10;
-/** List mode: row height at the highest viewScale (most items). */
 const LIST_ROW_MIN_HEIGHT = 40;
 /** List mode: row height at the lowest viewScale (fewest items). */
 const LIST_ROW_MAX_HEIGHT = 80;
-
-function mapScaleToColumns(
-  viewScale: number,
-  minColumns: number,
-  maxColumns: number,
-): number {
-  const clampedScale = Math.max(VIEW_SCALE_MIN, Math.min(VIEW_SCALE_MAX, viewScale));
-  const t = (clampedScale - VIEW_SCALE_MIN) / (VIEW_SCALE_MAX - VIEW_SCALE_MIN);
-  return Math.round(minColumns + t * (maxColumns - minColumns));
-}
 
 /**
  * Maps viewScale (1-10) to a row height in pixels for list mode.
