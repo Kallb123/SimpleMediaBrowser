@@ -323,21 +323,21 @@ export class MetadataService {
                 try {
                     const providerEpisodes = await provider.fetchSeasonEpisodes(showProviderId, season.seasonNumber);
 
-                    const episodeUpdates: { [episodeKey: string]: { tmdbTitle?: string; tmdbThumbnail?: string } } = {};
+                    const episodeUpdates: { [episodeKey: string]: { resolvedTitle?: string; resolvedThumbnail?: string } } = {};
 
                     for (const epData of providerEpisodes) {
                         const episodeKey = `e${String(epData.episodeNumber).padStart(2, '0')}`;
                         if (!season.episodes[episodeKey]) continue;
 
-                        const update: { tmdbTitle?: string; tmdbThumbnail?: string } = {};
+                        const update: { resolvedTitle?: string; resolvedThumbnail?: string } = {};
 
                         if (fetchNames && epData.title) {
-                            update.tmdbTitle = epData.title;
+                            update.resolvedTitle = epData.title;
                         }
 
                         if (fetchThumbnails && epData.stillUrl) {
                             // Reuse cached thumbnail if it already exists on disk.
-                            const existingThumbnail = season.episodes[episodeKey].tmdbThumbnail;
+                            const existingThumbnail = season.episodes[episodeKey].resolvedThumbnail;
                             let thumbnailUri: string | undefined;
                             if (existingThumbnail) {
                                 try {
@@ -356,7 +356,7 @@ export class MetadataService {
                                     logger.warn('MetadataService', `Failed to download thumbnail for "${showName}" S${season.seasonNumber}E${epData.episodeNumber}`, e);
                                 }
                             }
-                            if (thumbnailUri) update.tmdbThumbnail = thumbnailUri;
+                            if (thumbnailUri) update.resolvedThumbnail = thumbnailUri;
                         }
 
                         if (Object.keys(update).length > 0) {

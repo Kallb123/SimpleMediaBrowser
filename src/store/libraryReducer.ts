@@ -291,8 +291,8 @@ export const settingsSlice = createSlice({
       show.poster = '';
       for (const season of Object.values(show.seasons) as IMediaSeason[]) {
         for (const ep of Object.values(season.episodes) as IMediaObject[]) {
-          ep.tmdbTitle = undefined;
-          ep.tmdbThumbnail = undefined;
+          ep.resolvedTitle = undefined;
+          ep.resolvedThumbnail = undefined;
         }
       }
     },
@@ -306,8 +306,8 @@ export const settingsSlice = createSlice({
         for (const season of Object.values(show.seasons) as IMediaSeason[]) {
           const episode = Object.values(season.episodes as { [key: string]: IMediaObject }).find((ep) => ep.path === action.payload);
           if (episode) {
-            episode.tmdbTitle = undefined;
-            episode.tmdbThumbnail = undefined;
+            episode.resolvedTitle = undefined;
+            episode.resolvedThumbnail = undefined;
             return;
           }
         }
@@ -440,17 +440,17 @@ export const settingsSlice = createSlice({
       state.mediaOverrides = {};
     },
     /**
-     * Clears the TMDB-sourced episode metadata (tmdbTitle and tmdbThumbnail) for every
-     * episode in every season of the specified show.  Called before re-enriching a show
-     * after a manual TMDB rematch so stale data from the old match does not persist.
+     * Clears provider-sourced episode metadata (title and thumbnail) for every
+     * episode in every season of the specified show. Called before re-enriching a show
+     * after a manual rematch so stale data from the old match does not persist.
      */
     clearShowEpisodeMetadata: (state, action: PayloadAction<string>) => {
       const show = state.mediaLibrary[action.payload];
       if (!show) return;
       for (const season of Object.values(show.seasons) as IMediaSeason[]) {
         for (const ep of Object.values(season.episodes) as IMediaObject[]) {
-          ep.tmdbTitle = undefined;
-          ep.tmdbThumbnail = undefined;
+          ep.resolvedTitle = undefined;
+          ep.resolvedThumbnail = undefined;
         }
       }
     },
@@ -458,7 +458,7 @@ export const settingsSlice = createSlice({
      * Clears all cached poster data:
      * - Removes the `poster` field from every entry in `mediaOverrides`.
      * - Resets the poster URI to an empty string for every show and movie in the library.
-     * - Clears `tmdbThumbnail` from every episode (TMDB stills will be re-fetched on next scan).
+     * - Clears provider-sourced episode thumbnails from every episode.
      * Call this after deleting the smb_posters and smb_thumbnails_tmdb directories from disk.
      */
     clearPosterOverrides: (state) => {
@@ -469,7 +469,7 @@ export const settingsSlice = createSlice({
         show.poster = '';
         for (const season of Object.values(show.seasons) as IMediaSeason[]) {
           for (const ep of Object.values(season.episodes) as IMediaObject[]) {
-            ep.tmdbThumbnail = undefined;
+            ep.resolvedThumbnail = undefined;
           }
         }
       }
@@ -478,8 +478,8 @@ export const settingsSlice = createSlice({
       }
     },
     /**
-     * Batch-updates episode metadata (tmdbTitle and/or tmdbThumbnail) for all
-     * episodes in one season fetched from the TMDB season endpoint.
+     * Batch-updates episode metadata (title and/or thumbnail) for all
+     * episodes in one season fetched from the provider season endpoint.
      * This is dispatched once per season after a single API call, avoiding
      * the need for individual per-episode API calls.
      */
@@ -488,7 +488,7 @@ export const settingsSlice = createSlice({
       action: PayloadAction<{
         showName: string;
         seasonKey: string;
-        episodeUpdates: { [episodeKey: string]: { tmdbTitle?: string; tmdbThumbnail?: string } };
+        episodeUpdates: { [episodeKey: string]: { resolvedTitle?: string; resolvedThumbnail?: string } };
       }>,
     ) => {
       const { showName, seasonKey, episodeUpdates } = action.payload;
@@ -497,23 +497,23 @@ export const settingsSlice = createSlice({
       for (const [epKey, update] of Object.entries(episodeUpdates)) {
         const ep = season.episodes[epKey];
         if (!ep) continue;
-        if (update.tmdbTitle !== undefined) ep.tmdbTitle = update.tmdbTitle;
-        if (update.tmdbThumbnail !== undefined) ep.tmdbThumbnail = update.tmdbThumbnail;
+        if (update.resolvedTitle !== undefined) ep.resolvedTitle = update.resolvedTitle;
+        if (update.resolvedThumbnail !== undefined) ep.resolvedThumbnail = update.resolvedThumbnail;
       }
     },
     /**
      * Clears all cached TVDB poster and episode thumbnail data:
      * - Resets the poster URI to empty for shows whose metadata source is 'tvdb'.
-     * - Clears tmdbThumbnail from every episode for TVDB-sourced shows.
+     * - Clears provider-sourced episode thumbnails from every episode for TVDB-sourced shows.
      * Call this after deleting the smb_posters_tvdb and smb_thumbnails_tvdb directories from disk.
      */
     clearTvdbPosterOverrides: (state) => {
       for (const show of Object.values(state.mediaLibrary) as IMediaShow[]) {
         if (show.metadataSource === 'tvdb') {
           show.poster = '';
-          for (const season of Object.values(show.seasons)) {
-            for (const ep of Object.values(season.episodes)) {
-              ep.tmdbThumbnail = undefined;
+          for (const season of Object.values(show.seasons) as IMediaSeason[]) {
+            for (const ep of Object.values(season.episodes) as IMediaObject[]) {
+              ep.resolvedThumbnail = undefined;
             }
           }
         }

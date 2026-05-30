@@ -245,8 +245,8 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
                 const episodes: Record<string, { episodeTitle?: string }> = {};
                 let hasEpData = false;
                 for (const [epKey, ep] of Object.entries(season.episodes)) {
-                    if (ep.tmdbTitle) {
-                        episodes[epKey] = { episodeTitle: ep.tmdbTitle };
+                    if (ep.resolvedTitle) {
+                        episodes[epKey] = { episodeTitle: ep.resolvedTitle };
                         hasEpData = true;
                     }
                 }
@@ -365,9 +365,9 @@ export async function importJson(): Promise<{ applied: string[] }> {
                 }
                 for (const [seasonKey, season] of Object.entries(match.seasons ?? {})) {
                     if (!season?.episodes) continue;
-                    const episodeUpdates: Record<string, { tmdbTitle?: string }> = {};
+                    const episodeUpdates: Record<string, { resolvedTitle?: string }> = {};
                     for (const [epKey, ep] of Object.entries(season.episodes)) {
-                        if (ep?.episodeTitle) episodeUpdates[epKey] = { tmdbTitle: ep.episodeTitle };
+                        if (ep?.episodeTitle) episodeUpdates[epKey] = { resolvedTitle: ep.episodeTitle };
                     }
                     if (Object.keys(episodeUpdates).length > 0) {
                         store.dispatch(updateSeasonEpisodeMetadata({ showName, seasonKey, episodeUpdates }));
@@ -474,8 +474,8 @@ export async function exportToFilesystem(mediaSources: IMediaSource[]): Promise<
                 const episodes: Record<string, { title?: string; thumbnailFile?: string }> = {};
                 let hasEpData = false;
                 for (const [epKey, ep] of Object.entries(season.episodes)) {
-                    const epTitle = ep.tmdbTitle;
-                    const thumbName = ep.tmdbThumbnail ? smbThumbFilename(seasonKey, epKey) : undefined;
+                    const epTitle = ep.resolvedTitle;
+                    const thumbName = ep.resolvedThumbnail ? smbThumbFilename(seasonKey, epKey) : undefined;
                     if (epTitle || thumbName) {
                         episodes[epKey] = {};
                         if (epTitle) episodes[epKey].title = epTitle;
@@ -512,12 +512,12 @@ export async function exportToFilesystem(mediaSources: IMediaSource[]): Promise<
             // Copy episode thumbnails to their season directories
             for (const [seasonKey, season] of Object.entries(show.seasons)) {
                 for (const [epKey, ep] of Object.entries(season.episodes)) {
-                    if (!ep.tmdbThumbnail?.startsWith('file://')) continue;
+                    if (!ep.resolvedThumbnail?.startsWith('file://')) continue;
                     const seasonDirUri = getSafParentDirUri(ep.path);
                     if (!seasonDirUri) continue;
                     const thumbName = smbThumbFilename(seasonKey, epKey);
                     try {
-                        const base64 = await new File(ep.tmdbThumbnail).base64();
+                        const base64 = await new File(ep.resolvedThumbnail).base64();
                         await writeToSafDir(seasonDirUri, thumbName, base64, 'image/jpeg', 'base64');
                     } catch (e) {
                         logger.warn('ImportExport', `Could not copy thumbnail ${thumbName} for "${showName}"`, e);

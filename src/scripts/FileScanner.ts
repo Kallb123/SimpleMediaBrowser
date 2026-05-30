@@ -22,25 +22,25 @@ export interface IMediaObject {
     /**
      * Display title for the episode or movie.  For TV episodes this is the
      * scanned title derived from the local filename (see also `scannedTitle`).
-     * Prefer `tmdbTitle` for display when it is available.
+     * Prefer `resolvedTitle` for display when it is available.
      */
     title: string;
     /**
      * The title as parsed from the local filename or folder structure during
-     * scanning.  Stored separately so the TMDB-sourced title (`tmdbTitle`) can
+     * scanning.  Stored separately so the provider-sourced title (`resolvedTitle`) can
      * be displayed without losing the original locally-derived value.
      */
     scannedTitle?: string;
     /**
-     * Episode name fetched from TMDB (TV episodes only).
+     * Episode name fetched from a metadata provider.
      * When present, the UI prefers this over the locally-scanned title.
      */
-    tmdbTitle?: string;
+    resolvedTitle?: string;
     /**
-     * Local file URI for the episode still image downloaded from TMDB.
-     * TV episodes only.  Used as the episode "poster" in the grid/list UI.
+     * Local file URI for the episode still image downloaded from a metadata provider.
+     * Used as the episode "poster" in the grid/list UI.
      */
-    tmdbThumbnail?: string;
+    resolvedThumbnail?: string;
     filename: string
     path: string
     parsedPath: string
@@ -550,11 +550,11 @@ export class FileScanner {
                     for (const [epKey, ep] of Object.entries(season.episodes)) {
                         const prevEp = prevSeason.episodes[epKey];
                         if (!prevEp) continue;
-                        if (prevEp.tmdbTitle) ep.tmdbTitle = prevEp.tmdbTitle;
-                        if (prevEp.tmdbThumbnail) {
+                        if (prevEp.resolvedTitle) ep.resolvedTitle = prevEp.resolvedTitle;
+                        if (prevEp.resolvedThumbnail) {
                             try {
-                                if (new File(prevEp.tmdbThumbnail).exists) {
-                                    ep.tmdbThumbnail = prevEp.tmdbThumbnail;
+                                if (new File(prevEp.resolvedThumbnail).exists) {
+                                    ep.resolvedThumbnail = prevEp.resolvedThumbnail;
                                 }
                             } catch {
                                 // ignore; thumbnail will be re-fetched during enrichment
@@ -1218,14 +1218,14 @@ export class FileScanner {
                     const smb = smbData.get(folderKey);
                     if (smb && smb.type === 'show' && smb.seasons) {
                         const smbEp = smb.seasons[seasonKey]?.episodes[episodeKey];
-                        if (smbEp?.title && !ep.tmdbTitle) ep.tmdbTitle = smbEp.title;
+                        if (smbEp?.title && !ep.resolvedTitle) ep.resolvedTitle = smbEp.title;
                     }
                 }
                 // Apply episode thumbnail from smb_thumb files found during scan.
                 if (smbThumbnails && folderKey) {
                     const thumbMap = smbThumbnails.get(folderKey);
                     const thumbUri = thumbMap?.get(`${seasonKey}:${episodeKey}`);
-                    if (thumbUri && !ep.tmdbThumbnail) ep.tmdbThumbnail = thumbUri;
+                    if (thumbUri && !ep.resolvedThumbnail) ep.resolvedThumbnail = thumbUri;
                 }
                 library[showName].seasons[seasonKey].episodes[episodeKey] = ep;
             }

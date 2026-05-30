@@ -89,12 +89,12 @@ function compareEpisodes(
   const aSortTitle = aO?.sortTitle;
   const bSortTitle = bO?.sortTitle;
   if (aSortTitle || bSortTitle) {
-    const aKey = aSortTitle ?? aO?.title ?? a.tmdbTitle ?? a.title ?? a.filename;
-    const bKey = bSortTitle ?? bO?.title ?? b.tmdbTitle ?? b.title ?? b.filename;
+    const aKey = aSortTitle ?? aO?.title ?? a.resolvedTitle ?? a.title ?? a.filename;
+    const bKey = bSortTitle ?? bO?.title ?? b.resolvedTitle ?? b.title ?? b.filename;
     return aKey.localeCompare(bKey, undefined, NATURAL_SORT_OPTS);
   }
   if (a.episodeNumber !== b.episodeNumber) return a.episodeNumber - b.episodeNumber;
-  return (a.tmdbTitle ?? a.title ?? a.filename).localeCompare(b.tmdbTitle ?? b.title ?? b.filename, undefined, NATURAL_SORT_OPTS);
+  return (a.resolvedTitle ?? a.title ?? a.filename).localeCompare(b.resolvedTitle ?? b.title ?? b.filename, undefined, NATURAL_SORT_OPTS);
 }
 
 /** Locale-compare options that produce natural (numeric-aware) sort order. */
@@ -103,8 +103,8 @@ const NATURAL_SORT_OPTS: Intl.CollatorOptions = { numeric: true, sensitivity: 'b
 /** Returns the effective display label for an episode, applying overrides to the title portion. */
 function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }, prefix: string): string {
   const override = overrides[`episode:${ep.parsedPath}`];
-  // Priority: user override > TMDB title > scanned (local) title
-  const title = override?.title ?? ep.tmdbTitle ?? ep.title;
+  // Priority: user override > provider-resolved title > scanned (local) title
+  const title = override?.title ?? ep.resolvedTitle ?? ep.title;
   if (prefix) {
     return title ? `${prefix} - ${title}` : prefix;
   }
@@ -116,14 +116,14 @@ function movieDisplayLabel(movie: IMediaObject, overrides: { [key: string]: IMed
   return overrides[`movie:${movie.parsedPath}`]?.title ?? movie.title ?? movie.filename;
 }
 
-/** Returns the effective poster URI for an episode: user override > TMDB still > none. */
+/** Returns the effective poster URI for an episode: user override > provider-resolved still > none. */
 function getEpisodePosterUri(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }): string | undefined {
-  return overrides[`episode:${ep.parsedPath}`]?.poster || ep.tmdbThumbnail || undefined;
+  return overrides[`episode:${ep.parsedPath}`]?.poster || ep.resolvedThumbnail || undefined;
 }
 
-/** Returns true when the episode poster is a landscape TMDB still (no user portrait override set). */
+/** Returns true when the episode poster is a landscape provider still (no user portrait override set). */
 function getEpisodePosterIsLandscape(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }): boolean {
-  return !overrides[`episode:${ep.parsedPath}`]?.poster && !!ep.tmdbThumbnail;
+  return !overrides[`episode:${ep.parsedPath}`]?.poster && !!ep.resolvedThumbnail;
 }
 
 function buildDisplayItems(
@@ -155,7 +155,7 @@ function buildDisplayItems(
             items.push({
               kind: 'file',
               label: episodeDisplayLabel(ep, overrides, displayPrefix),
-              sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.tmdbTitle || ep.title || ep.filename,
+              sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.resolvedTitle || ep.title || ep.filename,
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
               posterUri: getEpisodePosterUri(ep, overrides),
@@ -688,7 +688,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       }
       for (const season of Object.values(show?.seasons ?? {})) {
         for (const ep of Object.values(season.episodes)) {
-          deleteLocalFile(ep.tmdbThumbnail);
+          deleteLocalFile(ep.resolvedThumbnail);
         }
       }
       dispatch(clearShowMetadata(showName));
@@ -706,8 +706,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       const episode = Object.values(state.libraryReducer.mediaLibrary).flatMap((show) =>
         Object.values(show.seasons).flatMap((season) => Object.values(season.episodes)),
       ).find((ep) => ep.path === episodePath);
-      if (episode?.tmdbThumbnail) {
-        deleteLocalFile(episode.tmdbThumbnail);
+      if (episode?.resolvedThumbnail) {
+        deleteLocalFile(episode.resolvedThumbnail);
       }
       dispatch(clearEpisodeMetadata(episodePath));
     }
