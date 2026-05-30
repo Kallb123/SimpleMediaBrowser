@@ -1,16 +1,19 @@
-import { BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { File } from 'expo-file-system';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
-import { setMediaOverride } from '@/store/libraryReducer';
+import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride } from '@/store/libraryReducer';
 import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
+import { MetadataService } from '@/scripts/MetadataService';
+import { store } from '@/store/store';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary } from '@/store/libraryReducer';
@@ -635,12 +638,120 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   // Derive the selected show names (without prefix) for the Merge action.
   const selectedShowKeys = useMemo(
-    () => Array.from(selectedItems).filter((k) => k.startsWith('show:')).map((k) => k.slice(5)),
+    () => (Array.from(selectedItems) as string[]).filter((k) => k.startsWith('show:')).map((k) => k.slice(5)),
+    [selectedItems],
+  );
+
+  const selectedMoviePaths = useMemo(
+    () => (Array.from(selectedItems) as string[]).filter((k) => k.startsWith('movie:')).map((k) => k.slice(6)),
+    [selectedItems],
+  );
+
+  const selectedEpisodePaths = useMemo(
+    () => (Array.from(selectedItems) as string[]).filter((k) => k.startsWith('episode:')).map((k) => k.slice(8)),
     [selectedItems],
   );
 
   const shouldShowToolbar = editMode && selectedItems.size >= 1;
   const shouldShowMerge = selectedShowKeys.length >= 2;
+
+  const deleteLocalFile = useCallback((uri?: string) => {
+    if (!uri) return;
+    try {
+      const file = new File(uri);
+      if (file.exists) {
+        file.delete();
+      }
+    } catch {
+      // ignore failures; refresh can still proceed
+    }
+  }, []);
+
+  const performResetSelectedMetadata = useCallback(async () => {
+    const selectedKeys = Array.from(selectedItems);
+    if (selectedKeys.length === 0) return;
+
+    const selectedShows = selectedShowKeys;
+    const selectedMoviesForRefresh = selectedMoviePaths;
+    const selectedEpisodes = selectedEpisodePaths;
+
+    // Clear selected overrides first, then clear metadata state and downloaded files.
+    for (const key of selectedKeys) {
+      dispatch(clearMediaOverride(key));
+    }
+
+    const state = store.getState();
+    for (const showName of selectedShows) {
+      const show = state.libraryReducer.mediaLibrary[showName];
+      if (show?.poster) {
+        deleteLocalFile(show.poster);
+      }
+      for (const season of Object.values(show?.seasons ?? {})) {
+        for (const ep of Object.values(season.episodes)) {
+          deleteLocalFile(ep.tmdbThumbnail);
+        }
+      }
+      dispatch(clearShowMetadata(showName));
+    }
+
+    for (const moviePath of selectedMoviesForRefresh) {
+      const movie = state.libraryReducer.movies.find((m: IMediaObject) => m.path === moviePath);
+      if (movie?.poster) {
+        deleteLocalFile(movie.poster);
+      }
+      dispatch(clearMovieMetadata(moviePath));
+    }
+
+    for (const episodePath of selectedEpisodes) {
+      const episode = Object.values(state.libraryReducer.mediaLibrary).flatMap((show) =>
+        Object.values(show.seasons).flatMap((season) => Object.values(season.episodes)),
+      ).find((ep) => ep.path === episodePath);
+      if (episode?.tmdbThumbnail) {
+        deleteLocalFile(episode.tmdbThumbnail);
+      }
+      dispatch(clearEpisodeMetadata(episodePath));
+    }
+
+    clearItemSelection();
+
+    // Re-read the refreshed state for the selected subset before metadata enrichment.
+    const refreshedState = store.getState();
+    const librarySubset: IMediaLibrary = {};
+    for (const showName of selectedShows) {
+      const show = refreshedState.libraryReducer.mediaLibrary[showName];
+      if (show) librarySubset[showName] = show;
+    }
+    for (const episodePath of selectedEpisodes) {
+      const showEntry = Object.entries(refreshedState.libraryReducer.mediaLibrary).find(([, show]) =>
+        Object.values(show.seasons).some((season) =>
+          Object.values(season.episodes).some((ep) => ep.path === episodePath),
+        ),
+      );
+      if (showEntry) {
+        const [showName, show] = showEntry;
+        librarySubset[showName] = show;
+      }
+    }
+    const moviesSubset = refreshedState.libraryReducer.movies.filter((movie: IMediaObject) => selectedMoviesForRefresh.includes(movie.parsedPath));
+
+    try {
+      await MetadataService.getInstance().enrichAll(librarySubset, moviesSubset);
+    } catch (e) {
+      logger.warn('MediaBrowserScreen', 'Failed to refresh metadata for selected items', e);
+    }
+  }, [dispatch, selectedItems, selectedShowKeys, selectedMoviePaths, selectedEpisodePaths, clearItemSelection, deleteLocalFile]);
+
+  const handleResetMetadata = useCallback(() => {
+    if (selectedItems.size === 0) return;
+    Alert.alert(
+      'Reset metadata',
+      'This will remove overrides and downloaded metadata for the selected items, then refresh their metadata from the configured provider.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: () => { void performResetSelectedMetadata(); } },
+      ],
+    );
+  }, [selectedItems.size, performResetSelectedMetadata]);
 
   /**
    * Marks all currently selected items as hidden by setting `hidden: true` in their
@@ -837,6 +948,12 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 onPress={handleHide}
               >
                 <ThemedText style={styles.hideButtonText}>Hide</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.resetButton}
+                onPress={handleResetMetadata}
+              >
+                <ThemedText style={styles.resetButtonText}>Reset</ThemedText>
               </TouchableOpacity>
               {shouldShowMerge && (
                 <TouchableOpacity
@@ -1088,6 +1205,17 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   hideButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  resetButton: {
+    backgroundColor: '#6a5acd',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  resetButtonText: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 13,

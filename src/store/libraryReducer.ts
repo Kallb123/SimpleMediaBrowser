@@ -285,6 +285,34 @@ export const settingsSlice = createSlice({
     clearMediaOverride: (state, action: PayloadAction<string>) => {
       delete state.mediaOverrides[action.payload];
     },
+    clearShowMetadata: (state, action: PayloadAction<string>) => {
+      const show = state.mediaLibrary[action.payload];
+      if (!show) return;
+      show.poster = '';
+      for (const season of Object.values(show.seasons)) {
+        for (const ep of Object.values(season.episodes)) {
+          ep.tmdbTitle = undefined;
+          ep.tmdbThumbnail = undefined;
+        }
+      }
+    },
+    clearMovieMetadata: (state, action: PayloadAction<string>) => {
+      const movie = state.movies.find((m) => m.path === action.payload);
+      if (!movie) return;
+      movie.poster = '';
+    },
+    clearEpisodeMetadata: (state, action: PayloadAction<string>) => {
+      for (const show of Object.values(state.mediaLibrary)) {
+        for (const season of Object.values(show.seasons)) {
+          const episode = Object.values(season.episodes).find((ep) => ep.path === action.payload);
+          if (episode) {
+            episode.tmdbTitle = undefined;
+            episode.tmdbThumbnail = undefined;
+            return;
+          }
+        }
+      }
+    },
     /**
      * Clears both the TV library and the movie list.  Dispatched at the start
      * of each scan so stale data is not shown before streaming results arrive.
@@ -494,7 +522,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
