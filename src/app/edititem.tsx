@@ -88,7 +88,12 @@ async function downloadPoster(cacheKey: string, posterPath: string): Promise<str
  */
 async function downloadTvdbPoster(tvdbId: string, fullUrl: string): Promise<string> {
   ensurePostersTvdbDir();
-  const safeName = tvdbId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  // Include a URL-derived suffix so that different poster selections for the same
+  // TVDB ID are cached as separate files instead of colliding on the same key.
+  const urlKey = (fullUrl.split('/').pop() ?? 'poster')
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeName = `${tvdbId.replace(/[^a-zA-Z0-9_-]/g, '_')}_${urlKey}`;
   const localFile = new File(POSTERS_TVDB_DIR, `${safeName}.jpg`);
   if (localFile.exists) {
     return localFile.uri;
@@ -146,7 +151,7 @@ export default function EditItemScreen() {
       return mediaLibrary[showName]?.poster ?? '';
     } else if (itemType === 'movie') {
       const path = itemKey.replace(/^movie:/, '');
-      return movies.find((m) => m.path === path)?.poster ?? '';
+      return movies.find((m) => m.parsedPath === path)?.poster ?? '';
     }
     return '';
   })();
@@ -503,8 +508,8 @@ export default function EditItemScreen() {
   };
 
   /**
-   * Apply a TMDB match — updates the metadata ID and re-enriches episodes (for
-   * shows). Does NOT change the poster.
+   * Apply a TMDB match — updates the metadata ID, downloads the poster, and
+   * re-enriches episodes (for shows).
    */
   const handleApplyTmdbRematch = async (result: TmdbResult) => {
     setRematchApplying(true);
@@ -523,6 +528,17 @@ export default function EditItemScreen() {
         const movie = movies.find((m) => m.parsedPath === parsedPath);
         if (movie) {
           dispatch(updateMovieMetadata({ path: movie.path, providerId: tmdbId }));
+        }
+      }
+
+      // Download and apply the poster from the matched result.
+      if (result.poster_path) {
+        try {
+          const cacheKey = result.poster_path.replace(/^\//, '').replace(/\.[^.]+$/, '');
+          const localPosterUri = await downloadPoster(cacheKey, result.poster_path);
+          applyPoster(localPosterUri);
+        } catch (e) {
+          logger.warn('EditItem', 'Failed to download poster during TMDB rematch', e);
         }
       }
 
@@ -551,8 +567,8 @@ export default function EditItemScreen() {
   };
 
   /**
-   * Apply a TVDB match — updates the metadata ID and re-enriches episodes (for
-   * shows). Does NOT change the poster.
+   * Apply a TVDB match — updates the metadata ID, downloads the poster, and
+   * re-enriches episodes (for shows).
    */
   const handleApplyTvdbRematch = async (result: ProviderShowResult) => {
     setRematchApplying(true);
@@ -574,6 +590,16 @@ export default function EditItemScreen() {
         key: itemKey,
         override: { tvdbId, year, metadataSourceOverride: 'tvdb' },
       }));
+
+      // Download and apply the poster from the matched result.
+      if (result.posterUrl) {
+        try {
+          const localPosterUri = await downloadTvdbPoster(tvdbId, result.posterUrl);
+          applyPoster(localPosterUri);
+        } catch (e) {
+          logger.warn('EditItem', 'Failed to download poster during TVDB rematch', e);
+        }
+      }
 
       setTvdbRematchApplied(result.id);
       logger.log('EditItem', `TVDB rematch applied: ID ${tvdbId}, year=${year}`);
