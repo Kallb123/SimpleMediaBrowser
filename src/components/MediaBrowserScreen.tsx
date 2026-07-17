@@ -715,9 +715,15 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   /** Open the edit screen for a given display item. */
   const openEditScreen = useCallback((item: DisplayItem) => {
-    let itemType: 'show' | 'movie' | 'episode';
+    let itemType: 'show' | 'movie' | 'episode' | 'audiobook';
     let itemKey: string;
-    if (item.kind === 'folder' && item.mediaType === 'show') {
+    if (item.mediaType === 'audiobook') {
+      // Only root audiobook entries (key "audiobook:<folderKey>") are editable;
+      // individual part files inside a multi-part audiobook are not.
+      if (!item.key.startsWith('audiobook:')) return;
+      itemType = 'audiobook';
+      itemKey = item.key;
+    } else if (item.kind === 'folder' && item.mediaType === 'show') {
       itemType = 'show';
       itemKey = `show:${item.key}`;
     } else if (item.kind === 'file') {
@@ -970,7 +976,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const isEditable = (
                 item.mediaType === 'show' ||
                 item.mediaType === 'movie' ||
-                item.mediaType === 'episode'
+                item.mediaType === 'episode' ||
+                // Root audiobook entries are editable; part files (key = file path) are not.
+                (item.mediaType === 'audiobook' && item.key.startsWith('audiobook:'))
               );
               // Any editable item can be long-pressed in edit mode to select it.
               const overrideKey = getItemOverrideKey(item);

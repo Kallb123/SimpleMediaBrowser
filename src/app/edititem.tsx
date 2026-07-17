@@ -20,11 +20,14 @@ import {
   selectMediaLibrary,
   selectMediaOverrides,
   selectMovies,
+  selectAudiobooks,
   setMediaOverride,
   updateShowMetadata,
   updateMovieMetadata,
   updateShowPoster,
   setMoviePoster,
+  setAudiobookPoster,
+  updateAudiobookMetadata,
   type dataSources,
 } from '@/store/libraryReducer';
 import { selectTmdbApiKey, selectTvdbApiKey, selectTvdbPin, selectDataSource } from '@/store/settingsReducer';
@@ -33,6 +36,8 @@ import { File, Directory, Paths } from 'expo-file-system';
 import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
 import { MetadataService } from '@/scripts/MetadataService';
 import { TvdbProvider } from '@/scripts/providers/TvdbProvider';
+import { AudiobookProvider } from '@/scripts/providers/AudiobookProvider';
+import type { AudiobookResult } from '@/scripts/providers/AudiobookProvider';
 import type { ProviderShowResult } from '@/scripts/providers/IMetadataProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -124,7 +129,7 @@ async function copyPickedPoster(sourceUri: string, key: string): Promise<string>
 
 export default function EditItemScreen() {
   const { itemType, itemKey, currentTitle } = useLocalSearchParams<{
-    itemType: 'show' | 'movie' | 'episode';
+    itemType: 'show' | 'movie' | 'episode' | 'audiobook';
     itemKey: string;
     currentTitle: string;
   }>();
@@ -133,6 +138,7 @@ export default function EditItemScreen() {
   const mediaOverrides = useSelector(selectMediaOverrides);
   const mediaLibrary = useSelector(selectMediaLibrary);
   const movies = useSelector(selectMovies);
+  const audiobooks = useSelector(selectAudiobooks);
   const tmdbApiKey = useSelector(selectTmdbApiKey);
   const tvdbApiKey = useSelector(selectTvdbApiKey);
   const tvdbPin = useSelector(selectTvdbPin);
@@ -143,6 +149,12 @@ export default function EditItemScreen() {
 
   const [titleInput, setTitleInput] = useState(existingOverride.title ?? currentTitle ?? '');
   const [sortTitleInput, setSortTitleInput] = useState(existingOverride.sortTitle ?? '');
+  // Year override – used for audiobooks as an edition/narrator proxy (different
+  // narrator releases usually have different years and different cover art).
+  const [yearInput, setYearInput] = useState(existingOverride.year ? String(existingOverride.year) : '');
+
+  // Folder key for audiobook items (itemKey is "audiobook:<folderKey>").
+  const audiobookFolderKey = itemType === 'audiobook' ? itemKey.replace(/^audiobook:/, '') : '';
 
   // Current poster URI: prefer the override poster, then the library poster.
   const currentLibraryPoster = (() => {
@@ -152,6 +164,8 @@ export default function EditItemScreen() {
     } else if (itemType === 'movie') {
       const path = itemKey.replace(/^movie:/, '');
       return movies.find((m) => m.parsedPath === path)?.poster ?? '';
+    } else if (itemType === 'audiobook') {
+      return audiobooks.find((a) => a.folderKey === audiobookFolderKey)?.poster ?? '';
     }
     return '';
   })();
@@ -209,6 +223,14 @@ export default function EditItemScreen() {
   // Browse-locally state
   const [browsingLocally, setBrowsingLocally] = useState(false);
 
+  // --- Audiobook cover search state ---
+  const [audiobookQuery, setAudiobookQuery] = useState(existingOverride.title ?? currentTitle ?? '');
+  const [audiobookSearching, setAudiobookSearching] = useState(false);
+  const [audiobookError, setAudiobookError] = useState('');
+  const [audiobookResults, setAudiobookResults] = useState<AudiobookResult[]>([]);
+  const [audiobookApplying, setAudiobookApplying] = useState(false);
+  const [audiobookSelectedId, setAudiobookSelectedId] = useState<string | null>(null);
+
   // Current TMDB ID for this item (override takes priority, then library data).
   const currentTmdbId: string | null = (() => {
     if (existingOverride.tmdbId) return existingOverride.tmdbId;
@@ -251,13 +273,18 @@ export default function EditItemScreen() {
 
   const handleSave = () => {
     logger.log('EditItem', `Saving overrides for ${itemKey}: title="${titleInput}" sortTitle="${sortTitleInput}"`);
-    dispatch(setMediaOverride({
-      key: itemKey,
-      override: {
-        title: titleInput.trim() || undefined,
-        sortTitle: sortTitleInput.trim() || undefined,
-      },
-    }));
+    const override: { title?: string; sortTitle?: string; year?: number } = {
+      title: titleInput.trim() || undefined,
+      sortTitle: sortTitleInput.trim() || undefined,
+    };
+    // Year is editable for audiobooks only (edition/narrator proxy). Only set the
+    // key for audiobooks so a blank field never clears a year fetched during a
+    // TV/movie rematch.
+    if (itemType === 'audiobook') {
+      const parsedYear = parseInt(yearInput.trim(), 10);
+      override.year = Number.isFinite(parsedYear) && parsedYear > 0 ? parsedYear : undefined;
+    }
+    dispatch(setMediaOverride({ key: itemKey, override }));
     router.back();
   };
 
@@ -273,6 +300,8 @@ export default function EditItemScreen() {
       if (movie) {
         dispatch(setMoviePoster({ path: movie.path, poster: localUri }));
       }
+    } else if (itemType === 'audiobook') {
+      dispatch(setAudiobookPoster({ folderKey: audiobookFolderKey, poster: localUri }));
     }
     // Persist the poster URI in mediaOverrides so it survives rescans.
     dispatch(setMediaOverride({ key: itemKey, override: { poster: localUri } }));
@@ -652,8 +681,69 @@ export default function EditItemScreen() {
     Linking.openURL(url).catch((e) => logger.warn('EditItem', 'Failed to open browser', e));
   };
 
+  // ─── Audiobook cover search handlers ─────────────────────────────────────────
+
+  const handleAudiobookSearch = async () => {
+    if (!audiobookQuery.trim()) return;
+    setAudiobookSearching(true);
+    setAudiobookError('');
+    setAudiobookResults([]);
+    try {
+      const provider = new AudiobookProvider();
+      let results = await provider.searchAudiobook(audiobookQuery.trim());
+      // When a year is set, prioritise editions matching it. Different narrator
+      // releases usually differ by year, so this surfaces the right cover first.
+      const targetYear = parseInt(yearInput.trim(), 10);
+      if (Number.isFinite(targetYear) && targetYear > 0) {
+        results = [...results].sort((a, b) => {
+          const da = a.year > 0 ? Math.abs(a.year - targetYear) : 9999;
+          const db = b.year > 0 ? Math.abs(b.year - targetYear) : 9999;
+          return da - db;
+        });
+      }
+      logger.log('EditItem', `Audiobook cover search: query="${audiobookQuery.trim()}" results=${results.length}`);
+      setAudiobookResults(results);
+      if (results.length === 0) setAudiobookError('No results found.');
+    } catch (e) {
+      logger.error('EditItem', 'Audiobook cover search failed', e);
+      setAudiobookError('Search failed. Check your connection.');
+    } finally {
+      setAudiobookSearching(false);
+    }
+  };
+
+  const handleApplyAudiobookCover = async (result: AudiobookResult) => {
+    if (!result.coverUrl) return;
+    setAudiobookApplying(true);
+    try {
+      const provider = new AudiobookProvider();
+      const localUri = await provider.downloadCover(result.id, result.coverUrl);
+      applyPoster(localUri);
+      dispatch(updateAudiobookMetadata({
+        folderKey: audiobookFolderKey,
+        itunesId: result.id,
+        author: result.author,
+      }));
+      // Adopt the edition's year if the user hasn't set one, so it is saved as a
+      // proxy for this narrator/release.
+      if (result.year > 0 && !yearInput.trim()) {
+        setYearInput(String(result.year));
+      }
+      setAudiobookSelectedId(result.id);
+      logger.log('EditItem', `Audiobook cover applied from iTunes ID ${result.id}`);
+    } catch (e) {
+      logger.error('EditItem', 'Failed to apply audiobook cover', e);
+      setAudiobookError('Failed to apply cover.');
+    } finally {
+      setAudiobookApplying(false);
+    }
+  };
+
   const itemTypeLabel =
-    itemType === 'show' ? 'TV Show' : itemType === 'movie' ? 'Movie' : 'Episode';
+    itemType === 'show' ? 'TV Show'
+      : itemType === 'movie' ? 'Movie'
+        : itemType === 'audiobook' ? 'Audiobook'
+          : 'Episode';
 
   return (
     <ThemedView style={styles.screen}>
@@ -686,12 +776,30 @@ export default function EditItemScreen() {
               Used to order the item in the grid. Leave empty to sort by display title.
             </ThemedText>
           </View>
+          {itemType === 'audiobook' && (
+            <View style={styles.field}>
+              <ThemedText style={styles.label}>Year</ThemedText>
+              <ThemedTextInput
+                value={yearInput}
+                onChangeText={setYearInput}
+                placeholder="Release year (e.g. 2012)"
+                keyboardType="number-pad"
+              />
+              <ThemedText style={styles.hint}>
+                Different narrator editions usually have different release years and
+                cover art. Set the year to help the cover search surface the right
+                edition first.
+              </ThemedText>
+            </View>
+          )}
         </View>
 
-        {/* Poster override (shows and movies only) */}
-        {(itemType === 'show' || itemType === 'movie') && (
+        {/* Poster/cover override (shows, movies and audiobooks) */}
+        {(itemType === 'show' || itemType === 'movie' || itemType === 'audiobook') && (
           <View style={styles.section}>
-            <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>Poster Override</ThemedText>
+            <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+              {itemType === 'audiobook' ? 'Cover Override' : 'Poster Override'}
+            </ThemedText>
 
             {activePosterUri ? (
               <Image
@@ -701,8 +809,8 @@ export default function EditItemScreen() {
               />
             ) : (
               <View style={styles.posterPlaceholder}>
-                <ThemedText style={styles.placeholderIcon}>🎬</ThemedText>
-                <ThemedText style={styles.hint}>No poster set</ThemedText>
+                <ThemedText style={styles.placeholderIcon}>{itemType === 'audiobook' ? '🎧' : '🎬'}</ThemedText>
+                <ThemedText style={styles.hint}>{itemType === 'audiobook' ? 'No cover set' : 'No poster set'}</ThemedText>
               </View>
             )}
 
@@ -725,8 +833,93 @@ export default function EditItemScreen() {
               </TouchableOpacity>
             </View>
             <ThemedText style={styles.hint}>
-              Google Images opens your browser to search for a poster. Browse Locally lets you pick any image file from your device and copies it for offline use.
+              Google Images opens your browser to search for a {itemType === 'audiobook' ? 'cover' : 'poster'}. Browse Locally lets you pick any image file from your device and copies it for offline use.
             </ThemedText>
+          </View>
+        )}
+
+        {/* Cover Search (audiobooks) — iTunes Search API, no key required */}
+        {itemType === 'audiobook' && (
+          <View style={styles.section}>
+            <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+              Cover Search
+            </ThemedText>
+            <ThemedText style={styles.hint}>
+              Search Apple Books / iTunes for cover art. Each result is a separate
+              edition — different narrator releases appear as different results with
+              their own covers. Set the Year above to bring the closest edition to
+              the top. Tap a result to apply its cover.
+            </ThemedText>
+
+            <View style={styles.searchRow}>
+              <ThemedTextInput
+                value={audiobookQuery}
+                onChangeText={setAudiobookQuery}
+                placeholder="Search audiobooks…"
+                style={styles.searchInput}
+                onSubmitEditing={handleAudiobookSearch}
+                returnKeyType="search"
+              />
+              <TouchableOpacity
+                style={styles.searchButton}
+                onPress={handleAudiobookSearch}
+                disabled={audiobookSearching || audiobookApplying}
+              >
+                <ThemedText style={styles.searchButtonText}>Search</ThemedText>
+              </TouchableOpacity>
+            </View>
+
+            {audiobookSearching && <ActivityIndicator style={styles.spinner} />}
+            {audiobookError !== '' && (
+              <ThemedText style={styles.errorText}>{audiobookError}</ThemedText>
+            )}
+            {audiobookApplying && (
+              <ThemedText style={styles.hint}>Applying cover…</ThemedText>
+            )}
+
+            {audiobookResults.length > 0 && (
+              <FlatList
+                data={audiobookResults}
+                keyExtractor={(item) => item.id}
+                scrollEnabled={false}
+                renderItem={({ item }) => {
+                  const isChosen = audiobookSelectedId === item.id;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.resultRow, styles.rematchResultRow, isChosen && styles.resultRowSelected]}
+                      onPress={() => handleApplyAudiobookCover(item)}
+                      disabled={audiobookApplying || !item.coverUrl}
+                    >
+                      {item.coverThumbUrl ? (
+                        <Image
+                          source={{ uri: item.coverThumbUrl }}
+                          style={styles.resultPoster}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <View style={[styles.resultPoster, styles.resultPosterPlaceholder]}>
+                          <ThemedText style={styles.placeholderIcon}>🎧</ThemedText>
+                        </View>
+                      )}
+                      <View style={styles.resultInfo}>
+                        <ThemedText style={styles.resultTitle}>{item.title}</ThemedText>
+                        {item.author ? (
+                          <ThemedText style={styles.resultYear}>{item.author}</ThemedText>
+                        ) : null}
+                        {item.year > 0 && (
+                          <ThemedText style={styles.resultYear}>{item.year}</ThemedText>
+                        )}
+                        {isChosen ? (
+                          <ThemedText style={styles.selectedLabel}>✔ Cover applied</ThemedText>
+                        ) : (
+                          <ThemedText style={styles.rematchActionLabel}>Tap to apply cover</ThemedText>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
           </View>
         )}
 
