@@ -140,9 +140,10 @@ export default function SettingsPrompt() {
   ];
 
   const defaultPageOptions = [
-    {id: 'home', label: 'Home (TV + Movies)'},
+    {id: 'home', label: 'Home (All)'},
     {id: 'tv', label: 'TV'},
     {id: 'movies', label: 'Movies'},
+    {id: 'audiobooks', label: 'Audiobooks'},
   ];
 
   const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
@@ -170,7 +171,7 @@ export default function SettingsPrompt() {
       const sanitised = mediaSources.filter((source): source is IMediaSource => {
         if (!source || typeof source !== 'object') return false;
         const uriOk = typeof source.uri === 'string' && source.uri.length > 0;
-        const typeOk = source.contentType === 'tv' || source.contentType === 'movie';
+        const typeOk = source.contentType === 'tv' || source.contentType === 'movie' || source.contentType === 'audiobook';
         return uriOk && typeOk;
       });
 
@@ -591,10 +592,11 @@ export default function SettingsPrompt() {
           <View key={source.uri} style={styles.sourceRow}>
             <View style={styles.sourceInfo}>
               <ThemedText style={styles.sourceType}>
-                {`Library ${index + 1} · ${source.contentType === 'tv' ? '📺 TV' : '🎬 Movies'}`}
+                {`Library ${index + 1} · ${source.contentType === 'tv' ? '📺 TV' : source.contentType === 'audiobook' ? '🎧 Audiobooks' : '🎬 Movies'}`}
               </ThemedText>
               <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
             </View>
+            {source.contentType !== 'audiobook' && (
             <SelectDropdown
               data={metadataSourceOptions}
               defaultValue={metadataSourceOptions.find(o => o.id === (source.metadataSource ?? 'auto'))}
@@ -624,6 +626,7 @@ export default function SettingsPrompt() {
               showsVerticalScrollIndicator={false}
               dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
             />
+            )}
             <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>
               <ThemedText style={styles.deleteButtonText}>✕</ThemedText>
             </TouchableOpacity>

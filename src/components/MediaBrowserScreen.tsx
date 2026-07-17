@@ -11,12 +11,12 @@ import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
 import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride } from '@/store/libraryReducer';
-import { selectMediaLibrary, selectMovies, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
+import { selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { MetadataService } from '@/scripts/MetadataService';
 import { store } from '@/store/store';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
-import type { IMediaLibrary } from '@/store/libraryReducer';
+import type { IMediaLibrary, IMediaAudiobook } from '@/store/libraryReducer';
 import type { IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
@@ -31,13 +31,15 @@ type NavLevel = {
   label: string;
   showName?: string;
   seasonKey?: string;
+  /** Set when navigating into a multi-part audiobook to list its files. */
+  audiobookKey?: string;
 };
 
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; posterIsLandscape?: boolean; onPress: () => void; mediaType: 'show' | 'season'; count?: number }
-  | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; posterIsLandscape?: boolean; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' };
+  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; posterIsLandscape?: boolean; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number }
+  | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; posterIsLandscape?: boolean; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -126,7 +128,116 @@ function getEpisodePosterIsLandscape(ep: IMediaObject, overrides: { [key: string
   return !overrides[`episode:${ep.parsedPath}`]?.poster && !!ep.resolvedThumbnail;
 }
 
+/** Returns the effective display label for an audiobook, applying overrides if present. */
+function audiobookDisplayLabel(audiobook: IMediaAudiobook, overrides: { [key: string]: IMediaOverride }): string {
+  return overrides[`audiobook:${audiobook.folderKey}`]?.title ?? audiobook.title;
+}
+
+/** Returns the effective sort key for an audiobook (sortTitle > title override > title). */
+function audiobookSortKey(audiobook: IMediaAudiobook, overrides: { [key: string]: IMediaOverride }): string {
+  const o = overrides[`audiobook:${audiobook.folderKey}`];
+  return o?.sortTitle ?? o?.title ?? audiobook.title;
+}
+
+/**
+ * Builds a minimal {@link IMediaObject} for a single audiobook file so it can be
+ * opened via the shared file-open flow.
+ */
+function makeAudiobookFileObject(file: { path: string; parsedPath: string; filename: string }): IMediaObject {
+  return {
+    ids: { tvdb: null, imdb: null, tmdb: null },
+    episodeNumber: 0,
+    title: file.filename.replace(/\.[^.]+$/, ''),
+    filename: file.filename,
+    path: file.path,
+    parsedPath: file.parsedPath,
+    isDirectory: false,
+    poster: '',
+  };
+}
+
+/**
+ * Builds the root-level display items for audiobooks.  A multi-part audiobook is
+ * shown as a folder (navigating in lists its parts); a single-file audiobook is
+ * shown as a file that opens directly.
+ */
+function buildAudiobookRootItems(
+  audiobooks: IMediaAudiobook[],
+  overrides: { [key: string]: IMediaOverride },
+  navigateInto: (entry: NavLevel) => void,
+): DisplayItem[] {
+  return audiobooks
+    .filter((audiobook) => !overrides[`audiobook:${audiobook.folderKey}`]?.hidden)
+    .map((audiobook) => {
+      const label = audiobookDisplayLabel(audiobook, overrides);
+      const sortKey = audiobookSortKey(audiobook, overrides);
+      const posterUri = overrides[`audiobook:${audiobook.folderKey}`]?.poster || audiobook.poster || undefined;
+      if (audiobook.files.length > 1) {
+        return {
+          kind: 'folder' as const,
+          label,
+          sortKey,
+          key: `audiobook:${audiobook.folderKey}`,
+          posterUri,
+          onPress: () => navigateInto({ label, audiobookKey: audiobook.folderKey }),
+          mediaType: 'audiobook' as const,
+          count: audiobook.files.length,
+        };
+      }
+      return {
+        kind: 'file' as const,
+        label,
+        sortKey,
+        key: `audiobook:${audiobook.folderKey}`,
+        posterUri,
+        mediaObject: makeAudiobookFileObject(audiobook.files[0] ?? { path: audiobook.path, parsedPath: audiobook.path, filename: audiobook.title }),
+        mediaType: 'audiobook' as const,
+      };
+    });
+}
+
+/**
+ * Top-level builder that layers audiobook browsing on top of the TV/movie
+ * display logic.  Audiobook part-listing (when navigated into a multi-part
+ * audiobook) takes priority over the viewType-driven layout; at the root level,
+ * audiobook items are interleaved with the TV/movie items.
+ */
 function buildDisplayItems(
+  library: IMediaLibrary,
+  movies: IMediaObject[],
+  audiobooks: IMediaAudiobook[],
+  viewType: viewTypes,
+  navStack: NavLevel[],
+  overrides: { [key: string]: IMediaOverride },
+  navigateInto: (entry: NavLevel) => void,
+): DisplayItem[] {
+  // Inside a multi-part audiobook: list its files as openable items.
+  const audiobookLevel = navStack.find((n) => n.audiobookKey);
+  if (audiobookLevel) {
+    const audiobook = audiobooks.find((a) => a.folderKey === audiobookLevel.audiobookKey);
+    if (!audiobook) return [];
+    return audiobook.files.map((file) => ({
+      kind: 'file' as const,
+      label: file.filename.replace(/\.[^.]+$/, '').replace(/[\._]+/g, ' ').trim() || file.filename,
+      key: file.path,
+      mediaObject: makeAudiobookFileObject(file),
+      mediaType: 'audiobook' as const,
+    }));
+  }
+
+  const baseItems = buildBaseDisplayItems(library, movies, viewType, navStack, overrides, navigateInto);
+
+  // Audiobooks only appear at the root level (they have no viewType hierarchy).
+  if (navStack.length === 0 && audiobooks.length > 0) {
+    const audiobookItems = buildAudiobookRootItems(audiobooks, overrides, navigateInto);
+    return [...baseItems, ...audiobookItems].sort(
+      (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
+    );
+  }
+  return baseItems;
+}
+
+function buildBaseDisplayItems(
   library: IMediaLibrary,
   movies: IMediaObject[],
   viewType: viewTypes,
@@ -442,7 +553,7 @@ const PROGRESS_COLOR_THUMBNAILS = '#4CAF50';
 /** Progress bar colour used during the TMDB metadata enrichment phase. */
 const PROGRESS_COLOR_ENRICHING = '#2196F3';
 
-export type MediaFilter = 'all' | 'tv' | 'movies';
+export type MediaFilter = 'all' | 'tv' | 'movies' | 'audiobooks';
 
 interface MediaBrowserScreenProps {
   mediaFilter: MediaFilter;
@@ -455,6 +566,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const viewOrientation = useSelector(selectViewOrientation);
   const allLibrary = useSelector(selectMediaLibrary);
   const allMovies = useSelector(selectMovies);
+  const allAudiobooks = useSelector(selectAudiobooks);
   const mediaOverrides = useSelector(selectMediaOverrides);
 
   const dispatch = useDispatch();
@@ -482,8 +594,10 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   }, []);
 
   // Apply filter
-  const mediaLibrary: IMediaLibrary = mediaFilter === 'movies' ? {} : allLibrary;
-  const movies: IMediaObject[] = mediaFilter === 'tv' ? [] : allMovies;
+  const mediaLibrary: IMediaLibrary = (mediaFilter === 'movies' || mediaFilter === 'audiobooks') ? {} : allLibrary;
+  const movies: IMediaObject[] = (mediaFilter === 'tv' || mediaFilter === 'audiobooks') ? [] : allMovies;
+  // Audiobooks appear on the dedicated Audiobooks page and on Home (all).
+  const audiobooks: IMediaAudiobook[] = (mediaFilter === 'all' || mediaFilter === 'audiobooks') ? allAudiobooks : [];
 
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
@@ -575,21 +689,23 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const listRowHeight = mapScaleToListRowHeight(viewScale);
 
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto),
+    () => buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto),
     // scanProgress.thumbnailsDone is included so the memo re-runs each time a
     // thumbnail is added to thumbnailCache during the thumbnail generation phase.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mediaLibrary, movies, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone],
+    [mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone],
   );
 
-  const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0;
+  const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0;
 
   // Root label for breadcrumb
   const rootLabel = mediaFilter === 'tv'
     ? (editMode ? '✏️ TV' : 'TV')
     : mediaFilter === 'movies'
       ? (editMode ? '✏️ Movies' : 'Movies')
-      : (editMode ? '✏️ Home' : 'Home');
+      : mediaFilter === 'audiobooks'
+        ? (editMode ? '✏️ Audiobooks' : 'Audiobooks')
+        : (editMode ? '✏️ Home' : 'Home');
 
   // Build breadcrumb label: "Home / Show / Season 1"
   const breadcrumb = [
@@ -599,9 +715,15 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   /** Open the edit screen for a given display item. */
   const openEditScreen = useCallback((item: DisplayItem) => {
-    let itemType: 'show' | 'movie' | 'episode';
+    let itemType: 'show' | 'movie' | 'episode' | 'audiobook';
     let itemKey: string;
-    if (item.kind === 'folder' && item.mediaType === 'show') {
+    if (item.mediaType === 'audiobook') {
+      // Only root audiobook entries (key "audiobook:<folderKey>") are editable;
+      // individual part files inside a multi-part audiobook are not.
+      if (!item.key.startsWith('audiobook:')) return;
+      itemType = 'audiobook';
+      itemKey = item.key;
+    } else if (item.kind === 'folder' && item.mediaType === 'show') {
       itemType = 'show';
       itemKey = `show:${item.key}`;
     } else if (item.kind === 'file') {
@@ -630,7 +752,8 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     if (item.kind === 'folder' && item.mediaType === 'show') {
       return `show:${item.key}`;
     }
-    if (item.kind === 'file') {
+    // Audiobooks are not selectable in edit mode (no reset/hide/merge support yet).
+    if (item.kind === 'file' && item.mediaType !== 'audiobook') {
       return `${item.mediaType}:${item.mediaObject.parsedPath}`;
     }
     return null;
@@ -853,7 +976,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const isEditable = (
                 item.mediaType === 'show' ||
                 item.mediaType === 'movie' ||
-                item.mediaType === 'episode'
+                item.mediaType === 'episode' ||
+                // Root audiobook entries are editable; part files (key = file path) are not.
+                (item.mediaType === 'audiobook' && item.key.startsWith('audiobook:'))
               );
               // Any editable item can be long-pressed in edit mode to select it.
               const overrideKey = getItemOverrideKey(item);

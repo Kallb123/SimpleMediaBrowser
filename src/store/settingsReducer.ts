@@ -1,11 +1,11 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { RootState } from './store'
 
-export type contentTypes = 'tv' | 'movie';
+export type contentTypes = 'tv' | 'movie' | 'audiobook';
 export type dataSources = 'tmdb' | 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'list';
-export type defaultPages = 'home' | 'tv' | 'movies';
+export type defaultPages = 'home' | 'tv' | 'movies' | 'audiobooks';
 export type appColorSchemes = 'light' | 'dark' | 'system';
 
 export interface IMediaSource {

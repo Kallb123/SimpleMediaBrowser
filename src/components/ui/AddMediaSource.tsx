@@ -11,6 +11,7 @@ import { logger } from '@/scripts/Logger';
 const MEDIA_TYPE_OPTIONS: { id: contentTypes; label: string }[] = [
   { id: 'tv', label: '📺 TV' },
   { id: 'movie', label: '🎬 Movies' },
+  { id: 'audiobook', label: '🎧 Audiobooks' },
 ];
 
 /**

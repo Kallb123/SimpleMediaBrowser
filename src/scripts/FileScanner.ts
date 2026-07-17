@@ -4,8 +4,8 @@ import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
-import type { IMediaLibrary, IMediaShow, IMediaSeason, MergeEpisodePayload, dataSources } from "@/store/libraryReducer";
+import { setScanList, setMediaLibrary, setMovies, setAudiobooks, setIsScanning, setScanProgress, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
+import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, IAudiobookFile, MergeEpisodePayload, dataSources } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
@@ -148,6 +148,15 @@ const VIDEO_EXTENSIONS = new Set([
 ]);
 
 /**
+ * Audio file extensions recognised as audiobook content.  Used only when
+ * scanning sources whose contentType is 'audiobook'; for TV/movie sources these
+ * remain in {@link NON_DIRECTORY_EXTENSIONS} so they are skipped.
+ */
+const AUDIO_EXTENSIONS = new Set([
+    '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.ogg', '.oga', '.opus', '.wav', '.wma',
+]);
+
+/**
  * Extensions that are definitively non-directory file types.  Entries with
  * these extensions are skipped without attempting to recurse into them,
  * avoiding unnecessary readDirectoryAsync calls for subtitle/image/metadata
@@ -287,8 +296,8 @@ interface IScannedFile extends IMediaObject {
  * auxiliary tracking maps needed to dispatch progressive Redux updates.
  */
 interface StreamState {
-    /** Whether this source scans TV shows or movies. */
-    sourceType: 'tv' | 'movie';
+    /** Whether this source scans TV shows, movies, or audiobooks. */
+    sourceType: 'tv' | 'movie' | 'audiobook';
     /** Buffered TV episode payloads waiting to be dispatched as a batch. */
     episodeBatch: MergeEpisodePayload[];
     /** Buffered movie objects (with their folder key) waiting to be dispatched. */
@@ -504,10 +513,37 @@ export class FileScanner {
         const movies = this.buildMovieList(allMovieFiles, moviePosterMap, allMovieSmbData);
         logger.log('FileScanner', `Built movie list with ${movies.length} movie(s)`);
 
+        // Collect audiobook files from all audiobook sources
+        const audiobookSources = sources.filter((s) => s.contentType === 'audiobook');
+        logger.log('FileScanner', `Audiobook sources: ${audiobookSources.length}`);
+        const allAudiobookFiles: IScannedFile[] = [];
+        const audiobookPosterMap = new Map<string, string>();
+        for (const src of audiobookSources) {
+            if (this._cancelRequested) {
+                logger.log('FileScanner', 'Scan cancelled before audiobook source');
+                return;
+            }
+            collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
+            logger.log('FileScanner', `Scanning Audiobook source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
+            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'audiobook');
+            logger.log('FileScanner', `  Found ${files.length} audiobook file(s) in source`);
+            allAudiobookFiles.push(...files);
+            posterMap.forEach((uri, key) => { if (!audiobookPosterMap.has(key)) audiobookPosterMap.set(key, uri); });
+        }
+
+        if (this._cancelRequested) {
+            logger.log('FileScanner', 'Scan cancelled after audiobook collection');
+            return;
+        }
+
+        const audiobooks = this.buildAudiobookList(allAudiobookFiles, audiobookPosterMap);
+        logger.log('FileScanner', `Built audiobook list with ${audiobooks.length} audiobook(s)`);
+
         // Build a combined scan list for diagnostic purposes
         const allScanUris: string[] = [
             ...allTvFiles.map((f) => f.path),
             ...allMovieFiles.map((f) => f.path),
+            ...allAudiobookFiles.map((f) => f.path),
         ];
 
         // Carry over previously-fetched provider poster URIs and IDs into the freshly-built
@@ -588,12 +624,33 @@ export class FileScanner {
             }
         }
 
+        // Carry over previously-fetched cover art and provider IDs for audiobooks so the
+        // cover stays visible during the upcoming enrichment phase and matched IDs persist.
+        const prevAudiobooks = store.getState().libraryReducer.audiobooks ?? [];
+        const prevAudiobookByKey = new Map(prevAudiobooks.map((a) => [a.folderKey, a]));
+        for (const audiobook of audiobooks) {
+            const prev = prevAudiobookByKey.get(audiobook.folderKey);
+            if (!prev) continue;
+            try {
+                if (prev.ids.itunes) audiobook.ids.itunes = prev.ids.itunes;
+                if (prev.author && !audiobook.author) audiobook.author = prev.author;
+                // Only restore the cover URI when the new scan did not find a local cover
+                // image and the cached file still exists on disk.
+                if (prev.poster && !audiobook.poster && new File(prev.poster).exists) {
+                    audiobook.poster = prev.poster;
+                }
+            } catch {
+                // Ignore file-existence errors; the cover will be re-fetched during enrichment.
+            }
+        }
+
         // Dispatch a final "collecting done" progress update with the exact total before
         // dispatching the library data, so the UI can show the correct file count.
         store.dispatch(setScanProgress({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
         store.dispatch(setScanList(allScanUris));
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
+        store.dispatch(setAudiobooks(audiobooks));
         logger.log('FileScanner', `Scan complete. Total media files dispatched: ${allScanUris.length}`);
 
         // Enrich library with metadata posters if any provider key is configured.
@@ -602,12 +659,17 @@ export class FileScanner {
         const settings = store.getState().settingsReducer;
         const enablePosterFetching = settings.enablePosterFetching ?? true;
         const hasAnyProviderKey = !!(settings.tmdbApiKey || settings.tvdbApiKey);
-        if (!this._cancelRequested && enablePosterFetching && hasAnyProviderKey) {
-            logger.log('FileScanner', 'Provider API key found – starting metadata enrichment');
+        // Audiobook cover art comes from the keyless iTunes Search API, so enrichment
+        // is worth running whenever poster fetching is on and any audiobooks exist,
+        // even without a TMDB/TVDB key.
+        const hasAudiobooks = audiobooks.length > 0;
+        if (!this._cancelRequested && enablePosterFetching && (hasAnyProviderKey || hasAudiobooks)) {
+            logger.log('FileScanner', 'Starting metadata enrichment');
             const currentLibrary = store.getState().libraryReducer.mediaLibrary;
             const currentMovies = store.getState().libraryReducer.movies;
+            const currentAudiobooks = store.getState().libraryReducer.audiobooks;
             try {
-                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, () => this._cancelRequested);
+                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, currentAudiobooks, () => this._cancelRequested);
             } catch (e) {
                 logger.error('FileScanner', 'Metadata enrichment failed', e);
             }
@@ -754,7 +816,7 @@ export class FileScanner {
         rootDirectory: string,
         dirSemaphore: Semaphore,
         progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
-        sourceType: 'tv' | 'movie' = 'tv',
+        sourceType: 'tv' | 'movie' | 'audiobook' = 'tv',
         metadataSource?: dataSources,
     ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string>; smbData: Map<string, SmbJsonData>; smbThumbnails: Map<string, Map<string, string>> }> {
         const result: IScannedFile[] = [];
@@ -822,7 +884,7 @@ export class FileScanner {
 
             if (filename.charAt(0) === '.') continue; // Skip hidden entries
 
-            if (this.isMediaFile(filename)) {
+            if (this.isMediaFile(filename, streamState.sourceType)) {
                 const file: IScannedFile = {
                     ids: { tvdb: null, imdb: null, tmdb: null },
                     title: '',
@@ -865,7 +927,12 @@ export class FileScanner {
                 // and copy them to persistent local storage so they survive without the
                 // original storage permission.  Only record the first poster found per folder.
                 if (relativePathParts.length >= 1 && POSTER_FILENAMES.has(filename.toLowerCase())) {
-                    const folderKey = relativePathParts[0];
+                    // Audiobooks are grouped by their full relative folder path so that
+                    // nested "Author/Book" layouts don't collapse into one entry; TV and
+                    // movies key posters off the top-level folder.
+                    const folderKey = streamState.sourceType === 'audiobook'
+                        ? relativePathParts.join('/')
+                        : relativePathParts[0];
                     if (!posterMap.has(folderKey)) {
                         try {
                             const localUri = await copyLocalPoster(resolvedUri, folderKey);
@@ -875,6 +942,10 @@ export class FileScanner {
                                 // The library key uses the normalized show name, not the raw folder name.
                                 const normalizedKey = normalizeShowName(folderKey).name;
                                 store.dispatch(updateShowPoster({ showName: normalizedKey, poster: localUri }));
+                            } else if (streamState.sourceType === 'audiobook') {
+                                // Audiobooks are built and dispatched after collection, so the
+                                // poster is applied via buildAudiobookList from posterMap; no
+                                // live dispatch is required here.
                             } else {
                                 // Update any movies already flushed to Redux for this folder.
                                 for (const path of streamState.moviePathsByFolder.get(folderKey) ?? []) {
@@ -970,11 +1041,11 @@ export class FileScanner {
         );
     }
 
-    private isMediaFile(filename: string): boolean {
+    private isMediaFile(filename: string, sourceType: 'tv' | 'movie' | 'audiobook' = 'tv'): boolean {
         const dotIndex = filename.lastIndexOf('.');
         if (dotIndex === -1) return false;
         const ext = filename.substring(dotIndex).toLowerCase();
-        return VIDEO_EXTENSIONS.has(ext);
+        return sourceType === 'audiobook' ? AUDIO_EXTENSIONS.has(ext) : VIDEO_EXTENSIONS.has(ext);
     }
 
     /**
@@ -984,6 +1055,12 @@ export class FileScanner {
     private addToStreamBatch(file: IScannedFile, posterMap: Map<string, string>, streamState: StreamState): void {
         const { relativePathParts } = file;
         const folderKey = relativePathParts[0] ?? '';
+
+        // Audiobooks are grouped by folder and dispatched in one pass after
+        // collection (see buildAudiobookList), so nothing is streamed here.
+        if (streamState.sourceType === 'audiobook') {
+            return;
+        }
 
         if (streamState.sourceType === 'tv') {
             const metadata = this.parseMediaFile(file);
@@ -1136,6 +1213,70 @@ export class FileScanner {
             }
             return movie;
         });
+    }
+
+    // ─── Audiobook list building ─────────────────────────────────────────────
+
+    /**
+     * Groups scanned audio files into audiobooks.  All audio files that live in
+     * the same folder are treated as parts of a single audiobook (so a folder of
+     * "Part 1.mp3, Part 2.mp3" becomes one entry).  Audio files sitting directly
+     * in the source root (no enclosing folder) each become their own audiobook.
+     *
+     * The grouping key is the file's relative folder path; the display title is
+     * derived from the last folder segment (or the filename for root-level files).
+     */
+    buildAudiobookList(files: IScannedFile[], posterMap?: Map<string, string>): IMediaAudiobook[] {
+        // Preserve first-seen folder order for stable output.
+        const order: string[] = [];
+        const groups = new Map<string, IScannedFile[]>();
+
+        for (const file of files) {
+            const folderPath = file.relativePathParts.join('/');
+            // Root-level files (no folder) are grouped per-file using the filename base.
+            const filenameBase = file.filename.replace(/\.[^.]+$/, '');
+            const groupKey = folderPath !== '' ? folderPath : `::${filenameBase}`;
+            let group = groups.get(groupKey);
+            if (!group) {
+                group = [];
+                groups.set(groupKey, group);
+                order.push(groupKey);
+            }
+            group.push(file);
+        }
+
+        const audiobooks: IMediaAudiobook[] = [];
+        for (const groupKey of order) {
+            const group = groups.get(groupKey)!;
+            // Order the parts naturally so multi-part audiobooks play in sequence.
+            group.sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' }));
+
+            const first = group[0];
+            const folderPath = first.relativePathParts.join('/');
+            // Title: last folder segment for folder-grouped books, else the filename base.
+            const lastSegment = first.relativePathParts.length > 0
+                ? first.relativePathParts[first.relativePathParts.length - 1]
+                : first.filename.replace(/\.[^.]+$/, '');
+            const title = lastSegment.replace(/[\._]+/g, ' ').trim() || first.filename;
+
+            const audiobookFiles: IAudiobookFile[] = group.map((f) => ({
+                path: f.path,
+                parsedPath: f.parsedPath,
+                filename: f.filename,
+            }));
+
+            audiobooks.push({
+                ids: { itunes: null },
+                title,
+                scannedTitle: title,
+                folderKey: groupKey,
+                path: first.path,
+                files: audiobookFiles,
+                poster: (folderPath !== '' ? posterMap?.get(folderPath) : undefined) ?? '',
+            });
+        }
+
+        return audiobooks;
     }
 
     // ─── Library building ────────────────────────────────────────────────────
