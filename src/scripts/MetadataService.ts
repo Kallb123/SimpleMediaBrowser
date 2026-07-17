@@ -1,13 +1,14 @@
 import { File } from 'expo-file-system';
 import { store } from '@/store/store';
-import { updateShowMetadata, updateMovieMetadata, setScanProgress, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
-import type { IMediaLibrary, IMediaShow, IMediaSeason, dataSources } from '@/store/libraryReducer';
+import { updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, setScanProgress, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
+import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, dataSources } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { fuzzyKey } from '@/scripts/FileScanner';
 import { logger } from '@/scripts/Logger';
 import type { IMetadataProvider } from '@/scripts/providers/IMetadataProvider';
 import { TmdbProvider } from '@/scripts/providers/TmdbProvider';
 import { TvdbProvider } from '@/scripts/providers/TvdbProvider';
+import { AudiobookProvider } from '@/scripts/providers/AudiobookProvider';
 
 export class MetadataService {
     private static _instance: MetadataService | null = null;
@@ -19,8 +20,8 @@ export class MetadataService {
         return MetadataService._instance;
     }
 
-    /** Enrich both the TV library and the movie list concurrently. */
-    async enrichAll(library: IMediaLibrary, movies: IMediaObject[], isCancelled: () => boolean = () => false): Promise<void> {
+    /** Enrich the TV library, the movie list, and audiobooks concurrently. */
+    async enrichAll(library: IMediaLibrary, movies: IMediaObject[], audiobooks: IMediaAudiobook[] = [], isCancelled: () => boolean = () => false): Promise<void> {
         // Read credentials and global settings from the Redux store.
         const settings = store.getState().settingsReducer;
         const globalSource: dataSources = settings.dataSource ?? 'tmdb';
@@ -62,8 +63,11 @@ export class MetadataService {
         // Re-read the library after fuzzy dedup so we don't enrich entries that were merged.
         const dedupedLibrary = store.getState().libraryReducer.mediaLibrary;
 
+        // Audiobook cover art comes from the keyless iTunes Search API.
+        const audiobookProvider = new AudiobookProvider();
+
         const showNames = Object.keys(dedupedLibrary);
-        const metadataTotal = showNames.length + movies.length;
+        const metadataTotal = showNames.length + movies.length + audiobooks.length;
         // Announce the enriching phase so the UI can show a progress banner.
         store.dispatch(setScanProgress({
             phase: 'enriching',
@@ -95,6 +99,7 @@ export class MetadataService {
         const results = await Promise.allSettled([
             this.enrichLibrary(dedupedLibrary, resolveShowProvider, progress, dispatchProgress, isCancelled),
             this.enrichMovies(movies, resolveMovieProvider, progress, dispatchProgress, isCancelled),
+            this.enrichAudiobooks(audiobooks, audiobookProvider, progress, dispatchProgress, isCancelled),
         ]);
         for (const result of results) {
             if (result.status === 'rejected') {
@@ -284,6 +289,77 @@ export class MetadataService {
         }
 
         logger.log('MetadataService', 'enrichMovies complete');
+    }
+
+    /**
+     * Fetch cover art for every audiobook that does not yet have one cached.
+     * Uses the keyless iTunes Search API via {@link AudiobookProvider}.
+     */
+    async enrichAudiobooks(
+        audiobooks: IMediaAudiobook[],
+        provider: AudiobookProvider,
+        progress: { done: number },
+        dispatchProgress: () => void,
+        isCancelled: () => boolean = () => false,
+    ): Promise<void> {
+        logger.log('MetadataService', `enrichAudiobooks: ${audiobooks.length} audiobook(s) to process`);
+
+        const overrides = store.getState().libraryReducer.mediaOverrides;
+
+        for (const audiobook of audiobooks) {
+            if (isCancelled()) {
+                logger.log('MetadataService', 'enrichAudiobooks: cancelled');
+                break;
+            }
+            const searchTitle = audiobook.title || audiobook.scannedTitle || '';
+            try {
+                // Honour a user-set cover override.
+                const overrideCover = overrides[`audiobook:${audiobook.folderKey}`]?.poster;
+                if (overrideCover) {
+                    if (new File(overrideCover).exists) {
+                        store.dispatch(updateAudiobookMetadata({ folderKey: audiobook.folderKey, poster: overrideCover }));
+                        logger.log('MetadataService', `Applying cover override for audiobook "${audiobook.title}"`);
+                        continue;
+                    }
+                }
+
+                // Skip if we already have a locally cached cover for this audiobook.
+                if (audiobook.poster) {
+                    if (new File(audiobook.poster).exists) {
+                        logger.log('MetadataService', `Skipping audiobook "${audiobook.title}" – cover already cached`);
+                        continue;
+                    }
+                }
+
+                if (!searchTitle.trim()) {
+                    logger.log('MetadataService', 'Skipping audiobook with empty title');
+                    continue;
+                }
+
+                const searchResults = await provider.searchAudiobook(searchTitle, audiobook.author);
+                const best = searchResults[0];
+                if (!best || !best.coverUrl) {
+                    logger.log('MetadataService', `No cover found for audiobook "${searchTitle}"`);
+                    continue;
+                }
+
+                const localUri = await provider.downloadCover(best.id, best.coverUrl);
+                store.dispatch(updateAudiobookMetadata({
+                    folderKey: audiobook.folderKey,
+                    itunesId: best.id,
+                    author: best.author,
+                    poster: localUri,
+                }));
+                logger.log('MetadataService', `Audiobook "${searchTitle}" → iTunes ID ${best.id}, cover cached at ${localUri}`);
+            } catch (e) {
+                logger.warn('MetadataService', `Error enriching audiobook "${searchTitle}"`, e);
+            } finally {
+                progress.done++;
+                dispatchProgress();
+            }
+        }
+
+        logger.log('MetadataService', 'enrichAudiobooks complete');
     }
 
     /**

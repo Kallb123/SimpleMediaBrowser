@@ -69,6 +69,46 @@ export interface IMediaSeason {
     episodes: { [episode: string] : IMediaObject; };
 }
 
+/** A single audio file that forms part of an audiobook. */
+export interface IAudiobookFile {
+    /** SAF content:// URI used to open the file in an external player. */
+    path: string;
+    /** Decoded URI (human-readable), used as a stable key. */
+    parsedPath: string;
+    /** Filename including extension. */
+    filename: string;
+}
+
+/**
+ * A single audiobook.  An audiobook is a folder (or a single audio file) that
+ * groups one or more audio files (mp3 / m4a / m4b …).  Multiple files within
+ * the same folder are treated as parts of one audiobook.
+ */
+export interface IMediaAudiobook {
+    ids: {
+        /** iTunes / Apple Books collection ID once matched. */
+        itunes: string | null;
+    }
+    /** Display title (folder name, or provider title once matched). */
+    title: string;
+    /** Title parsed from the local folder/filename during scanning. */
+    scannedTitle?: string;
+    /** Author / narrator, populated from the metadata provider when available. */
+    author?: string;
+    /**
+     * Stable key that groups the audio files of this audiobook.  Derived from the
+     * relative folder path during scanning.  Used as the Redux/list key and as the
+     * override namespace (`audiobook:<folderKey>`).
+     */
+    folderKey: string;
+    /** Primary file URI used when the audiobook is opened directly (first part). */
+    path: string;
+    /** All audio files that make up this audiobook, ordered naturally by filename. */
+    files: IAudiobookFile[];
+    /** Local file URI for the downloaded cover art (empty string when none). */
+    poster: string;
+}
+
 export type IRawScanList = string[];
 
 /**
@@ -124,7 +164,7 @@ export interface ScanProgress {
   sourcesTotal?: number;
 }
 
-export type contentTypes = 'tv' | 'movie';
+export type contentTypes = 'tv' | 'movie' | 'audiobook';
 export type dataSources = 'tmdb' | 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
@@ -133,6 +173,7 @@ export type viewOrientations = 'poster' | 'banner';
 interface LibraryState {
   mediaLibrary: IMediaLibrary;
   movies: IMediaObject[];
+  audiobooks: IMediaAudiobook[];
   scanList: IRawScanList;
   isScanning: boolean;
   thumbnails: { [path: string]: string };
@@ -160,6 +201,7 @@ export const INITIAL_SCAN_PROGRESS: ScanProgress = {
 const initialState: LibraryState = {
   mediaLibrary: {},
   movies: [],
+  audiobooks: [],
   scanList: [],
   isScanning: false,
   thumbnails: {},
@@ -187,6 +229,49 @@ export const settingsSlice = createSlice({
     },
     setMovies: (state, action: PayloadAction<IMediaObject[]>) => {
       state.movies = action.payload;
+    },
+    setAudiobooks: (state, action: PayloadAction<IMediaAudiobook[]>) => {
+      state.audiobooks = action.payload;
+    },
+    /**
+     * Appends a batch of audiobooks, deduplicating by folderKey so re-scanning
+     * an overlapping source is safe.
+     */
+    appendAudiobookBatch: (state, action: PayloadAction<IMediaAudiobook[]>) => {
+      const existingKeys = new Set(state.audiobooks.map((a) => a.folderKey));
+      for (const audiobook of action.payload) {
+        if (!existingKeys.has(audiobook.folderKey)) {
+          state.audiobooks.push(audiobook);
+          existingKeys.add(audiobook.folderKey);
+        }
+      }
+    },
+    /** Updates the cover-art poster URI for a single audiobook by its folder key. */
+    setAudiobookPoster: (state, action: PayloadAction<{ folderKey: string; poster: string }>) => {
+      const audiobook = state.audiobooks.find((a) => a.folderKey === action.payload.folderKey);
+      if (audiobook) audiobook.poster = action.payload.poster;
+    },
+    /** Updates audiobook metadata (provider ID, title, author, cover) after a match. */
+    updateAudiobookMetadata: (state, action: PayloadAction<{
+      folderKey: string;
+      itunesId?: string;
+      title?: string;
+      author?: string;
+      /** When omitted the existing poster is left unchanged. */
+      poster?: string;
+    }>) => {
+      const audiobook = state.audiobooks.find((a) => a.folderKey === action.payload.folderKey);
+      if (audiobook) {
+        if (action.payload.itunesId !== undefined) audiobook.ids.itunes = action.payload.itunesId || null;
+        if (action.payload.title) audiobook.title = action.payload.title;
+        if (action.payload.author) audiobook.author = action.payload.author;
+        if (action.payload.poster !== undefined) audiobook.poster = action.payload.poster;
+      }
+    },
+    clearAudiobookMetadata: (state, action: PayloadAction<string>) => {
+      const audiobook = state.audiobooks.find((a) => a.folderKey === action.payload);
+      if (!audiobook) return;
+      audiobook.poster = '';
     },
     setIsScanning: (state, action: PayloadAction<boolean>) => {
       state.isScanning = action.payload;
@@ -320,6 +405,7 @@ export const settingsSlice = createSlice({
     clearLibraryAndMovies: (state) => {
       state.mediaLibrary = {};
       state.movies = [];
+      state.audiobooks = [];
     },
     /**
      * Incrementally upserts a batch of TV episodes into the library.
@@ -476,6 +562,9 @@ export const settingsSlice = createSlice({
       for (const movie of state.movies) {
         movie.poster = '';
       }
+      for (const audiobook of state.audiobooks) {
+        audiobook.poster = '';
+      }
     },
     /**
      * Batch-updates episode metadata (title and/or thumbnail) for all
@@ -522,12 +611,13 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
 export const selectMovies = (state: RootState) => state.libraryReducer.movies;
+export const selectAudiobooks = (state: RootState) => state.libraryReducer.audiobooks ?? [];
 export const selectIsScanning = (state: RootState) => state.libraryReducer.isScanning;
 export const selectThumbnails = (state: RootState) => state.libraryReducer.thumbnails;
 export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;

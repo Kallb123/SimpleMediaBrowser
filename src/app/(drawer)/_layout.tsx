@@ -11,7 +11,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { logger } from '@/scripts/Logger';
 
-const MAIN_ROUTES = ['index', 'tv', 'movies'];
+const MAIN_ROUTES = ['index', 'tv', 'movies', 'audiobooks'];
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { editMode, setEditMode, drawerUnlocked, setDrawerUnlocked } = useEditMode();
@@ -229,6 +229,13 @@ export default function DrawerLayout() {
             options={{
                 drawerLabel: '🎬 Movies',
                 title: "Movies",
+            }}
+            />
+            <Drawer.Screen
+            name="audiobooks"
+            options={{
+                drawerLabel: '🎧 Audiobooks',
+                title: "Audiobooks",
             }}
             />
             <Drawer.Screen
