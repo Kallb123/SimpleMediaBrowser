@@ -6,7 +6,7 @@ import { useEditMode } from '@/contexts/EditModeContext';
 import { useSelector } from 'react-redux';
 import { selectPassword, selectMediaSources, selectRescanOnStartup } from '@/store/settingsReducer';
 import { useState, useEffect } from 'react';
-import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { logger } from '@/scripts/Logger';
@@ -141,7 +141,12 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         animationType="fade"
         onRequestClose={cancelPassword}
       >
-        <View style={styles.modalOverlay}>
+        {/* Modal content renders in its own native layer, outside the drawer's tree, so it
+            needs its own KeyboardAvoidingView rather than relying on a screen-level one. */}
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={[styles.modalBox, { backgroundColor: colorScheme === 'dark' ? '#1E2022' : '#fff' }]}>
             <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
             <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>
@@ -169,7 +174,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </DrawerContentScrollView>
   );
