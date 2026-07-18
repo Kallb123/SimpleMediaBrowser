@@ -1,5 +1,6 @@
 import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView, Alert } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -61,6 +62,9 @@ export default function SettingsPrompt() {
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
   const { drawerUnlocked } = useEditMode();
   const insets = useSafeAreaInsets();
+  // See edititem.tsx for why we use the real header height here instead of
+  // KeyboardAvoidingView's automaticOffset heuristic.
+  const headerHeight = useHeaderHeight();
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
@@ -566,7 +570,7 @@ export default function SettingsPrompt() {
 
   return (
     <SettingsErrorBoundary>
-    <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
+    <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={headerHeight}>
     <ScrollView style={containerStyle} contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]} keyboardShouldPersistTaps="handled">
 
       {/* Access */}

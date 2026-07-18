@@ -1,4 +1,5 @@
 import { useLocalSearchParams, router, Stack } from 'expo-router';
+import { useHeaderHeight } from '@react-navigation/elements';
 import {
   ActivityIndicator,
   Button,
@@ -145,6 +146,13 @@ export default function EditItemScreen() {
   const tvdbPin = useSelector(selectTvdbPin);
   const globalDataSource = useSelector(selectDataSource);
   const insets = useSafeAreaInsets();
+  // The native header sits above this screen's content but outside this
+  // component's own layout tree, so KeyboardAvoidingView can't discover its
+  // height on its own — react-native-keyboard-controller's `automaticOffset`
+  // heuristic (view-position-in-window measurement) still came up short by
+  // roughly the header's height on-device. useHeaderHeight() reads the
+  // actual rendered header height from React Navigation directly.
+  const headerHeight = useHeaderHeight();
 
   const existingOverride = mediaOverrides[itemKey] ?? {};
 
@@ -748,7 +756,7 @@ export default function EditItemScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
+      <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={headerHeight}>
       <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
         <View style={styles.header}>
