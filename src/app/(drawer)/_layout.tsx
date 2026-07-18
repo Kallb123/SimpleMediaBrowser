@@ -6,7 +6,8 @@ import { useEditMode } from '@/contexts/EditModeContext';
 import { useSelector } from 'react-redux';
 import { selectPassword, selectMediaSources, selectRescanOnStartup } from '@/store/settingsReducer';
 import { useState, useEffect } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { logger } from '@/scripts/Logger';
@@ -141,12 +142,11 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         animationType="fade"
         onRequestClose={cancelPassword}
       >
-        {/* Modal content renders in its own native layer, outside the drawer's tree, so it
-            needs its own KeyboardAvoidingView rather than relying on a screen-level one. */}
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        {/* RN's Modal renders in its own native window on Android, separate from the
+            app-root KeyboardProvider's window, so keyboard insets there need their own
+            nested KeyboardProvider rather than relying on the root one. */}
+        <KeyboardProvider>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior="padding">
           <View style={[styles.modalBox, { backgroundColor: colorScheme === 'dark' ? '#1E2022' : '#fff' }]}>
             <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
             <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>
@@ -175,6 +175,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
             </View>
           </View>
         </KeyboardAvoidingView>
+        </KeyboardProvider>
       </Modal>
     </DrawerContentScrollView>
   );

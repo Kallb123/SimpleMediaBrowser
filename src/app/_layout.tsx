@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { useColorScheme as useNativeColorScheme } from 'react-native';
 import 'react-native-reanimated';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import '@/global.css';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';
@@ -114,35 +115,37 @@ function AppRoot() {
   }
 
   return (
-    <ThemeProvider value={effectiveScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <StatusBar style={effectiveScheme === 'dark' ? 'light' : 'dark'} />
-      <EditModeProvider>
-        <Stack>
-          <Stack.Screen name="firsttime" options={{ headerShown: false }} />
-          <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
-          <Stack.Screen name="+not-found" />
-          <Stack.Screen
-            name="modal"
-            options={{
-              presentation: 'modal',
-            }}
-          />
-          <Stack.Screen
-            name="edititem"
-            options={{
-              presentation: 'modal',
-              title: 'Edit Item',
-            }}
-          />
-          <Stack.Screen
-            name="mergeshows"
-            options={{
-              presentation: 'modal',
-              title: 'Merge Shows',
-            }}
-          />
-        </Stack>
-      </EditModeProvider>
-    </ThemeProvider>
+    <KeyboardProvider>
+      <ThemeProvider value={effectiveScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <StatusBar style={effectiveScheme === 'dark' ? 'light' : 'dark'} />
+        <EditModeProvider>
+          <Stack>
+            <Stack.Screen name="firsttime" options={{ headerShown: false }} />
+            <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
+            <Stack.Screen name="+not-found" />
+            <Stack.Screen
+              name="modal"
+              options={{
+                presentation: 'modal',
+              }}
+            />
+            <Stack.Screen
+              name="edititem"
+              options={{
+                presentation: 'modal',
+                title: 'Edit Item',
+              }}
+            />
+            <Stack.Screen
+              name="mergeshows"
+              options={{
+                presentation: 'modal',
+                title: 'Merge Shows',
+              }}
+            />
+          </Stack>
+        </EditModeProvider>
+      </ThemeProvider>
+    </KeyboardProvider>
   );
 }
