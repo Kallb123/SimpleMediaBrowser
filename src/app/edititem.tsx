@@ -748,7 +748,7 @@ export default function EditItemScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <KeyboardAvoidingView style={styles.container} behavior="padding">
+      <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
       <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
         <View style={styles.header}>

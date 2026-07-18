@@ -566,7 +566,7 @@ export default function SettingsPrompt() {
 
   return (
     <SettingsErrorBoundary>
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
     <ScrollView style={containerStyle} contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]} keyboardShouldPersistTaps="handled">
 
       {/* Access */}

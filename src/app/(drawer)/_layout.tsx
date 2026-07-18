@@ -146,7 +146,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
             app-root KeyboardProvider's window, so keyboard insets there need their own
             nested KeyboardProvider rather than relying on the root one. */}
         <KeyboardProvider>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior="padding">
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior="padding" automaticOffset>
           <View style={[styles.modalBox, { backgroundColor: colorScheme === 'dark' ? '#1E2022' : '#fff' }]}>
             <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
             <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>

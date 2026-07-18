@@ -49,7 +49,7 @@ export default function FirstTime() {
   return (
     <SafeAreaView style={styles.container}>
     <ThemedView style={styles.container}>
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
     <ScrollView contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
       <View style={styles.header}>
         <ThemedText type="title">Welcome to Simple Media Browser</ThemedText>
