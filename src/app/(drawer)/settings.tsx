@@ -1,4 +1,4 @@
-import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView, Alert } from 'react-native';
+import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -565,6 +565,7 @@ export default function SettingsPrompt() {
 
   return (
     <SettingsErrorBoundary>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView style={containerStyle} contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]} keyboardShouldPersistTaps="handled">
 
       {/* Access */}
@@ -1023,6 +1024,7 @@ export default function SettingsPrompt() {
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
       </View>
     </ScrollView>
+    </KeyboardAvoidingView>
     </SettingsErrorBoundary>
   );
 }

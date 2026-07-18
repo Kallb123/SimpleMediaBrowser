@@ -2,9 +2,11 @@ import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { ThemedText } from '@/components/ThemedText';
-import type { viewOrientations } from '@/store/settingsReducer';
 
 type ThumbnailSource = VideoThumbnail | string;
+
+/** Blur strength for the backdrop that fills the letterbox area behind non-portrait art. */
+const BACKDROP_BLUR_RADIUS = 24;
 
 export type PosterBoxItem = {
   kind: 'folder' | 'file';
@@ -12,8 +14,6 @@ export type PosterBoxItem = {
   label: string;
   thumbnailUri?: ThumbnailSource;
   posterUri?: string;
-  /** True when posterUri is a TMDB episode still (landscape 16:9) rather than a portrait poster. */
-  posterIsLandscape?: boolean;
   count?: number;
 };
 
@@ -21,7 +21,6 @@ export type PosterBoxProps = {
   item: PosterBoxItem;
   cardWidth: number;
   thumbnailHeight: number;
-  viewOrientation: viewOrientations;
   editMode: boolean;
   isRevealed: boolean;
   isEditable: boolean;
@@ -36,7 +35,6 @@ export function PosterBox({
   item,
   cardWidth,
   thumbnailHeight,
-  viewOrientation,
   editMode,
   isRevealed,
   isEditable,
@@ -47,7 +45,6 @@ export function PosterBox({
   onEditPress,
 }: PosterBoxProps) {
   const isFolder = item.kind === 'folder';
-  const hasPoster = !!item.posterUri;
 
   // Items with a poster show the poster by default; long-press reveals the video thumbnail.
   const displaySource = item.posterUri && !isRevealed
@@ -55,13 +52,6 @@ export function PosterBox({
     : typeof item.thumbnailUri === 'string'
       ? { uri: item.thumbnailUri }
       : item.thumbnailUri; // VideoThumbnail (SharedRef) passed directly to expo-image
-
-  // In poster layout, video thumbnails are wider than portrait posters and should use a 16:9 box.
-  const isShowingVideoThumbnail = !hasPoster || isRevealed;
-
-  const effectiveThumbnailHeight = item.posterIsLandscape || isShowingVideoThumbnail
-    ? Math.round(cardWidth * 9 / 16)
-    : thumbnailHeight;
 
   return (
     <TouchableOpacity
@@ -72,15 +62,27 @@ export function PosterBox({
     >
       <View style={[
         styles.thumbnailBox,
-        { height: effectiveThumbnailHeight },
+        { height: thumbnailHeight },
         isSelected && styles.thumbnailBoxSelected,
       ]}>
         {displaySource ? (
-          <Image
-            source={displaySource}
-            style={styles.thumbnailImage}
-            contentFit={viewOrientation === 'poster' && isShowingVideoThumbnail ? 'contain' : 'cover'}
-          />
+          <>
+            {/* Blurred, cover-scaled copy of the same art fills the letterbox area so
+                non-portrait images (landscape stills, square audiobook covers) sit in a
+                uniform poster-shaped box without cropping or flat empty bars. Portrait
+                posters cover the box exactly, hiding the backdrop entirely. */}
+            <Image
+              source={displaySource}
+              style={styles.thumbnailBackdrop}
+              contentFit="cover"
+              blurRadius={BACKDROP_BLUR_RADIUS}
+            />
+            <Image
+              source={displaySource}
+              style={styles.thumbnailImage}
+              contentFit="contain"
+            />
+          </>
         ) : (
           <View style={styles.thumbnailPlaceholder}>
             <ThemedText style={styles.placeholderIcon}>
@@ -136,6 +138,13 @@ const styles = StyleSheet.create({
   thumbnailBoxSelected: {
     borderWidth: 3,
     borderColor: '#0a7ea4',
+  },
+  thumbnailBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   thumbnailImage: {
     width: '100%',

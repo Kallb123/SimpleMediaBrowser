@@ -1,4 +1,4 @@
-import { StyleSheet, Button, Switch, ScrollView, View, Platform } from 'react-native';
+import { StyleSheet, Button, Switch, ScrollView, View, Platform, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HelloWave } from '@/components/HelloWave';
@@ -48,6 +48,7 @@ export default function FirstTime() {
   return (
     <SafeAreaView style={styles.container}>
     <ThemedView style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
       <View style={styles.header}>
         <ThemedText type="title">Welcome to Simple Media Browser</ThemedText>
@@ -107,6 +108,7 @@ export default function FirstTime() {
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
       </View>
     </ScrollView>
+    </KeyboardAvoidingView>
     </ThemedView>
     </SafeAreaView>
   );
