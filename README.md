@@ -12,7 +12,7 @@ A local media browser for Android. Point it at folders on your device or network
 - **Video thumbnail generation** — Thumbnails are generated for episodes and movies that have no poster, persisted to disk, and reused across sessions.
 - **Metadata overrides** — An edit-mode allows changes to any items title, poster, or other metadata and override what was fetched automatically.
 - **Flexible display options** — Choose between grid and list layouts, adjust poster/thumbnail scale, and select landscape or portrait orientation modes.
-- **Parent-mode** — Includes password-protection for all settings pages, so that the usual user is limited to selecting media to watch.
+- **Parent-mode** — Includes password-protection for all settings pages, so that the usual user is limited to selecting media to watch. If the password is forgotten, "Forgot password?" on the unlock screen presents a small daily arithmetic challenge (computed from today's date, no internet required) that clears the password when solved.
 - **Dark & light theme** — Follows the system colour scheme automatically.
 - **Debug log viewer** — An in-app log screen captures scan and metadata activity to help diagnose issues without needing a connected debugger.
 
