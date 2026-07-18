@@ -1,4 +1,5 @@
-import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView, Alert } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -565,7 +566,7 @@ export default function SettingsPrompt() {
 
   return (
     <SettingsErrorBoundary>
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
     <ScrollView style={containerStyle} contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]} keyboardShouldPersistTaps="handled">
 
       {/* Access */}

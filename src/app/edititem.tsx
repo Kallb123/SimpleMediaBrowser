@@ -3,14 +3,13 @@ import {
   ActivityIndicator,
   Button,
   FlatList,
-  KeyboardAvoidingView,
   Linking,
-  Platform,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { ThemedText } from '@/components/ThemedText';
@@ -749,7 +748,7 @@ export default function EditItemScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={styles.container} behavior="padding">
       <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
         <View style={styles.header}>
