@@ -3,23 +3,28 @@ import { Drawer } from 'expo-router/drawer';
 import { Colors } from '@/constants/Colors';
 import { DrawerContentScrollView, DrawerItemList, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useEditMode } from '@/contexts/EditModeContext';
-import { useSelector } from 'react-redux';
-import { selectPassword, selectMediaSources, selectRescanOnStartup } from '@/store/settingsReducer';
+import { useDispatch, useSelector } from 'react-redux';
+import { selectPassword, selectMediaSources, selectRescanOnStartup, setPassword } from '@/store/settingsReducer';
 import { useState, useEffect } from 'react';
-import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { logger } from '@/scripts/Logger';
+import { computeRecoveryCode, recoveryChallengeText } from '@/scripts/PasswordRecovery';
 
 const MAIN_ROUTES = ['index', 'tv', 'movies', 'audiobooks'];
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { editMode, setEditMode, drawerUnlocked, setDrawerUnlocked } = useEditMode();
+  const dispatch = useDispatch();
   const settingsPassword = useSelector(selectPassword);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryInput, setRecoveryInput] = useState('');
+  const [recoveryError, setRecoveryError] = useState('');
   const colorScheme = useColorScheme() ?? 'light';
 
   const currentRouteName = props.state.routes[props.state.index]?.name;
@@ -40,6 +45,9 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     setShowPasswordModal(false);
     setPasswordInput('');
     setPasswordError('');
+    setRecoveryMode(false);
+    setRecoveryInput('');
+    setRecoveryError('');
   };
 
   const handleUnlockPress = () => {
@@ -97,6 +105,32 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     resetPasswordModal();
   };
 
+  const startRecovery = () => {
+    setPasswordError('');
+    setRecoveryInput('');
+    setRecoveryError('');
+    setRecoveryMode(true);
+  };
+
+  const cancelRecovery = () => {
+    setRecoveryMode(false);
+    setRecoveryInput('');
+    setRecoveryError('');
+  };
+
+  const submitRecovery = () => {
+    if (recoveryInput.trim() === computeRecoveryCode()) {
+      logger.log('Drawer', 'Settings password recovered via math challenge – password cleared');
+      dispatch(setPassword(null));
+      setDrawerUnlocked(true);
+      resetPasswordModal();
+      Alert.alert('Password cleared', 'The settings password has been removed. Set a new one from Settings if you want to lock it again.');
+    } else {
+      logger.warn('Drawer', 'Settings password recovery code rejected');
+      setRecoveryError('Incorrect code.');
+    }
+  };
+
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={styles.drawerContent}>
       <DrawerItemList {...mainProps} />
@@ -148,31 +182,66 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         <KeyboardProvider>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior="padding" automaticOffset>
           <View style={[styles.modalBox, { backgroundColor: colorScheme === 'dark' ? '#1E2022' : '#fff' }]}>
-            <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
-            <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>
-            <ThemedTextInput
-              value={passwordInput}
-              onChangeText={(v) => {
-                setPasswordInput(v);
-                setPasswordError('');
-              }}
-              placeholder="Password"
-              secureTextEntry
-              style={styles.modalInput}
-              autoFocus
-              onSubmitEditing={submitPassword}
-            />
-            {passwordError !== '' && (
-              <ThemedText style={styles.errorText}>{passwordError}</ThemedText>
+            {recoveryMode ? (
+              <>
+                <ThemedText type="subtitle" style={styles.modalTitle}>Forgotten Password Recovery</ThemedText>
+                <ThemedText style={styles.modalSubtitle}>{recoveryChallengeText()}</ThemedText>
+                <ThemedTextInput
+                  value={recoveryInput}
+                  onChangeText={(v) => {
+                    setRecoveryInput(v);
+                    setRecoveryError('');
+                  }}
+                  placeholder="6-digit code"
+                  keyboardType="number-pad"
+                  style={styles.modalInput}
+                  autoFocus
+                  onSubmitEditing={submitRecovery}
+                />
+                {recoveryError !== '' && (
+                  <ThemedText style={styles.errorText}>{recoveryError}</ThemedText>
+                )}
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity onPress={cancelRecovery} style={[styles.modalButton, { borderColor: colorScheme === 'dark' ? '#555' : '#CCC' }]}>
+                    <ThemedText>Back</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={submitRecovery} style={[styles.modalButton, styles.modalButtonPrimary]}>
+                    <ThemedText style={styles.modalButtonPrimaryText}>Submit</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
+                <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>
+                <ThemedTextInput
+                  value={passwordInput}
+                  onChangeText={(v) => {
+                    setPasswordInput(v);
+                    setPasswordError('');
+                  }}
+                  placeholder="Password"
+                  secureTextEntry
+                  style={styles.modalInput}
+                  autoFocus
+                  onSubmitEditing={submitPassword}
+                />
+                {passwordError !== '' && (
+                  <ThemedText style={styles.errorText}>{passwordError}</ThemedText>
+                )}
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity onPress={cancelPassword} style={[styles.modalButton, { borderColor: colorScheme === 'dark' ? '#555' : '#CCC' }]}>
+                    <ThemedText>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={submitPassword} style={[styles.modalButton, styles.modalButtonPrimary]}>
+                    <ThemedText style={styles.modalButtonPrimaryText}>Unlock</ThemedText>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity onPress={startRecovery}>
+                  <ThemedText style={styles.forgotPasswordText}>Forgot password?</ThemedText>
+                </TouchableOpacity>
+              </>
             )}
-            <View style={styles.modalButtons}>
-              <TouchableOpacity onPress={cancelPassword} style={[styles.modalButton, { borderColor: colorScheme === 'dark' ? '#555' : '#CCC' }]}>
-                <ThemedText>Cancel</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={submitPassword} style={[styles.modalButton, styles.modalButtonPrimary]}>
-                <ThemedText style={styles.modalButtonPrimaryText}>Unlock</ThemedText>
-              </TouchableOpacity>
-            </View>
           </View>
         </KeyboardAvoidingView>
         </KeyboardProvider>
@@ -313,6 +382,11 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#E55',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  forgotPasswordText: {
+    color: '#0a7ea4',
     fontSize: 13,
     textAlign: 'center',
   },
