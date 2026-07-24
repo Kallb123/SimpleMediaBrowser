@@ -107,6 +107,11 @@ export interface IMediaAudiobook {
     files: IAudiobookFile[];
     /** Local file URI for the downloaded cover art (empty string when none). */
     poster: string;
+    /**
+     * Timestamp (`Date.now()`) of the last time any part of this audiobook was
+     * opened in an external player.  Absent means never opened.
+     */
+    lastOpened?: number;
 }
 
 export type IRawScanList = string[];
@@ -398,6 +403,28 @@ export const settingsSlice = createSlice({
         }
       }
     },
+    /** Records when an episode was last opened in an external player, keyed by its file path. */
+    setEpisodeLastOpened: (state, action: PayloadAction<{ path: string; lastOpened: number }>) => {
+      for (const show of Object.values(state.mediaLibrary) as IMediaShow[]) {
+        for (const season of Object.values(show.seasons) as IMediaSeason[]) {
+          const episode = Object.values(season.episodes as { [key: string]: IMediaObject }).find((ep) => ep.path === action.payload.path);
+          if (episode) {
+            episode.lastOpened = action.payload.lastOpened;
+            return;
+          }
+        }
+      }
+    },
+    /** Records when a movie was last opened in an external player, keyed by its file path. */
+    setMovieLastOpened: (state, action: PayloadAction<{ path: string; lastOpened: number }>) => {
+      const movie = state.movies.find((m) => m.path === action.payload.path);
+      if (movie) movie.lastOpened = action.payload.lastOpened;
+    },
+    /** Records when an audiobook (any of its parts) was last opened in an external player. */
+    setAudiobookLastOpened: (state, action: PayloadAction<{ folderKey: string; lastOpened: number }>) => {
+      const audiobook = state.audiobooks.find((a) => a.folderKey === action.payload.folderKey);
+      if (audiobook) audiobook.lastOpened = action.payload.lastOpened;
+    },
     /**
      * Clears both the TV library and the movie list.  Dispatched at the start
      * of each scan so stale data is not shown before streaming results arrive.
@@ -611,7 +638,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
@@ -622,5 +649,28 @@ export const selectIsScanning = (state: RootState) => state.libraryReducer.isSca
 export const selectThumbnails = (state: RootState) => state.libraryReducer.thumbnails;
 export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;
 export const selectScanProgress = (state: RootState) => state.libraryReducer.scanProgress;
+
+/** Latest `lastOpened` timestamp among a season's episodes, or undefined if none were ever opened. */
+export function getSeasonLastOpened(season: IMediaSeason): number | undefined {
+  let latest: number | undefined;
+  for (const ep of Object.values(season.episodes) as IMediaObject[]) {
+    if (ep.lastOpened !== undefined && (latest === undefined || ep.lastOpened > latest)) {
+      latest = ep.lastOpened;
+    }
+  }
+  return latest;
+}
+
+/** Latest `lastOpened` timestamp inherited from any episode across all of a show's seasons. */
+export function getShowLastOpened(show: IMediaShow): number | undefined {
+  let latest: number | undefined;
+  for (const season of Object.values(show.seasons) as IMediaSeason[]) {
+    const seasonLatest = getSeasonLastOpened(season);
+    if (seasonLatest !== undefined && (latest === undefined || seasonLatest > latest)) {
+      latest = seasonLatest;
+    }
+  }
+  return latest;
+}
 
 export default settingsSlice.reducer
