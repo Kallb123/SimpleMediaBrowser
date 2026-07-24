@@ -7,7 +7,7 @@ export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'list';
 export type defaultPages = 'home' | 'tv' | 'movies' | 'audiobooks';
 export type appColorSchemes = 'light' | 'dark' | 'system';
-export type sortOrders = 'alphabetical' | 'reverseAlphabetical' | 'lastOpened' | 'reverseLastOpened';
+export type sortOrders = 'alphabetical' | 'reverseAlphabetical' | 'lastOpened' | 'reverseLastOpened' | 'recentlyAdded';
 
 export interface IMediaSource {
   uri: string;

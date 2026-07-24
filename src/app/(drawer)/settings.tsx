@@ -165,6 +165,7 @@ export default function SettingsPrompt() {
     {id: 'reverseAlphabetical', label: 'Reverse alphabetical'},
     {id: 'lastOpened', label: 'Last opened'},
     {id: 'reverseLastOpened', label: 'Reverse last opened'},
+    {id: 'recentlyAdded', label: 'Recently added'},
   ];
 
   const safeDecodeUri = useCallback((uri: string) => {
