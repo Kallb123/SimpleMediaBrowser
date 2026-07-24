@@ -53,6 +53,13 @@ export interface IMediaObject {
      * global setting.
      */
     metadataSource?: dataSources;
+    /**
+     * Timestamp (`Date.now()`) of the last time this episode/movie was opened
+     * in an external player.  Absent means never opened.  Not populated during
+     * scanning; set via the `setEpisodeLastOpened`/`setMovieLastOpened`
+     * reducers when the user opens the file.
+     */
+    lastOpened?: number;
 }
 
 // Re-export library types so other modules can import them from here

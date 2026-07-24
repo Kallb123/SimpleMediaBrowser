@@ -10,7 +10,7 @@ import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
-import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride } from '@/store/libraryReducer';
+import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened } from '@/store/libraryReducer';
 import { selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { MetadataService } from '@/scripts/MetadataService';
 import { store } from '@/store/store';
@@ -704,6 +704,21 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     ...navStack.map((n: NavLevel) => n.label),
   ].join(' › ');
 
+  /** Records the current time as the `lastOpened` timestamp for a file display item. */
+  const recordLastOpened = useCallback((item: DisplayItem & { kind: 'file' }) => {
+    const now = Date.now();
+    if (item.mediaType === 'episode') {
+      dispatch(setEpisodeLastOpened({ path: item.mediaObject.path, lastOpened: now }));
+    } else if (item.mediaType === 'movie') {
+      dispatch(setMovieLastOpened({ path: item.mediaObject.path, lastOpened: now }));
+    } else if (item.mediaType === 'audiobook') {
+      const folderKey = item.key.startsWith('audiobook:')
+        ? item.key.slice('audiobook:'.length)
+        : navStack.find((n) => n.audiobookKey)?.audiobookKey;
+      if (folderKey) dispatch(setAudiobookLastOpened({ folderKey, lastOpened: now }));
+    }
+  }, [dispatch, navStack]);
+
   /** Open the edit screen for a given display item. */
   const openEditScreen = useCallback((item: DisplayItem) => {
     let itemType: 'show' | 'movie' | 'episode' | 'audiobook';
@@ -982,6 +997,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               } else {
                 handlePress = () => {
                   logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
+                  recordLastOpened(item);
                   openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
                     logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
                   });
