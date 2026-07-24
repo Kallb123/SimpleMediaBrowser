@@ -10,7 +10,7 @@ import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder } from '@/store/settingsReducer';
-import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened } from '@/store/libraryReducer';
+import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected } from '@/store/libraryReducer';
 import { selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { MetadataService } from '@/scripts/MetadataService';
 import { store } from '@/store/store';
@@ -38,8 +38,8 @@ type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number }
-  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook' };
+  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number }
+  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -110,6 +110,8 @@ function compareItemLabels(a: DisplayItem, b: DisplayItem): number {
  * Reorders a list of display items according to the "Sorting" appearance setting.
  * `lastOpened`/`reverseLastOpened` fall back to alphabetical order for items that
  * have never been opened, and always place them after any opened items.
+ * `recentlyAdded` similarly falls back to alphabetical order for items with no
+ * `firstDetected` timestamp, placing them after items that do have one.
  */
 function applySortOrder(items: DisplayItem[], sortOrder: sortOrders): DisplayItem[] {
   const sorted = [...items];
@@ -129,6 +131,13 @@ function applySortOrder(items: DisplayItem[], sortOrder: sortOrders): DisplayIte
         if (a.lastOpened === undefined) return 1;
         if (b.lastOpened === undefined) return -1;
         return a.lastOpened - b.lastOpened;
+      });
+    case 'recentlyAdded':
+      return sorted.sort((a, b) => {
+        if (a.firstDetected === undefined && b.firstDetected === undefined) return compareItemLabels(a, b);
+        if (a.firstDetected === undefined) return 1;
+        if (b.firstDetected === undefined) return -1;
+        return b.firstDetected - a.firstDetected;
       });
     case 'alphabetical':
     default:
@@ -207,6 +216,7 @@ function buildAudiobookRootItems(
           label,
           sortKey,
           lastOpened: audiobook.lastOpened,
+          firstDetected: audiobook.firstDetected,
           key: `audiobook:${audiobook.folderKey}`,
           posterUri,
           onPress: () => navigateInto({ label, audiobookKey: audiobook.folderKey }),
@@ -219,6 +229,7 @@ function buildAudiobookRootItems(
         label,
         sortKey,
         lastOpened: audiobook.lastOpened,
+        firstDetected: audiobook.firstDetected,
         key: `audiobook:${audiobook.folderKey}`,
         posterUri,
         mediaObject: makeAudiobookFileObject(audiobook.files[0] ?? { path: audiobook.path, parsedPath: audiobook.path, filename: audiobook.title }),
@@ -299,6 +310,7 @@ function buildBaseDisplayItems(
               label: episodeDisplayLabel(ep, overrides, displayPrefix),
               sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.resolvedTitle || ep.title || ep.filename,
               lastOpened: ep.lastOpened,
+              firstDetected: ep.firstDetected,
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
               posterUri: getEpisodePosterUri(ep, overrides),
@@ -316,6 +328,7 @@ function buildBaseDisplayItems(
           label: movieDisplayLabel(movie, overrides),
           sortKey: movieSortKey(movie, overrides),
           lastOpened: movie.lastOpened,
+          firstDetected: movie.firstDetected,
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
@@ -343,6 +356,7 @@ function buildBaseDisplayItems(
               label: showDisplayLabel(showName, overrides),
               sortKey: showSortKey(showName, overrides),
               lastOpened: getShowLastOpened(show),
+              firstDetected: getShowFirstDetected(show),
               key: showName,
               posterUri: overrides[`show:${showName}`]?.poster || show.poster || undefined,
               thumbnailUri: pickShowThumbnail(library, showName),
@@ -358,6 +372,7 @@ function buildBaseDisplayItems(
             label: movieDisplayLabel(movie, overrides),
             sortKey: movieSortKey(movie, overrides),
             lastOpened: movie.lastOpened,
+            firstDetected: movie.firstDetected,
             key: movie.path,
             thumbnailUri: thumbnailCache.get(movie.path),
             posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
@@ -411,6 +426,7 @@ function buildBaseDisplayItems(
               label,
               sortKey,
               lastOpened: getSeasonLastOpened(season),
+              firstDetected: getSeasonFirstDetected(season),
               key: `${showName}::${seasonKey}`,
               posterUri: overrides[`show:${showName}`]?.poster || show.poster || undefined,
               thumbnailUri: firstEpThumb,
@@ -427,6 +443,7 @@ function buildBaseDisplayItems(
             label: movieDisplayLabel(movie, overrides),
             sortKey: movieSortKey(movie, overrides),
             lastOpened: movie.lastOpened,
+            firstDetected: movie.firstDetected,
             key: movie.path,
             thumbnailUri: thumbnailCache.get(movie.path),
             posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
@@ -468,6 +485,7 @@ function buildBaseDisplayItems(
             label: showDisplayLabel(showName, overrides),
             sortKey: showSortKey(showName, overrides),
             lastOpened: getShowLastOpened(library[showName]),
+            firstDetected: getShowFirstDetected(library[showName]),
             key: showName,
             posterUri: overrides[`show:${showName}`]?.poster || library[showName].poster || undefined,
             thumbnailUri: pickShowThumbnail(library, showName),
@@ -485,6 +503,7 @@ function buildBaseDisplayItems(
             label: movieDisplayLabel(movie, overrides),
             sortKey: movieSortKey(movie, overrides),
             lastOpened: movie.lastOpened,
+            firstDetected: movie.firstDetected,
             key: movie.path,
             thumbnailUri: thumbnailCache.get(movie.path),
             posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,

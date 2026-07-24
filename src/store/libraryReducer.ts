@@ -112,6 +112,11 @@ export interface IMediaAudiobook {
      * opened in an external player.  Absent means never opened.
      */
     lastOpened?: number;
+    /**
+     * Timestamp (`Date.now()`) of the first time this audiobook was discovered
+     * by a scan.  Set once and carried forward on every subsequent rescan.
+     */
+    firstDetected?: number;
 }
 
 export type IRawScanList = string[];
@@ -666,6 +671,29 @@ export function getShowLastOpened(show: IMediaShow): number | undefined {
   let latest: number | undefined;
   for (const season of Object.values(show.seasons) as IMediaSeason[]) {
     const seasonLatest = getSeasonLastOpened(season);
+    if (seasonLatest !== undefined && (latest === undefined || seasonLatest > latest)) {
+      latest = seasonLatest;
+    }
+  }
+  return latest;
+}
+
+/** Latest `firstDetected` timestamp among a season's episodes, inherited by the season. */
+export function getSeasonFirstDetected(season: IMediaSeason): number | undefined {
+  let latest: number | undefined;
+  for (const ep of Object.values(season.episodes) as IMediaObject[]) {
+    if (ep.firstDetected !== undefined && (latest === undefined || ep.firstDetected > latest)) {
+      latest = ep.firstDetected;
+    }
+  }
+  return latest;
+}
+
+/** Latest `firstDetected` timestamp inherited from any episode across all of a show's seasons. */
+export function getShowFirstDetected(show: IMediaShow): number | undefined {
+  let latest: number | undefined;
+  for (const season of Object.values(show.seasons) as IMediaSeason[]) {
+    const seasonLatest = getSeasonFirstDetected(season);
     if (seasonLatest !== undefined && (latest === undefined || seasonLatest > latest)) {
       latest = seasonLatest;
     }

@@ -60,6 +60,13 @@ export interface IMediaObject {
      * reducers when the user opens the file.
      */
     lastOpened?: number;
+    /**
+     * Timestamp (`Date.now()`) of the first time this episode/movie was
+     * discovered by a scan.  Set once when the item is first built and then
+     * carried forward on every subsequent rescan (see the carry-over block
+     * in `scanAllSources`), so it never changes once assigned.
+     */
+    firstDetected?: number;
 }
 
 // Re-export library types so other modules can import them from here
@@ -594,6 +601,9 @@ export class FileScanner {
                         const prevEp = prevSeason.episodes[epKey];
                         if (!prevEp) continue;
                         if (prevEp.resolvedTitle) ep.resolvedTitle = prevEp.resolvedTitle;
+                        // Preserve the original detection timestamp across rescans instead of
+                        // the fresh Date.now() stamped when this episode was just rebuilt.
+                        if (prevEp.firstDetected) ep.firstDetected = prevEp.firstDetected;
                         if (prevEp.resolvedThumbnail) {
                             try {
                                 if (new File(prevEp.resolvedThumbnail).exists) {
@@ -619,6 +629,8 @@ export class FileScanner {
                 // and episode enrichment continues to work on subsequent scans.
                 if (prev.ids.tmdb) movie.ids.tmdb = prev.ids.tmdb;
                 if (prev.ids.tvdb) movie.ids.tvdb = prev.ids.tvdb;
+                // Preserve the original detection timestamp across rescans.
+                if (prev.firstDetected) movie.firstDetected = prev.firstDetected;
                 // Only restore the poster URI when the cached file still exists on disk.
                 const posterPath = prev.poster;
                 if (posterPath && !movie.poster) {
@@ -641,6 +653,8 @@ export class FileScanner {
             try {
                 if (prev.ids.itunes) audiobook.ids.itunes = prev.ids.itunes;
                 if (prev.author && !audiobook.author) audiobook.author = prev.author;
+                // Preserve the original detection timestamp across rescans.
+                if (prev.firstDetected) audiobook.firstDetected = prev.firstDetected;
                 // Only restore the cover URI when the new scan did not find a local cover
                 // image and the cached file still exists on disk.
                 if (prev.poster && !audiobook.poster && new File(prev.poster).exists) {
@@ -1206,7 +1220,7 @@ export class FileScanner {
             const poster = relativePathParts.length > 0
                 ? (posterMap?.get(relativePathParts[0]) ?? '')
                 : '';
-            const movie: IMediaObject = { ...mediaObj, title, poster };
+            const movie: IMediaObject = { ...mediaObj, title, poster, firstDetected: Date.now() };
             // Apply IDs from smb.json when present and not already set.
             // These IDs will be overwritten by API-fetched IDs on the next enrichment.
             if (smbData && relativePathParts.length > 0) {
@@ -1280,6 +1294,7 @@ export class FileScanner {
                 path: first.path,
                 files: audiobookFiles,
                 poster: (folderPath !== '' ? posterMap?.get(folderPath) : undefined) ?? '',
+                firstDetected: Date.now(),
             });
         }
 
@@ -1359,6 +1374,7 @@ export class FileScanner {
                     title: resolvedTitle,
                     scannedTitle: resolvedTitle,
                     episodeNumber: episode,
+                    firstDetected: Date.now(),
                 };
                 // Apply episode title from smb.json when not derived from filename.
                 const folderKey = relativePathParts[0];
