@@ -9,8 +9,8 @@ import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation } from '@/store/settingsReducer';
-import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened } from '@/store/libraryReducer';
+import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder } from '@/store/settingsReducer';
+import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened } from '@/store/libraryReducer';
 import { selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { MetadataService } from '@/scripts/MetadataService';
 import { store } from '@/store/store';
@@ -18,7 +18,7 @@ import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary, IMediaAudiobook } from '@/store/libraryReducer';
 import type { IMediaOverride } from '@/store/libraryReducer';
-import type { viewTypes } from '@/store/settingsReducer';
+import type { viewTypes, sortOrders } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { PosterBox } from '@/components/ui/PosterBox';
@@ -38,8 +38,8 @@ type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number }
-  | { kind: 'file'; label: string; sortKey?: string; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook' };
+  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number }
+  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook' };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -101,6 +101,40 @@ function compareEpisodes(
 
 /** Locale-compare options that produce natural (numeric-aware) sort order. */
 const NATURAL_SORT_OPTS: Intl.CollatorOptions = { numeric: true, sensitivity: 'base' };
+
+function compareItemLabels(a: DisplayItem, b: DisplayItem): number {
+  return (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS);
+}
+
+/**
+ * Reorders a list of display items according to the "Sorting" appearance setting.
+ * `lastOpened`/`reverseLastOpened` fall back to alphabetical order for items that
+ * have never been opened, and always place them after any opened items.
+ */
+function applySortOrder(items: DisplayItem[], sortOrder: sortOrders): DisplayItem[] {
+  const sorted = [...items];
+  switch (sortOrder) {
+    case 'reverseAlphabetical':
+      return sorted.sort((a, b) => compareItemLabels(b, a));
+    case 'lastOpened':
+      return sorted.sort((a, b) => {
+        if (a.lastOpened === undefined && b.lastOpened === undefined) return compareItemLabels(a, b);
+        if (a.lastOpened === undefined) return 1;
+        if (b.lastOpened === undefined) return -1;
+        return b.lastOpened - a.lastOpened;
+      });
+    case 'reverseLastOpened':
+      return sorted.sort((a, b) => {
+        if (a.lastOpened === undefined && b.lastOpened === undefined) return compareItemLabels(a, b);
+        if (a.lastOpened === undefined) return 1;
+        if (b.lastOpened === undefined) return -1;
+        return a.lastOpened - b.lastOpened;
+      });
+    case 'alphabetical':
+    default:
+      return sorted.sort(compareItemLabels);
+  }
+}
 
 /** Returns the effective display label for an episode, applying overrides to the title portion. */
 function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }, prefix: string): string {
@@ -172,6 +206,7 @@ function buildAudiobookRootItems(
           kind: 'folder' as const,
           label,
           sortKey,
+          lastOpened: audiobook.lastOpened,
           key: `audiobook:${audiobook.folderKey}`,
           posterUri,
           onPress: () => navigateInto({ label, audiobookKey: audiobook.folderKey }),
@@ -183,6 +218,7 @@ function buildAudiobookRootItems(
         kind: 'file' as const,
         label,
         sortKey,
+        lastOpened: audiobook.lastOpened,
         key: `audiobook:${audiobook.folderKey}`,
         posterUri,
         mediaObject: makeAudiobookFileObject(audiobook.files[0] ?? { path: audiobook.path, parsedPath: audiobook.path, filename: audiobook.title }),
@@ -205,6 +241,7 @@ function buildDisplayItems(
   navStack: NavLevel[],
   overrides: { [key: string]: IMediaOverride },
   navigateInto: (entry: NavLevel) => void,
+  sortOrder: sortOrders,
 ): DisplayItem[] {
   // Inside a multi-part audiobook: list its files as openable items.
   const audiobookLevel = navStack.find((n) => n.audiobookKey);
@@ -220,14 +257,12 @@ function buildDisplayItems(
     }));
   }
 
-  const baseItems = buildBaseDisplayItems(library, movies, viewType, navStack, overrides, navigateInto);
+  const baseItems = buildBaseDisplayItems(library, movies, viewType, navStack, overrides, navigateInto, sortOrder);
 
   // Audiobooks only appear at the root level (they have no viewType hierarchy).
   if (navStack.length === 0 && audiobooks.length > 0) {
     const audiobookItems = buildAudiobookRootItems(audiobooks, overrides, navigateInto);
-    return [...baseItems, ...audiobookItems].sort(
-      (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
-    );
+    return applySortOrder([...baseItems, ...audiobookItems], sortOrder);
   }
   return baseItems;
 }
@@ -239,6 +274,7 @@ function buildBaseDisplayItems(
   navStack: NavLevel[],
   overrides: { [key: string]: IMediaOverride },
   navigateInto: (entry: NavLevel) => void,
+  sortOrder: sortOrders,
 ): DisplayItem[] {
   switch (viewType) {
     case 'flat': {
@@ -262,6 +298,7 @@ function buildBaseDisplayItems(
               kind: 'file',
               label: episodeDisplayLabel(ep, overrides, displayPrefix),
               sortKey: sortPrefix || overrides[`episode:${ep.parsedPath}`]?.sortTitle || ep.resolvedTitle || ep.title || ep.filename,
+              lastOpened: ep.lastOpened,
               key: ep.path,
               thumbnailUri: thumbnailCache.get(ep.path),
               posterUri: getEpisodePosterUri(ep, overrides),
@@ -278,6 +315,7 @@ function buildBaseDisplayItems(
           kind: 'file',
           label: movieDisplayLabel(movie, overrides),
           sortKey: movieSortKey(movie, overrides),
+          lastOpened: movie.lastOpened,
           key: movie.path,
           thumbnailUri: thumbnailCache.get(movie.path),
           posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
@@ -285,11 +323,8 @@ function buildBaseDisplayItems(
           mediaType: 'movie',
         });
       }
-      // Sort by sort key (respects sortTitle overrides), falling back to label.
-      items.sort((a, b) =>
-        (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
-      );
-      return items;
+      // Order by the user's chosen "Sorting" appearance setting.
+      return applySortOrder(items, sortOrder);
     }
 
     case 'show': {
@@ -307,6 +342,7 @@ function buildBaseDisplayItems(
               kind: 'folder' as const,
               label: showDisplayLabel(showName, overrides),
               sortKey: showSortKey(showName, overrides),
+              lastOpened: getShowLastOpened(show),
               key: showName,
               posterUri: overrides[`show:${showName}`]?.poster || show.poster || undefined,
               thumbnailUri: pickShowThumbnail(library, showName),
@@ -321,16 +357,15 @@ function buildBaseDisplayItems(
             kind: 'file' as const,
             label: movieDisplayLabel(movie, overrides),
             sortKey: movieSortKey(movie, overrides),
+            lastOpened: movie.lastOpened,
             key: movie.path,
             thumbnailUri: thumbnailCache.get(movie.path),
             posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
             mediaObject: movie,
             mediaType: 'movie' as const,
           }));
-        // Interleave shows and movies sorted together by sort key.
-        return [...showFolders, ...movieItems].sort(
-          (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
-        );
+        // Interleave shows and movies, ordered by the user's chosen "Sorting" appearance setting.
+        return applySortOrder([...showFolders, ...movieItems], sortOrder);
       }
       // Inside a show: all episodes from every season
       const show = library[navStack[0].showName!];
@@ -375,6 +410,7 @@ function buildBaseDisplayItems(
               kind: 'folder',
               label,
               sortKey,
+              lastOpened: getSeasonLastOpened(season),
               key: `${showName}::${seasonKey}`,
               posterUri: overrides[`show:${showName}`]?.poster || show.poster || undefined,
               thumbnailUri: firstEpThumb,
@@ -390,16 +426,15 @@ function buildBaseDisplayItems(
             kind: 'file' as const,
             label: movieDisplayLabel(movie, overrides),
             sortKey: movieSortKey(movie, overrides),
+            lastOpened: movie.lastOpened,
             key: movie.path,
             thumbnailUri: thumbnailCache.get(movie.path),
             posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
             mediaObject: movie,
             mediaType: 'movie' as const,
           }));
-        // Interleave show+season folders and movies sorted together by sort key.
-        return [...showSeasonItems, ...movieItems].sort(
-          (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
-        );
+        // Interleave show+season folders and movies, ordered by the "Sorting" appearance setting.
+        return applySortOrder([...showSeasonItems, ...movieItems], sortOrder);
       }
       // Inside a show+season folder: episodes of that season
       const { showName, seasonKey } = navStack[0];
@@ -432,6 +467,7 @@ function buildBaseDisplayItems(
             kind: 'folder' as const,
             label: showDisplayLabel(showName, overrides),
             sortKey: showSortKey(showName, overrides),
+            lastOpened: getShowLastOpened(library[showName]),
             key: showName,
             posterUri: overrides[`show:${showName}`]?.poster || library[showName].poster || undefined,
             thumbnailUri: pickShowThumbnail(library, showName),
@@ -448,16 +484,15 @@ function buildBaseDisplayItems(
             kind: 'file' as const,
             label: movieDisplayLabel(movie, overrides),
             sortKey: movieSortKey(movie, overrides),
+            lastOpened: movie.lastOpened,
             key: movie.path,
             thumbnailUri: thumbnailCache.get(movie.path),
             posterUri: overrides[`movie:${movie.parsedPath}`]?.poster || movie.poster || undefined,
             mediaObject: movie,
             mediaType: 'movie' as const,
           }));
-        // Interleave shows and movies sorted together by sort key.
-        return [...showFolders, ...movieItems].sort(
-          (a, b) => (a.sortKey ?? a.label).localeCompare(b.sortKey ?? b.label, undefined, NATURAL_SORT_OPTS),
-        );
+        // Interleave shows and movies, ordered by the user's chosen "Sorting" appearance setting.
+        return applySortOrder([...showFolders, ...movieItems], sortOrder);
       }
       if (navStack.length === 1) {
         // Inside a show: one folder per season
@@ -555,6 +590,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const viewType = useSelector(selectMediaStructure);
   const viewScale = useSelector(selectViewScale);
   const viewOrientation = useSelector(selectViewOrientation);
+  const sortOrder = useSelector(selectSortOrder);
   const allLibrary = useSelector(selectMediaLibrary);
   const allMovies = useSelector(selectMovies);
   const allAudiobooks = useSelector(selectAudiobooks);
@@ -680,11 +716,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const listRowHeight = mapScaleToListRowHeight(viewScale);
 
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto),
+    () => buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto, sortOrder),
     // scanProgress.thumbnailsDone is included so the memo re-runs each time a
     // thumbnail is added to thumbnailCache during the thumbnail generation phase.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone],
+    [mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone, sortOrder],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0;
