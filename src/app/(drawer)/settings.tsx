@@ -9,7 +9,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, sortOrders, selectSortOrder, setSortOrder } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides, setScanList } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -89,6 +89,7 @@ export default function SettingsPrompt() {
   const [fetchEpisodeNames, setLocalFetchEpisodeNames] = useState(true);
   const [fetchEpisodeThumbnails, setLocalFetchEpisodeThumbnails] = useState(true);
   const [appColorScheme, setLocalAppColorScheme] = useState('system' as appColorSchemes);
+  const [sortOrder, setLocalSortOrder] = useState('alphabetical' as sortOrders);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
@@ -114,12 +115,14 @@ export default function SettingsPrompt() {
   const settingsFetchEpisodeNames = useSelector(selectFetchEpisodeNames);
   const settingsFetchEpisodeThumbnails = useSelector(selectFetchEpisodeThumbnails);
   const settingsAppColorScheme = useSelector(selectAppColorScheme);
+  const settingsSortOrder = useSelector(selectSortOrder);
 
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
   const viewOrientationRef = useRef(null);
   const defaultPageRef = useRef(null);
   const appColorSchemeRef = useRef(null);
+  const sortOrderRef = useRef(null);
 
   const dataSourceOptions = [
     {id: 'tmdb', label: 'TMDB'},
@@ -155,6 +158,13 @@ export default function SettingsPrompt() {
     {id: 'system', label: 'System'},
     {id: 'light', label: 'Light'},
     {id: 'dark', label: 'Dark'},
+  ];
+
+  const sortOrderOptions: { id: sortOrders; label: string }[] = [
+    {id: 'alphabetical', label: 'Alphabetical'},
+    {id: 'reverseAlphabetical', label: 'Reverse alphabetical'},
+    {id: 'lastOpened', label: 'Last opened'},
+    {id: 'reverseLastOpened', label: 'Reverse last opened'},
   ];
 
   const safeDecodeUri = useCallback((uri: string) => {
@@ -246,10 +256,16 @@ export default function SettingsPrompt() {
       }
       setLocalAppColorScheme(settingsAppColorScheme);
       setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
+
+      const sortOrderIndex = sortOrderOptions.findIndex(o => o.id === settingsSortOrder);
+      if (sortOrderRef.current && sortOrderIndex >= 0) {
+        (sortOrderRef.current as any).selectIndex(sortOrderIndex);
+      }
+      setLocalSortOrder(settingsSortOrder);
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder]);
 
   const save = () => {
     try {
@@ -329,6 +345,11 @@ export default function SettingsPrompt() {
       if (appColorScheme && appColorScheme !== settingsAppColorScheme) {
         logger.log('Settings', `Persisting: appColorScheme changed ${settingsAppColorScheme} → ${appColorScheme}`);
         dispatch(setAppColorScheme(appColorScheme));
+        changeCount++;
+      }
+      if (sortOrder && sortOrder !== settingsSortOrder) {
+        logger.log('Settings', `Persisting: sortOrder changed ${settingsSortOrder} → ${sortOrder}`);
+        dispatch(setSortOrder(sortOrder));
         changeCount++;
       }
       logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
@@ -809,6 +830,37 @@ export default function SettingsPrompt() {
                 setLocalAppColorScheme(selectedItem.id as appColorSchemes);
               } catch (e) {
                 logger.error('Settings', 'Exception while selecting color scheme', e as Error);
+              }
+            }}
+            renderButton={(selectedItem, isOpened) => (
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                  {(selectedItem && selectedItem.label) || 'Please select...'}
+                </Text>
+                <Text>{isOpened ? "🔼" : "🔽"}</Text>
+              </View>
+            )}
+            renderItem={(item, index, isSelected) => (
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+          />
+        </View>
+
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Sorting:</ThemedText>
+          <SelectDropdown
+            ref={sortOrderRef}
+            data={sortOrderOptions}
+            defaultValue={sortOrderOptions.find(o => o.id === settingsSortOrder)}
+            onSelect={(selectedItem) => {
+              try {
+                setLocalSortOrder(selectedItem.id as sortOrders);
+              } catch (e) {
+                logger.error('Settings', 'Exception while selecting sort order', e as Error);
               }
             }}
             renderButton={(selectedItem, isOpened) => (
