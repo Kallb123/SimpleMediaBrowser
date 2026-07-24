@@ -161,10 +161,9 @@ export default function SettingsPrompt() {
   ];
 
   const sortOrderOptions: { id: sortOrders; label: string }[] = [
-    {id: 'alphabetical', label: 'Alphabetical'},
-    {id: 'reverseAlphabetical', label: 'Reverse alphabetical'},
+    {id: 'alphabetical', label: 'A > Z'},
+    {id: 'reverseAlphabetical', label: 'Z > A'},
     {id: 'lastOpened', label: 'Last opened'},
-    {id: 'reverseLastOpened', label: 'Reverse last opened'},
     {id: 'recentlyAdded', label: 'Recently added'},
   ];
 
