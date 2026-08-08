@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="assets/store/icon-512.png" alt="SimpleMediaBrowser app icon" width="128">
+</p>
+
 # SimpleMediaBrowser
 
 A local media browser for Android. Point it at folders on your device or network storage and it organises your TV shows, movies and audiobooks into a clean, browsable library — with posters and metadata pulled automatically from [TMDB](https://www.themoviedb.org/) and cover art for audiobooks from the [iTunes Search API](https://performance-partners.apple.com/search-api).
+
+![Simple Media Browser — your own shows, films and audiobooks. Off your own drive. No account, no cloud.](assets/store/feature-graphic.png)
 
 ## Features
 
