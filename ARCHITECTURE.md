@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes how SimpleMediaBrowser is put together: the app's
+This document describes how Zibo is put together: the app's
 purpose, its runtime architecture, the data model, and the major subsystems.
 It is aimed at anyone (human or AI agent) making non-trivial changes to the
 codebase. For a quick orientation and contributor workflow, see
@@ -8,7 +8,8 @@ codebase. For a quick orientation and contributor workflow, see
 
 ## 1. Purpose
 
-SimpleMediaBrowser is an Android-first Expo/React Native app that turns
+Zibo ("Zibo — Local Media Library") is an Android-first Expo/React Native app
+that turns
 folders on local or network storage (accessed via Android's Storage Access
 Framework) into a browsable media library. It does **not** play media itself
 — it scans, organizes, and enriches metadata, then hands playback off to an
@@ -39,10 +40,14 @@ SimpleMediaBrowser/
 ├── App.tsx                      # Unused legacy entry point; real entry is expo-router (see index.js)
 ├── index.js                     # Entry: registers expo-router root ("expo-router/entry" in package.json)
 ├── app.json                     # Expo app config (name, package id, plugins, expo-router root="src")
+│                                # Note: `android.package` is still `net.nawt.simplemediabrowser` and the EAS
+│                                # `slug` is still `SimpleMediaBrowser` — both are store/build identity and
+│                                # must not be renamed, they predate the Zibo rebrand.
 ├── eas.json                     # EAS Build profiles
 ├── build.ps1                    # Windows helper script for local release builds
 ├── .github/workflows/           # CI: pre-build-test.yaml (typecheck/lint/test), build-apk.yml, eas-build.yaml
 ├── assets/                      # Icons, splash images, fonts, store graphics
+│   └── svg/                     # Master brand artwork (launcher fg/bg/monochrome, icon); PNGs are rasterised from these
 ├── docs/                        # README screenshots
 ├── scripts/reset-project.js     # Stock Expo "reset to blank template" helper — not app logic
 └── src/
