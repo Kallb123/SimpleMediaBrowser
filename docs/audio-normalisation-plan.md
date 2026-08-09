@@ -21,8 +21,9 @@ items — the plan is built around finding that minority cheaply.
 | **How is loudness measured?** | A local Expo native module: `MediaCodec` audio-only decode → BS.1770-4 K-weighted gated loudness. No ffmpeg. |
 | **Cost on a low-powered device?** | Full-file analysis of a 2h film ≈ 1–4 min on a cheap TV box. So we **don't** do that by default — a sampled estimate (~12×15 s windows) gets ±1 LU in **2–6 seconds** and is enough to triage. |
 | **How many items get touched?** | Only those outside a ±2 LU deadband around the library target. On a typical mixed library expect **10–25 %**; the rest are marked "in tolerance" and cost nothing further. |
-| **Does it modify the user's files?** | No, by default. M6 adds opt-in permanent normalisation for **audio-only** files, done losslessly and in place (§5.3). Rewriting video files is a non-goal — the objection is I/O and data-loss risk, not CPU. |
-| **Why not just use ffmpeg's `loudnorm`?** | Its *measurement* pass is genuinely attractive and would delete most of M1. But the maintained successor (FFmpegKitNext) is source-only, so we'd own an NDK build. Deferred to M6 as a deliberate decision, not dismissed — see §3.1. |
+| **Does it modify the user's files?** | Not in v1. M6 adds opt-in lossless in-place gain for **audio-only** files; M7 adds opt-in `loudnorm` for video on local storage. Both behind an explicit confirmation. |
+| **Can we just use ffmpeg's `loudnorm`?** | **Yes.** 16 KB-aligned FFmpegKit AARs are on Maven Central, FFmpegKit carries the `saf:` protocol Zibo needs for `content://` URIs, and no React Native binding is required — it's a Gradle line in our own Kotlin module. See §5.5. |
+| **What does that cost per film?** | With `-c:v copy` only the audio track is re-encoded: ~2 min on internal storage, ~5–10 min on MicroSD for an 8 GB film. A library is an overnight job. |
 
 ---
 
@@ -101,25 +102,33 @@ Against that:
 | Licensing | None | LGPL v3 (GPL if `--enable-gpl`) — needs dynamic linking + attribution |
 | Unlocks file-level gain? | No | Yes (A4) |
 
-**On the supply chain specifically:** the retirement of `ffmpeg-kit` (binaries
-pulled from Maven Central, CocoaPods and npm on 1 April 2025) is no longer the
-end of the story — development continues as
-[`FFmpegKitNext`](https://github.com/arthenica/ffmpeg-kit-next), maintained by
-the original author. The catch is that **FFmpegKitNext is distributed as source
-only**. Prebuilt binaries would have to be produced and maintained by us — an
-NDK build in CI producing an `.aar`, including 16 KB page alignment, which Google
-Play has required since 1 November 2025 for apps targeting Android 15+ and which
-the old artifacts never had. Several community forks publish binaries
-(`ffmpeg-kit-16KB` and similar), but they are unofficial and of varying
-provenance; for a feature that touches users' media files, that is not a
-dependency to take casually.
+**On the supply chain:** the retirement of `ffmpeg-kit` (binaries pulled from
+Maven Central, CocoaPods and npm on 1 April 2025) is not the end of the story.
+Development continues as
+[`FFmpegKitNext`](https://github.com/arthenica/ffmpeg-kit-next), maintained by the
+original author but **source-only**; separately, community forks publish
+16 KB-aligned AARs to Maven Central that can be consumed with a single Gradle
+line. Full detail on the options, the SAF protocol requirement and sizing is in
+**§5.5** — the short version is that this is a more available dependency than the
+"retired" headline suggests.
 
-**Recommendation: Path 1 for M1–M5.** The system-volume mechanism (A1) needs no
-ffmpeg, the deadband means most items are never touched anyway, and MediaCodec's
-hardware decode is an advantage on exactly the weak hardware this plan is built
-around. Revisit Path 2 at M6 *if* users actually ask for permanent, file-level
-normalisation — at which point the build pipeline earns its keep by enabling A4
-as well as the measurement. This decision should be re-taken at M6, not now.
+**Recommendation — and it hinges on one product decision.** These two questions
+have the same answer:
+
+- *If permanent, file-level normalisation (A4/A2b) is in scope at all*, take
+  **Path 2 from the start.** FFmpeg is then arriving anyway, and once it is in
+  the build, hand-writing a BS.1770 meter to sit next to `-af ebur128` is
+  pointless duplication. **M1 collapses to parsing JSON**, and the whole feature
+  gets the reference implementation's numbers.
+- *If the feature is only ever going to be A1 (system volume at handoff)*, take
+  **Path 1.** No APK bloat, no licence obligations, no third-party build to
+  vet, and MediaCodec's hardware decode helps on exactly the weak hardware this
+  plan targets.
+
+**Decide this before starting M1, not at M6** — building the Kotlin meter first
+and adopting ffmpeg later means paying for both. The plan below is written for
+Path 1 because it is the larger amount of work and the safer default; if Path 2
+is chosen, M1 shrinks to a day and M7 becomes reachable.
 
 ### 3.2 The module
 
@@ -405,24 +414,49 @@ an audio decode, nothing more. Pass two applies the gain. **You only ever need
 pass two if you want the change baked into the file**, and once pass one has
 given you a number, pass two can be the far simpler `-af volume=-3.2dB`.
 
-**Applying it to video is cheap in CPU and expensive in I/O.** With
-`-map 0 -c copy -c:a:0 ac3 -af volume=…` the video bitstream is stream-copied,
-not transcoded — only one audio track is decoded and re-encoded. For a 2-hour
-film that is a couple of minutes of CPU on a phone, not hours. **My earlier
-framing of this as "hours per film" was a full-transcode figure and simply
-wrong.** The genuine objections are elsewhere:
+**Applying it to video is cheap in CPU.** With `-map 0 -c copy -c:a:0 ac3 -af
+volume=…` the video bitstream is stream-copied, not transcoded — only one audio
+track is decoded and re-encoded. For a 2-hour film that is a couple of minutes of
+CPU on a phone. Any framing of this as "hours per film" is a full-transcode
+figure and does not apply.
 
-- **A whole new file must be written.** An 8 GB film means reading 8 GB and
-  writing 8 GB, then replacing the original. Over USB 2.0 that's ~10 minutes; over
-  a Wi-Fi SMB share, closer to half an hour. CPU was never the bottleneck.
-- **It needs 2× free space** during the operation, on storage the user may not
-  control.
-- **Lossy → lossy generation loss** on the re-encoded audio track.
-- **A failure mid-write can destroy an irreplaceable file.** This is the one that
-  actually settles it. An app whose job is *browsing* a library should not be
-  rewriting multi-gigabyte files on a network share.
+**On local storage the I/O is fine too.** Scoping this to internal storage and
+MicroSD — where the app's content usually lives, and where the user isn't
+choosing to put a library on a Wi-Fi share — an 8 GB film costs:
 
-So A4 stays a non-goal for video — but for the right reason, and only for video.
+| Storage | Read + write 8 GB | With audio re-encode overlapped |
+|---|---|---|
+| Internal (UFS) | ~30–60 s | ~2 min |
+| MicroSD (UHS-I) | ~3–8 min | ~5–10 min |
+
+So a film is minutes and a whole library is an overnight job — perfectly
+reasonable for an opt-in, resumable, one-time batch. **Network and USB sources
+are the user's choice and their cost;** the right behaviour is to warn and let
+them proceed, not to refuse.
+
+What genuinely remains, and must be designed for rather than used as an excuse:
+
+- **Free space.** Needs headroom equal to the largest file being processed.
+  Check before starting each item, skip and report if short.
+- **Atomicity.** Write to a temp document, verify it (duration and track count
+  match the source), *then* swap via `DocumentsContract.renameDocument` and only
+  then delete the original. Never delete first.
+- **Generation loss.** AC-3 → AC-3 costs a little quality each pass. Mitigate by
+  making the operation idempotent: record the original LUFS and the applied gain,
+  so a re-run is a no-op rather than a second re-encode. Encode at no less than
+  the source bitrate.
+- **Track preservation.** `-map 0 -c copy` keeps subtitles, chapters and extra
+  audio tracks, but MKV attachments and some subtitle codecs need checking.
+- **Baked-in gain makes the target sticky.** This is the subtle one. If 200 films
+  are normalised to a library-derived target and 50 more arrive that shift the
+  median, you either re-encode everything again or accept a mismatch. **Anything
+  written into files should therefore use a fixed standard target (−23 LUFS EBU
+  R128), never the `minimise-work` or `library-median` modes** — those exist
+  precisely because A1 can re-plan for free, and that property is lost the moment
+  gain is permanent. The planner needs to enforce this, not just document it.
+
+A4 is therefore **not a non-goal any more** — it is an opt-in feature for local
+storage, planned as M7.
 
 **For audio-only files there is a genuinely cheap permanent option (A2b).** MP3
 and AAC frames carry a `global_gain` field; patching it changes playback level
@@ -471,7 +505,62 @@ MP3 audiobooks fare no better — they would come back as `.m4a`.
 
 So Media3 Transformer is a good tool aimed slightly past this problem. Worth
 re-checking at M6 in case Matroska output lands, but not something to build on
-today.
+today. FFmpeg does not have this limitation — it muxes Matroska natively and
+`-c copy` round-trips the container, subtitles and chapters intact, which is the
+single strongest argument for using it over Media3 here.
+
+### 5.5 Which library actually gives us `loudnorm`
+
+`loudnorm` is a libavfilter filter, so this means FFmpeg — the question is only
+how to get FFmpeg into the app. Three viable routes, and one thing that makes all
+of them easier than expected.
+
+**The thing that makes it easier: we don't need a React Native binding.** The plan
+already calls for a local Kotlin Expo module (`modules/zibo-loudness/`). An
+Android `.aar` added to that module's `build.gradle`, called through FFmpegKit's
+Java API, is all that's required. No `ffmpeg-kit-react-native`, no npm package, no
+JS bridge coupled to the RN version — which removes most of the fragility that
+made this look unattractive. (`ffmpeg-expo` exists on npm but self-describes as
+"not stable for production use yet… mostly a hobby project" at 17 commits, so it
+is not a candidate.)
+
+| Route | What it is | Trade-off |
+|---|---|---|
+| **`com.moizhassan.ffmpeg:ffmpeg-kit-16kb:6.1.1`** | Community rebuild of the retired arthenica source, on Maven Central. FFmpeg 6.0, NDK r23/r25, 16 KB aligned. | Fastest route — one Gradle line. Unofficial; a single-maintainer republish. Pin the version and vendor a copy. |
+| **`io.github.jamaismagic.ffmpeg:ffmpeg-kit-lts-16kb`** | Another published fork; LTS variant targets a wider range of API levels. | Same category. Worth comparing ABI coverage and minSdk against the above. |
+| **Build FFmpegKitNext in CI** | The [official continuation](https://github.com/arthenica/ffmpeg-kit-next), source-only, by the original author. | Most trustworthy and lets us strip the build down to only what we use. Costs an NDK build job and ongoing ownership. |
+
+**The SAF detail that matters more than any of the above:** Zibo has no file
+paths — everything is a `content://` URI, and on removable storage (MicroSD)
+there is no usable direct path at all. Plain FFmpeg cannot open a content URI.
+FFmpegKit solves this with a [custom `saf:`
+protocol](https://github.com/arthenica/ffmpeg-kit/wiki/Storage-Access-Framework):
+`FFmpegKitConfig.getSafParameterForRead(context, uri)` returns a path FFmpeg can
+open, and `getSafParameterForWrite` does the same for output. **This is an
+FFmpegKit patch on top of upstream FFmpeg, not an upstream feature** — so a
+minimal AAR built from vanilla FFmpeg sources would not have it and would need
+the equivalent work replicating. It is a strong reason to stay in the FFmpegKit
+family rather than rolling a bare build.
+
+**Size.** The stock `min` package is roughly 10–15 MB of `.so` per ABI. Delivered
+as an App Bundle that is per-ABI, so the user downloads one copy — but
+`build-apk.yml` produces a universal APK, which would multiply it. Either restrict
+ABIs there or accept the size. A custom FFmpegKitNext build enabling only the
+demuxers, decoders, encoders and filters actually used (`ebur128`, `loudnorm`,
+`volume`, matroska/mov/mp3, ac3/aac/opus/flac) would come in well under that;
+that is the main practical payoff of route 3.
+
+**Licensing.** LGPL v3 for the non-`-gpl` packages, which is satisfied by the
+dynamic `.so` linking these AARs already use, plus attribution and an offer of
+source. Avoid any `-gpl` variant. Nothing here needs `libx264`.
+
+**On `loudnorm` specifically:** use it in **two-pass linear mode**
+(`loudnorm=I=-23:TP=-1:LRA=11:measured_I=…:measured_TP=…:measured_LRA=…:measured_thresh=…:linear=true`),
+feeding pass one's JSON back in. Single-pass `loudnorm` applies *dynamic* gain —
+it would audibly squash a film's dynamics, which is the opposite of what this
+feature is for. Two-pass linear is equivalent to measure-then-`volume=XdB` with a
+true-peak limiter attached, and the limiter is a genuine bonus over the manual
+clip guard in §4.4.
 
 ---
 
@@ -649,17 +738,40 @@ actually adjusted.
   normalisation" action. Ship behind the same explicit "this modifies your files"
   confirmation, and only after the analysis numbers have been trusted in the field
   for a release or two.
-- **Re-open the ffmpeg decision (§3.1).** If users want permanent normalisation
-  for *video* too, that is the point at which building FFmpegKitNext from source
-  in CI earns its cost — it would serve both the measurement and A4. The I/O and
-  data-loss objections in §5.3 still apply and would need a real answer (write to
-  a temp file on internal storage, verify, then swap; refuse on network sources).
 - **In-app player path** using the already-installed `expo-video`, applying exact
   attenuation via `player.volume`. Best precision available, but it changes the
   product from "launcher" to "player" and inherits codec limits — a product
   decision, not a technical one.
 - **Export/import**: include loudness in `ImportExportService.exportJson` so a
   reinstall or a second device doesn't repeat hours of analysis.
+
+### M7 — Permanent normalisation for video, on local storage *(opt-in)*
+
+Only if M1–M5 are solid and the ffmpeg decision in §3.1 went to Path 2. This is
+the `loudnorm` path, scoped to internal storage and MicroSD.
+
+1. **Dependency**: FFmpegKit AAR in the local module's `build.gradle` (§5.5),
+   version pinned, LGPL attribution added to the about screen.
+2. **SAF plumbing**: `getSafParameterForRead` / `getSafParameterForWrite` wrappers;
+   verify seekable read *and* write against MicroSD specifically, which is the
+   case most likely to misbehave.
+3. **Measure**: reuse the existing measurements from M1–M2 — pass one is already
+   done. Only `measured_*` values need carrying into the command.
+4. **Apply**: `-map 0 -c copy -c:a:0 <src codec> -af loudnorm=…:linear=true` into
+   a temp document in the same directory.
+5. **Verify then swap**: compare duration and track count against the source,
+   `DocumentsContract.renameDocument`, delete the original last.
+6. **Guard rails**, all of which are the point of the milestone rather than
+   details of it: free-space precheck; **force the fixed −23 LUFS target, not a
+   library-derived one** (§5.3); record `normalisedAt` + `originalLufs` +
+   `appliedGainDb` so the operation is idempotent and auditable; warn (don't
+   refuse) on network/USB sources; process one item at a time, resumable, with a
+   clear "this rewrites your files" confirmation and a per-item opt-out.
+7. **Test on real files**: MKV with AC-3 + subtitles + chapters, MKV with DTS,
+   MP4/AAC, and a file with two audio tracks. Confirm nothing is lost.
+
+**Exit criteria:** a normalised film plays in VLC and MX Player with all tracks,
+subtitles and chapters intact, at the target level, with no second pass needed.
 
 ---
 
@@ -712,14 +824,16 @@ milestone.
 
 ## 9. Explicit non-goals
 
-- **Re-encoding the audio track of video files (`loudnorm` / A4)** — *for v1*.
-  Not because it is slow: with the video stream-copied it is a couple of minutes
-  of CPU per film. Because it means rewriting a multi-gigabyte file over
-  SAF/network storage, needing 2× free space, with a mid-write failure destroying
-  something irreplaceable (§5.3). A browsing app should not carry that risk by
-  default. Permanent normalisation of *audio-only* files is a different matter and
-  is planned as A2b in M6. If a user wants it baked into their films, a desktop
-  pass before the files reach the library remains the right answer.
+- **Re-encoding audio tracks (`loudnorm` / A4) — for v1 only, not permanently.**
+  It is planned as M7 for local storage. It is out of scope for the first release
+  because it depends on the ffmpeg decision (§3.1), needs the atomic
+  write-verify-swap machinery of §5.3, and should not ship until the measurement
+  numbers have been trusted in the field. It is *not* excluded on cost grounds —
+  with the video stream-copied it is minutes per film on internal storage or
+  MicroSD.
+- **Rewriting files on network or USB sources by default.** The cost there is
+  real and unpredictable, but it is the user's choice to make: warn, show an
+  estimate, and let them proceed.
 - **Dynamic range compression / night mode.** Different feature, different
   problem (loud explosions vs quiet dialogue *within* one item). Related, worth
   considering later, out of scope here.
@@ -752,3 +866,11 @@ milestone.
    the case for Path 1 rests on APK size and supply chain alone.
 6. **What proportion of a real audiobook library is MP3 vs M4B?** A2b's value
    depends on it; the MP3 frame walk is well-trodden, the AAC one less so.
+7. **Which FFmpegKit fork, and how much do we trust it?** §5.5 lists two published
+   16 KB-aligned AARs against building FFmpegKitNext ourselves. Needs an actual
+   look at the artifacts — ABI coverage, minSdk, whether the `saf:` protocol
+   survived the rebuild, and reproducibility against the source. Vendor a pinned
+   copy either way.
+8. **Does the `saf:` protocol give seekable read *and* write on MicroSD?** M7 step
+   2. Read is well-trodden; write to removable storage via SAF is the case most
+   likely to surprise us, and the whole write-verify-swap flow depends on it.
