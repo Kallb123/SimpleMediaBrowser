@@ -1,5 +1,5 @@
 /**
- * ImportExportService — import/export functionality for SimpleMediaBrowser.
+ * ImportExportService — import/export functionality for Zibo.
  *
  * Provides three operations:
  *  1. exportJson  – save settings, overrides and/or matched metadata to a JSON file.

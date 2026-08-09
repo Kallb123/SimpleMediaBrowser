@@ -56,7 +56,7 @@ export default function LogsScreen() {
         const text = logger.getLogs();
         try {
             await Share.share({
-                title: 'SimpleMediaBrowser debug log',
+                title: 'Zibo debug log',
                 message: text || '(log is empty)',
             });
         } catch {

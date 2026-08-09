@@ -7,7 +7,7 @@ defers to it for anything beyond orientation.
 
 ## What this project is
 
-SimpleMediaBrowser is an Android-first Expo/React Native app (Expo SDK 55,
+Zibo (Zibo — Local Media Library) is an Android-first Expo/React Native app (Expo SDK 55,
 RN 0.83) that scans SAF-accessible folders into a browsable TV/movie/
 audiobook library, enriches it with TMDB/TVDB/iTunes metadata, and hands
 playback off to an external player app. See [README.md](./README.md) for the

@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "SimpleMediaBrowser",
+    "name": "Zibo",
     "owner": "kallb123",
     "slug": "SimpleMediaBrowser",
-    "version": "1.15.2",
+    "version": "2.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "simplemediabrowser",
+    "scheme": "zibo",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png"
@@ -20,7 +20,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "net.nawt.simplemediabrowser",
-      "versionCode": 56
+      "versionCode": 57
     },
     "web": {
       "output": "static",

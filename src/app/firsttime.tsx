@@ -52,7 +52,7 @@ export default function FirstTime() {
     <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
     <ScrollView contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
       <View style={styles.header}>
-        <ThemedText type="title">Welcome to Simple Media Browser</ThemedText>
+        <ThemedText type="title">Welcome to Zibo</ThemedText>
         <HelloWave />
       </View>
 
