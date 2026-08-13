@@ -683,22 +683,22 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   // navigateBack pops one entry), so comparing lengths is sufficient to determine direction.
   const prevNavStackLength = useRef(0);
   useEffect(() => {
-    const list = flashListRef.current;
-    if (!list) return;
     const goingDeeper = navStack.length > prevNavStackLength.current;
     prevNavStackLength.current = navStack.length;
-    if (goingDeeper) {
-      currentScrollOffset.current = 0;
-      list.scrollToOffset({ offset: 0, animated: false });
-    } else {
-      // Restore the offset saved for this level. Because offsets are recorded
-      // in navigateInto at the moment the user leaves a level, the stored value
-      // always reflects exactly where the user was in that list—it cannot be
-      // stale within the same session.
-      const saved = savedScrollOffsets.current.get(navStackKey(navStack)) ?? 0;
-      currentScrollOffset.current = saved;
-      list.scrollToOffset({ offset: saved, animated: false });
-    }
+    // Restore the offset saved for this level. Because offsets are recorded
+    // in navigateInto at the moment the user leaves a level, the stored value
+    // always reflects exactly where the user was in that list—it cannot be
+    // stale within the same session.
+    const targetOffset = goingDeeper ? 0 : (savedScrollOffsets.current.get(navStackKey(navStack)) ?? 0);
+    currentScrollOffset.current = targetOffset;
+    // Deferred to the next frame: FlashList hasn't laid out the new `data` yet on the
+    // same tick the nav stack changes, so calling scrollToOffset synchronously here
+    // either no-ops or lands wherever the previous list's content size happens to
+    // clamp it—not the target offset. Waiting a frame lets the new item set commit first.
+    const rafId = requestAnimationFrame(() => {
+      flashListRef.current?.scrollToOffset({ offset: targetOffset, animated: false });
+    });
+    return () => cancelAnimationFrame(rafId);
   }, [navStack]);
 
   const handleScroll = useCallback(
@@ -1028,6 +1028,10 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
             extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedItems).join(',')}`}
+            // v2 enables this by default to reduce feed/chat-style glitches, but it fights
+            // our own scroll save/restore below since each nav level swaps in an entirely
+            // unrelated item set (not an incremental append/prepend).
+            maintainVisibleContentPosition={{ disabled: true }}
             onScroll={handleScroll}
             // scrollEventThrottle controls how often the native layer fires scroll
             // events (in ms). 16ms ≈ 60 fps keeps offset tracking accurate without
