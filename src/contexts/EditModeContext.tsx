@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 interface EditModeContextType {
   editMode: boolean;
@@ -32,15 +32,18 @@ export function EditModeProvider({ children }: { children: React.ReactNode }) {
   const [drawerUnlocked, setDrawerUnlocked] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
-  const setEditMode = (value: boolean) => {
+  // These are memoised because consumers use them as hook dependencies — notably
+  // MediaBrowserScreen's navigateInto, which feeds the memo backing FlashList's `data`.
+  // Recreating them each render invalidates that memo and forces the list to re-lay out.
+  const setEditMode = useCallback((value: boolean) => {
     _setEditMode(value);
     // Clear any pending selection when leaving edit mode.
     if (!value) {
       setSelectedItems(new Set());
     }
-  };
+  }, []);
 
-  const toggleItemSelection = (key: string) => {
+  const toggleItemSelection = useCallback((key: string) => {
     setSelectedItems((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
@@ -50,12 +53,17 @@ export function EditModeProvider({ children }: { children: React.ReactNode }) {
       }
       return next;
     });
-  };
+  }, []);
 
-  const clearItemSelection = () => setSelectedItems(new Set());
+  const clearItemSelection = useCallback(() => setSelectedItems(new Set()), []);
+
+  const value = useMemo(
+    () => ({ editMode, setEditMode, drawerUnlocked, setDrawerUnlocked, selectedItems, toggleItemSelection, clearItemSelection }),
+    [editMode, setEditMode, drawerUnlocked, selectedItems, toggleItemSelection, clearItemSelection],
+  );
 
   return (
-    <EditModeContext.Provider value={{ editMode, setEditMode, drawerUnlocked, setDrawerUnlocked, selectedItems, toggleItemSelection, clearItemSelection }}>
+    <EditModeContext.Provider value={value}>
       {children}
     </EditModeContext.Provider>
   );

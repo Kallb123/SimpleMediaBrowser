@@ -14,7 +14,7 @@ import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShow
 import { selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { MetadataService } from '@/scripts/MetadataService';
 import { store } from '@/store/store';
-import { FlashList, FlashListRef } from '@shopify/flash-list';
+import { FlashList, FlashListRef, ViewToken } from '@shopify/flash-list';
 import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary, IMediaAudiobook } from '@/store/libraryReducer';
 import type { IMediaOverride } from '@/store/libraryReducer';
@@ -566,8 +566,14 @@ function buildBaseDisplayItems(
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
-/** Serialises a nav stack into a stable string key used to save/restore scroll offsets. */
+/** Serialises a nav stack into a stable string key used to save/restore scroll positions. */
 const navStackKey = (stack: NavLevel[]) => stack.map((n) => n.label).join('/');
+
+/** Stable empty collections, so filtered-out media types keep a constant identity across
+ *  renders instead of handing the `displayItems` memo a fresh `{}`/`[]` every time. */
+const EMPTY_LIBRARY: IMediaLibrary = {};
+const EMPTY_MOVIES: IMediaObject[] = [];
+const EMPTY_AUDIOBOOKS: IMediaAudiobook[] = [];
 
 const CARD_GAP = 8;
 /** Portrait mode: minimum number of grid columns shown at the lowest viewScale. */
@@ -639,25 +645,31 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     });
   }, []);
 
-  // Apply filter
-  const mediaLibrary: IMediaLibrary = (mediaFilter === 'movies' || mediaFilter === 'audiobooks') ? {} : allLibrary;
-  const movies: IMediaObject[] = (mediaFilter === 'tv' || mediaFilter === 'audiobooks') ? [] : allMovies;
+  // Apply filter. These are memoised because they feed the `displayItems` memo, which in
+  // turn is FlashList's `data`: rebuilding the empty literals on every render would hand
+  // FlashList a fresh array identity each time and make it re-run layout (which discards
+  // any scroll position we just restored).
+  const mediaLibrary: IMediaLibrary = (mediaFilter === 'movies' || mediaFilter === 'audiobooks') ? EMPTY_LIBRARY : allLibrary;
+  const movies: IMediaObject[] = (mediaFilter === 'tv' || mediaFilter === 'audiobooks') ? EMPTY_MOVIES : allMovies;
   // Audiobooks appear on the dedicated Audiobooks page and on Home (all).
-  const audiobooks: IMediaAudiobook[] = (mediaFilter === 'all' || mediaFilter === 'audiobooks') ? allAudiobooks : [];
+  const audiobooks: IMediaAudiobook[] = (mediaFilter === 'all' || mediaFilter === 'audiobooks') ? allAudiobooks : EMPTY_AUDIOBOOKS;
 
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
 
   // Ref to the FlashList so we can programmatically scroll it.
   const flashListRef = useRef<FlashListRef<DisplayItem>>(null);
-  // Tracks the most recent scroll offset without causing re-renders.
-  const currentScrollOffset = useRef(0);
-  // Persists the scroll offset for each nav level, keyed by serialised stack path.
-  const savedScrollOffsets = useRef<Map<string, number>>(new Map());
+  // Index of the topmost visible item, tracked without causing re-renders.
+  const firstVisibleIndex = useRef(0);
+  // Persists the topmost visible index for each nav level, keyed by serialised stack path.
+  const savedScrollIndices = useRef<Map<string, number>>(new Map());
+  // Latest `displayItems`, so the restore effect can clamp to the current item count
+  // without re-running every time the list contents change.
+  const displayItemsRef = useRef<DisplayItem[]>([]);
 
-  // Reset navigation and saved offsets when viewType changes.
+  // Reset navigation and saved positions when viewType changes.
   useEffect(() => {
-    savedScrollOffsets.current.clear();
+    savedScrollIndices.current.clear();
     setNavStack([]);
   }, [viewType]);
 
@@ -666,7 +678,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     clearItemSelection();
     setNavStack((prev: NavLevel[]) => {
       // Save the scroll position for the level we are leaving.
-      savedScrollOffsets.current.set(navStackKey(prev), currentScrollOffset.current);
+      savedScrollIndices.current.set(navStackKey(prev), firstVisibleIndex.current);
       return [...prev, entry];
     });
   }, [clearItemSelection]);
@@ -677,33 +689,58 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   }, []);
 
   // After the nav stack changes, scroll to the appropriate position:
-  // - going deeper → reset to top (offset 0)
-  // - going shallower (back) → restore the saved offset for that level
+  // - going deeper → reset to top
+  // - going shallower (back) → restore the saved position for that level
   // Navigation always moves exactly one level at a time (navigateInto pushes one entry,
   // navigateBack pops one entry), so comparing lengths is sufficient to determine direction.
   const prevNavStackLength = useRef(0);
   useEffect(() => {
     const goingDeeper = navStack.length > prevNavStackLength.current;
     prevNavStackLength.current = navStack.length;
-    // Restore the offset saved for this level. Because offsets are recorded
-    // in navigateInto at the moment the user leaves a level, the stored value
-    // always reflects exactly where the user was in that list—it cannot be
-    // stale within the same session.
-    const targetOffset = goingDeeper ? 0 : (savedScrollOffsets.current.get(navStackKey(navStack)) ?? 0);
-    currentScrollOffset.current = targetOffset;
-    // Deferred to the next frame: FlashList hasn't laid out the new `data` yet on the
-    // same tick the nav stack changes, so calling scrollToOffset synchronously here
-    // either no-ops or lands wherever the previous list's content size happens to
-    // clamp it—not the target offset. Waiting a frame lets the new item set commit first.
+    // Restore the index saved for this level. Because it is recorded in navigateInto at
+    // the moment the user leaves a level, the stored value always reflects exactly where
+    // the user was in that list—it cannot be stale within the same session.
+    const saved = goingDeeper ? 0 : (savedScrollIndices.current.get(navStackKey(navStack)) ?? 0);
+    // Clamp: the level may hold fewer items than when we left it (e.g. items hidden since).
+    const targetIndex = Math.min(saved, Math.max(0, displayItemsRef.current.length - 1));
+    firstVisibleIndex.current = targetIndex;
+    if (targetIndex === 0) {
+      // Offset 0 is always valid regardless of how much has been measured, so this needs
+      // none of the retry machinery below.
+      flashListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      return;
+    }
+    // Restore by index rather than by pixel offset. A raw scrollToOffset is a single
+    // native scrollTo that the underlying ScrollView clamps to the content size measured
+    // *so far*; right after a nav-level swap most of the new list is still unmeasured, so
+    // a large offset clamps to near the top. scrollToIndex instead steps toward the target
+    // and recomputes it as items get measured, which converges on the right row.
+    let cancelled = false;
     const rafId = requestAnimationFrame(() => {
-      flashListRef.current?.scrollToOffset({ offset: targetOffset, animated: false });
+      if (cancelled) return;
+      flashListRef.current?.scrollToIndex({ index: targetIndex, animated: false })
+        .catch((e: unknown) => {
+          logger.warn('MediaBrowserScreen', `Failed to restore scroll to index ${targetIndex}`, e);
+        });
     });
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+    };
   }, [navStack]);
 
-  const handleScroll = useCallback(
-    (event: { nativeEvent: { contentOffset: { y: number } } }) => {
-      currentScrollOffset.current = event.nativeEvent.contentOffset.y;
+  // FlashList requires a stable identity here; the refs it writes to keep it dependency-free.
+  const handleViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken<DisplayItem>[] }) => {
+      let topmost = -1;
+      for (const token of viewableItems) {
+        if (token.index !== null && token.index !== undefined && (topmost === -1 || token.index < topmost)) {
+          topmost = token.index;
+        }
+      }
+      if (topmost !== -1) {
+        firstVisibleIndex.current = topmost;
+      }
     },
     [],
   );
@@ -741,6 +778,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone, sortOrder],
   );
+  // Kept in a ref so the scroll-restore effect can read the current item count without
+  // taking displayItems as a dependency (which would re-trigger restores mid-browse).
+  displayItemsRef.current = displayItems;
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0;
 
@@ -1032,11 +1072,9 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             // our own scroll save/restore below since each nav level swaps in an entirely
             // unrelated item set (not an incremental append/prepend).
             maintainVisibleContentPosition={{ disabled: true }}
-            onScroll={handleScroll}
-            // scrollEventThrottle controls how often the native layer fires scroll
-            // events (in ms). 16ms ≈ 60 fps keeps offset tracking accurate without
-            // flooding the JS thread.
-            scrollEventThrottle={16}
+            // Tracks which item is at the top of the viewport, so navigating away can
+            // record a position that survives the list being re-laid out on return.
+            onViewableItemsChanged={handleViewableItemsChanged}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isEditable = (
                 item.mediaType === 'show' ||
