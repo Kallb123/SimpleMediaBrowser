@@ -16,6 +16,7 @@ import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
+import { useKeyboardScrollFix } from '@/hooks/useKeyboardScrollFix';
 import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 import { useEditMode } from '@/contexts/EditModeContext';
@@ -65,6 +66,7 @@ export default function SettingsPrompt() {
   // See edititem.tsx for why we use the real header height here instead of
   // KeyboardAvoidingView's automaticOffset heuristic.
   const headerHeight = useHeaderHeight();
+  const { scrollRef, handleScroll, handleInputFocus } = useKeyboardScrollFix();
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
@@ -592,7 +594,14 @@ export default function SettingsPrompt() {
   return (
     <SettingsErrorBoundary>
     <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={headerHeight}>
-    <ScrollView style={containerStyle} contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      ref={scrollRef}
+      style={containerStyle}
+      contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]}
+      keyboardShouldPersistTaps="handled"
+      onScroll={handleScroll}
+      scrollEventThrottle={16}
+    >
 
       {/* Access */}
       <View style={styles.section}>
@@ -601,6 +610,7 @@ export default function SettingsPrompt() {
           <ThemedText style={styles.rowLabel}>Password for settings:</ThemedText>
           <ThemedTextInput
             onChangeText={setLocalPassword}
+            onFocus={handleInputFocus}
             value={password ?? ""}
             placeholder="Settings password"
             keyboardType="default"
@@ -719,6 +729,7 @@ export default function SettingsPrompt() {
         <ThemedText style={styles.rowLabel}>TMDB API Key:</ThemedText>
         <ThemedTextInput
           onChangeText={setLocalTmdbApiKey}
+          onFocus={handleInputFocus}
           value={tmdbApiKey ?? ""}
           placeholder="Paste your TMDB API key"
           keyboardType="default"
@@ -731,6 +742,7 @@ export default function SettingsPrompt() {
         <ThemedText style={styles.rowLabel}>TheTVDB API Key:</ThemedText>
         <ThemedTextInput
           onChangeText={setLocalTvdbApiKey}
+          onFocus={handleInputFocus}
           value={tvdbApiKey ?? ""}
           placeholder="Paste your TVDB API key"
           keyboardType="default"
@@ -742,6 +754,7 @@ export default function SettingsPrompt() {
         <ThemedText style={styles.rowLabel}>TheTVDB Subscriber PIN:</ThemedText>
         <ThemedTextInput
           onChangeText={setLocalTvdbPin}
+          onFocus={handleInputFocus}
           value={tvdbPin ?? ""}
           placeholder="Optional subscriber PIN"
           keyboardType="default"
