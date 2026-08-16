@@ -645,14 +645,34 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     });
   }, []);
 
+  // Shows/movies/audiobooks whose source was unreachable during the last scan (e.g. a
+  // disconnected storage device) are kept in Redux with their metadata intact but marked
+  // `unavailable`, so they must be excluded here rather than deleted. Preserve identity
+  // when nothing is unavailable so this doesn't churn the memos below on every render.
+  const visibleLibrary: IMediaLibrary = useMemo(() => {
+    const hiddenNames = Object.keys(allLibrary).filter((name) => allLibrary[name].unavailable);
+    if (hiddenNames.length === 0) return allLibrary;
+    const filtered: IMediaLibrary = { ...allLibrary };
+    for (const name of hiddenNames) delete filtered[name];
+    return filtered;
+  }, [allLibrary]);
+  const visibleMovies: IMediaObject[] = useMemo(
+    () => (allMovies.some((m) => m.unavailable) ? allMovies.filter((m) => !m.unavailable) : allMovies),
+    [allMovies],
+  );
+  const visibleAudiobooks: IMediaAudiobook[] = useMemo(
+    () => (allAudiobooks.some((a) => a.unavailable) ? allAudiobooks.filter((a) => !a.unavailable) : allAudiobooks),
+    [allAudiobooks],
+  );
+
   // Apply filter. These are memoised because they feed the `displayItems` memo, which in
   // turn is FlashList's `data`: rebuilding the empty literals on every render would hand
   // FlashList a fresh array identity each time and make it re-run layout (which discards
   // any scroll position we just restored).
-  const mediaLibrary: IMediaLibrary = (mediaFilter === 'movies' || mediaFilter === 'audiobooks') ? EMPTY_LIBRARY : allLibrary;
-  const movies: IMediaObject[] = (mediaFilter === 'tv' || mediaFilter === 'audiobooks') ? EMPTY_MOVIES : allMovies;
+  const mediaLibrary: IMediaLibrary = (mediaFilter === 'movies' || mediaFilter === 'audiobooks') ? EMPTY_LIBRARY : visibleLibrary;
+  const movies: IMediaObject[] = (mediaFilter === 'tv' || mediaFilter === 'audiobooks') ? EMPTY_MOVIES : visibleMovies;
   // Audiobooks appear on the dedicated Audiobooks page and on Home (all).
-  const audiobooks: IMediaAudiobook[] = (mediaFilter === 'all' || mediaFilter === 'audiobooks') ? allAudiobooks : EMPTY_AUDIOBOOKS;
+  const audiobooks: IMediaAudiobook[] = (mediaFilter === 'all' || mediaFilter === 'audiobooks') ? visibleAudiobooks : EMPTY_AUDIOBOOKS;
 
   const [navStack, setNavStack] = useState<NavLevel[]>([]);
   const [pressedKey, setPressedKey] = useState<string | null>(null);

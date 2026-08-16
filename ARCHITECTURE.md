@@ -187,6 +187,15 @@ Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
   `folderKey` (stable grouping key derived from the relative folder path),
   `path` (first part), `files: IAudiobookFile[]` (all parts, naturally
   sorted), `poster`.
+- **`sourceUri` / `unavailable`** — `IMediaShow`, `IMediaObject`, and
+  `IMediaAudiobook` all carry an optional `sourceUri` (the `IMediaSource.uri`
+  they were scanned from) and an optional `unavailable` flag. When a
+  source's root folder can't be read during a scan (e.g. its storage device
+  is disconnected), `scanAllSources` carries the item forward from the
+  previous scan with `unavailable: true` instead of dropping it — metadata
+  survives, but `MediaBrowserScreen` excludes flagged items from what it
+  renders (see §7 step 5). The flag clears itself the next time that
+  source scans successfully, since the item is then rebuilt fresh.
 - **`IMediaOverride`** — user edits layered on top of scanned/provider data:
   `title`, `sortTitle`, `tmdbId`/`tvdbId`, `year`, `poster`, `hidden`,
   `metadataSourceOverride`. Stored in `mediaOverrides` keyed by a namespaced
@@ -242,6 +251,15 @@ per-source-folder `metadataSource` → global `settings.dataSource`.**
    exists on disk and the new scan didn't find a fresher local poster), and
    episode-level `resolvedTitle`/`resolvedThumbnail`. This is what keeps
    posters from "flashing empty" on every rescan while enrichment re-runs.
+   Separately, if a source's root directory itself couldn't be read this
+   scan (`rootAccessible` false in `collectAllMediaFiles` — e.g. a
+   disconnected USB/SD device), any previously-scanned show/movie/audiobook
+   whose `sourceUri` matches that source (or, for older items scanned before
+   `sourceUri` existed, when *every* source of that content type failed) is
+   re-inserted into the fresh library/movie/audiobook list with
+   `unavailable: true` rather than being silently dropped by the `setMedia*`
+   dispatches below. This is what fixes the "app forgets everything scanned
+   from a disconnected drive" failure mode — data is hidden, not deleted.
 6. **Metadata enrichment** — if poster fetching is enabled and either a
    provider API key is configured or any audiobooks were found, awaits
    `MetadataService.getInstance().enrichAll(...)` before continuing (kept
