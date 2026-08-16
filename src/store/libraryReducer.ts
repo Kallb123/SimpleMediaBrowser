@@ -57,6 +57,15 @@ export interface IMediaShow {
      * without needing a per-item override.  Absent means use the global setting.
      */
     metadataSource?: dataSources;
+    /** The `IMediaSource.uri` of the source folder this show was scanned from. */
+    sourceUri?: string;
+    /**
+     * Set when this show's source could not be read during the most recent
+     * scan (e.g. its storage device is disconnected) and it was carried
+     * forward from the previous scan instead of being dropped. The UI hides
+     * shows with this flag rather than deleting their metadata.
+     */
+    unavailable?: boolean;
 }
 
 export interface IMediaSeason {
@@ -117,6 +126,15 @@ export interface IMediaAudiobook {
      * by a scan.  Set once and carried forward on every subsequent rescan.
      */
     firstDetected?: number;
+    /** The `IMediaSource.uri` of the source folder this audiobook was scanned from. */
+    sourceUri?: string;
+    /**
+     * Set when this audiobook's source could not be read during the most
+     * recent scan (e.g. its storage device is disconnected) and it was
+     * carried forward from the previous scan instead of being dropped. The
+     * UI hides audiobooks with this flag rather than deleting their metadata.
+     */
+    unavailable?: boolean;
 }
 
 export type IRawScanList = string[];

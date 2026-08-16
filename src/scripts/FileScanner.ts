@@ -67,6 +67,23 @@ export interface IMediaObject {
      * in `scanAllSources`), so it never changes once assigned.
      */
     firstDetected?: number;
+    /**
+     * The `IMediaSource.uri` of the source folder this item was scanned from.
+     * Stamped during collection so a later scan can tell, if the item is
+     * absent from a fresh build, whether it came from a source that failed
+     * to enumerate this time (device disconnected) versus one that was read
+     * successfully (item genuinely removed) — see `unavailable`.
+     */
+    sourceUri?: string;
+    /**
+     * Set when this item's originating source could not be read during the
+     * most recent scan (e.g. the storage device is disconnected) and the
+     * item was carried forward from the previous scan instead of being
+     * dropped. The UI should hide items with this flag set rather than
+     * deleting their metadata, so they reappear automatically once the
+     * source is reachable again.
+     */
+    unavailable?: boolean;
 }
 
 // Re-export library types so other modules can import them from here
@@ -338,6 +355,15 @@ interface StreamState {
      * local file:// URI inside smb_thumbnails_fs/.
      */
     smbThumbnails: Map<string, Map<string, string>>;
+    /**
+     * Whether the source root directory itself could be read this scan.
+     * Starts `true`; set `false` in `recursiveCollect` if the depth-0
+     * `readDirectoryAsync` call fails (e.g. the storage device backing this
+     * source is disconnected). Read by `scanAllSources` to decide whether
+     * previously-scanned items from this source should be carried forward
+     * as `unavailable` rather than dropped.
+     */
+    rootAccessible: boolean;
 }
 
 /**
@@ -478,6 +504,10 @@ export class FileScanner {
         const tvPosterMap = new Map<string, string>();
         const allTvSmbData = new Map<string, SmbJsonData>();
         const allTvSmbThumbnails = new Map<string, Map<string, string>>();
+        // Sources whose root directory could not be read this scan (e.g. a
+        // disconnected storage device). Used below to carry forward previously
+        // scanned items from these sources as `unavailable` instead of dropping them.
+        const failedTvSourceUris = new Set<string>();
         for (const src of tvSources) {
             if (this._cancelRequested) {
                 logger.log('FileScanner', 'Scan cancelled before TV source');
@@ -485,8 +515,12 @@ export class FileScanner {
             }
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning TV source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
-            const { files, posterMap, smbData, smbThumbnails } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv', src.metadataSource);
+            const { files, posterMap, smbData, smbThumbnails, rootAccessible } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'tv', src.metadataSource);
             logger.log('FileScanner', `  Found ${files.length} TV file(s) in source`);
+            if (!rootAccessible) {
+                logger.warn('FileScanner', `TV source unreachable, will preserve its previously scanned items as unavailable: ${src.uri}`);
+                failedTvSourceUris.add(src.uri);
+            }
             allTvFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!tvPosterMap.has(key)) tvPosterMap.set(key, uri); });
             smbData.forEach((v, k) => { if (!allTvSmbData.has(k)) allTvSmbData.set(k, v); });
@@ -505,6 +539,7 @@ export class FileScanner {
         const allMovieFiles: IScannedFile[] = [];
         const moviePosterMap = new Map<string, string>();
         const allMovieSmbData = new Map<string, SmbJsonData>();
+        const failedMovieSourceUris = new Set<string>();
         for (const src of movieSources) {
             if (this._cancelRequested) {
                 logger.log('FileScanner', 'Scan cancelled before movie source');
@@ -512,8 +547,12 @@ export class FileScanner {
             }
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning Movie source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
-            const { files, posterMap, smbData } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie', src.metadataSource);
+            const { files, posterMap, smbData, rootAccessible } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'movie', src.metadataSource);
             logger.log('FileScanner', `  Found ${files.length} movie file(s) in source`);
+            if (!rootAccessible) {
+                logger.warn('FileScanner', `Movie source unreachable, will preserve its previously scanned items as unavailable: ${src.uri}`);
+                failedMovieSourceUris.add(src.uri);
+            }
             allMovieFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!moviePosterMap.has(key)) moviePosterMap.set(key, uri); });
             smbData.forEach((v, k) => { if (!allMovieSmbData.has(k)) allMovieSmbData.set(k, v); });
@@ -532,6 +571,7 @@ export class FileScanner {
         logger.log('FileScanner', `Audiobook sources: ${audiobookSources.length}`);
         const allAudiobookFiles: IScannedFile[] = [];
         const audiobookPosterMap = new Map<string, string>();
+        const failedAudiobookSourceUris = new Set<string>();
         for (const src of audiobookSources) {
             if (this._cancelRequested) {
                 logger.log('FileScanner', 'Scan cancelled before audiobook source');
@@ -539,8 +579,12 @@ export class FileScanner {
             }
             collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
             logger.log('FileScanner', `Scanning Audiobook source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
-            const { files, posterMap } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'audiobook');
+            const { files, posterMap, rootAccessible } = await this.collectAllMediaFiles(src.uri, dirSemaphore, collectProgress, 'audiobook');
             logger.log('FileScanner', `  Found ${files.length} audiobook file(s) in source`);
+            if (!rootAccessible) {
+                logger.warn('FileScanner', `Audiobook source unreachable, will preserve its previously scanned items as unavailable: ${src.uri}`);
+                failedAudiobookSourceUris.add(src.uri);
+            }
             allAudiobookFiles.push(...files);
             posterMap.forEach((uri, key) => { if (!audiobookPosterMap.has(key)) audiobookPosterMap.set(key, uri); });
         }
@@ -662,6 +706,46 @@ export class FileScanner {
                 }
             } catch {
                 // Ignore file-existence errors; the cover will be re-fetched during enrichment.
+            }
+        }
+
+        // Preserve shows/movies/audiobooks from sources that failed to enumerate this
+        // scan (e.g. a disconnected storage device) instead of letting the dispatches
+        // below wipe them out just because they're absent from this scan's fresh build.
+        // An item is only restored when its originating source is known to have failed;
+        // items scanned before `sourceUri` existed fall back to "restore only if every
+        // source of that content type failed", since that is the only case where we can
+        // be sure a missing legacy item wasn't simply deleted from a still-reachable source.
+        if (failedTvSourceUris.size > 0) {
+            const allTvSourcesFailed = failedTvSourceUris.size === tvSources.length;
+            for (const [showName, prevShow] of Object.entries(prevLibrary)) {
+                if (mergedLibrary[showName]) continue;
+                const belongsToFailedSource = prevShow.sourceUri ? failedTvSourceUris.has(prevShow.sourceUri) : allTvSourcesFailed;
+                if (belongsToFailedSource) {
+                    mergedLibrary[showName] = { ...prevShow, unavailable: true };
+                }
+            }
+        }
+        if (failedMovieSourceUris.size > 0) {
+            const allMovieSourcesFailed = failedMovieSourceUris.size === movieSources.length;
+            const moviePaths = new Set(movies.map((m) => m.path));
+            for (const prevMovie of prevMovies) {
+                if (moviePaths.has(prevMovie.path)) continue;
+                const belongsToFailedSource = prevMovie.sourceUri ? failedMovieSourceUris.has(prevMovie.sourceUri) : allMovieSourcesFailed;
+                if (belongsToFailedSource) {
+                    movies.push({ ...prevMovie, unavailable: true });
+                }
+            }
+        }
+        if (failedAudiobookSourceUris.size > 0) {
+            const allAudiobookSourcesFailed = failedAudiobookSourceUris.size === audiobookSources.length;
+            const audiobookKeys = new Set(audiobooks.map((a) => a.folderKey));
+            for (const prevAudiobook of prevAudiobooks) {
+                if (audiobookKeys.has(prevAudiobook.folderKey)) continue;
+                const belongsToFailedSource = prevAudiobook.sourceUri ? failedAudiobookSourceUris.has(prevAudiobook.sourceUri) : allAudiobookSourcesFailed;
+                if (belongsToFailedSource) {
+                    audiobooks.push({ ...prevAudiobook, unavailable: true });
+                }
             }
         }
 
@@ -839,7 +923,7 @@ export class FileScanner {
         progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
         sourceType: 'tv' | 'movie' | 'audiobook' = 'tv',
         metadataSource?: dataSources,
-    ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string>; smbData: Map<string, SmbJsonData>; smbThumbnails: Map<string, Map<string, string>> }> {
+    ): Promise<{ files: IScannedFile[]; posterMap: Map<string, string>; smbData: Map<string, SmbJsonData>; smbThumbnails: Map<string, Map<string, string>>; rootAccessible: boolean }> {
         const result: IScannedFile[] = [];
         const posterMap = new Map<string, string>();
         const streamState: StreamState = {
@@ -850,16 +934,19 @@ export class FileScanner {
             metadataSource,
             smbData: new Map(),
             smbThumbnails: new Map(),
+            rootAccessible: true,
         };
         await this.recursiveCollect(rootDirectory, [], result, posterMap, 0, dirSemaphore, progress, streamState);
-        // Stamp the source-level metadata provider on every collected file so
-        // buildLibrary and buildMovieList can propagate it to show/movie entries.
-        if (metadataSource) {
-            for (const f of result) f.metadataSource = metadataSource;
+        // Stamp the source-level metadata provider and originating source URI on every
+        // collected file so buildLibrary/buildMovieList/buildAudiobookList can propagate
+        // them to show/movie/audiobook entries.
+        for (const f of result) {
+            if (metadataSource) f.metadataSource = metadataSource;
+            f.sourceUri = rootDirectory;
         }
         // Flush any remaining buffered items that did not reach the batch threshold
         this.flushStreamBatch(streamState, posterMap);
-        return { files: result, posterMap, smbData: streamState.smbData, smbThumbnails: streamState.smbThumbnails };
+        return { files: result, posterMap, smbData: streamState.smbData, smbThumbnails: streamState.smbThumbnails, rootAccessible: streamState.rootAccessible };
     }
 
     private async recursiveCollect(
@@ -887,6 +974,11 @@ export class FileScanner {
             contents = await StorageAccessFramework.readDirectoryAsync(directory);
         } catch (e) {
             logger.warn('FileScanner', `Cannot read directory (depth=${depth}): ${directory}`, e);
+            if (depth === 0) {
+                // The source root itself is unreadable (e.g. the storage device is
+                // disconnected) rather than some deeper subfolder having been removed.
+                streamState.rootAccessible = false;
+            }
             return; // Directory not accessible
         } finally {
             dirSemaphore.release();
@@ -1295,6 +1387,7 @@ export class FileScanner {
                 files: audiobookFiles,
                 poster: (folderPath !== '' ? posterMap?.get(folderPath) : undefined) ?? '',
                 firstDetected: Date.now(),
+                sourceUri: first.sourceUri,
             });
         }
 
@@ -1326,6 +1419,7 @@ export class FileScanner {
                     seasons: {},
                     rawNames: rawShowName !== showName ? [rawShowName] : [],
                     metadataSource: file.metadataSource,
+                    sourceUri: file.sourceUri,
                 };
                 // Apply IDs and metadata source from smb.json when present.
                 // These are overwritten by API-fetched IDs during enrichment.
