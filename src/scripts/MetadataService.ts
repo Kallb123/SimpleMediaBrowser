@@ -378,7 +378,7 @@ export class MetadataService {
     ): Promise<void> {
         logger.log('MetadataService', 'enrichEpisodes: starting episode metadata enrichment');
 
-        for (const [showName, show] of Object.entries(library) as Array<[string, IMediaShow]>) {
+        for (const [showName, show] of Object.entries(library) as [string, IMediaShow][]) {
             if (isCancelled()) {
                 logger.log('MetadataService', 'enrichEpisodes: cancelled');
                 break;
@@ -394,7 +394,7 @@ export class MetadataService {
                 (a, b) => (a[1] as IMediaSeason).seasonNumber - (b[1] as IMediaSeason).seasonNumber,
             );
 
-            for (const [seasonKey, season] of sortedSeasons as Array<[string, IMediaSeason]>) {
+            for (const [seasonKey, season] of sortedSeasons as [string, IMediaSeason][]) {
                 if (isCancelled()) break;
                 try {
                     const providerEpisodes = await provider.fetchSeasonEpisodes(showProviderId, season.seasonNumber);
@@ -572,7 +572,7 @@ export class MetadataService {
 
         for (const idField of ['tmdb', 'tvdb'] as const) {
             const byId = new Map<string, string[]>();
-            for (const [showKey, show] of Object.entries(library) as Array<[string, IMediaShow]>) {
+            for (const [showKey, show] of Object.entries(library) as [string, IMediaShow][]) {
                 const id = show.ids[idField];
                 if (!id) continue;
                 const group = byId.get(id);

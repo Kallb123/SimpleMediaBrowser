@@ -51,12 +51,12 @@ export class TmdbProvider implements IMetadataProvider {
                 return [];
             }
             const data = await response.json();
-            const results: Array<{
+            const results: {
                 id: number;
                 name?: string;
                 poster_path: string | null;
                 first_air_date?: string;
-            }> = data.results ?? [];
+            }[] = data.results ?? [];
             return results.map((r) => ({
                 id: String(r.id),
                 title: r.name ?? name,
@@ -84,12 +84,12 @@ export class TmdbProvider implements IMetadataProvider {
                 return [];
             }
             const data = await response.json();
-            const results: Array<{
+            const results: {
                 id: number;
                 title?: string;
                 poster_path: string | null;
                 release_date?: string;
-            }> = data.results ?? [];
+            }[] = data.results ?? [];
             return results.map((r) => ({
                 id: String(r.id),
                 title: r.title ?? title,
@@ -136,11 +136,11 @@ export class TmdbProvider implements IMetadataProvider {
                 return [];
             }
             const data = await response.json();
-            const episodes: Array<{
+            const episodes: {
                 episode_number: number;
                 name?: string;
                 still_path: string | null;
-            }> = data.episodes ?? [];
+            }[] = data.episodes ?? [];
             return episodes.map((ep) => ({
                 episodeNumber: ep.episode_number,
                 title: ep.name,

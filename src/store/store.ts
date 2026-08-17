@@ -3,8 +3,7 @@ import settingsReducer from './settingsReducer'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FLUSH, PAUSE, PERSIST, persistReducer, persistStore, PURGE, REGISTER, REHYDRATE, createTransform } from 'redux-persist';
 import type { Transform } from 'redux-persist';
-import libraryReducer from './libraryReducer';
-import { INITIAL_SCAN_PROGRESS } from './libraryReducer';
+import libraryReducer, { INITIAL_SCAN_PROGRESS } from './libraryReducer';
 
 // Transform that prevents transient scan state from being persisted and ensures
 // it is always reset to its initial values when the store is rehydrated.

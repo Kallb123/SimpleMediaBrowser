@@ -541,7 +541,7 @@ export const settingsSlice = createSlice({
         const removeShow = state.mediaLibrary[removeKey];
         if (!removeShow) continue;
         // Merge seasons and episodes
-        for (const [seasonKey, season] of Object.entries(removeShow.seasons) as Array<[string, IMediaSeason]>) {
+        for (const [seasonKey, season] of Object.entries(removeShow.seasons) as [string, IMediaSeason][]) {
           if (!keepShow.seasons[seasonKey]) {
             keepShow.seasons[seasonKey] = season;
           } else {
