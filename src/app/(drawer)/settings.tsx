@@ -27,6 +27,49 @@ import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, POR
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 const DESTRUCTIVE_COLOR = '#E55';
 
+const dataSourceOptions = [
+  {id: 'tmdb', label: 'TMDB'},
+  {id: 'tvdb', label: 'TheTVDB'},
+];
+
+const metadataSourceOptions: { id: dataSources | 'auto'; label: string }[] = [
+  { id: 'auto', label: '🌐 Auto' },
+  { id: 'tmdb', label: 'TMDB' },
+  { id: 'tvdb', label: 'TheTVDB' },
+];
+
+const viewTypeOptions = [
+  {id: 'flat', label: 'Flat', title: 'All episodes of all shows visible in one list'},
+  {id: 'show', label: 'Show', title: 'A folder for each show, with all episodes of that show then visible in each folder'},
+  {id: 'show+season', label: 'Show + Season', title: 'A folder for each show and season, with the episodes of that season in the folder'},
+  {id: 'show/season', label: 'Show/Season', title: 'A folder for each show, with a further folder for each season, with episodes then visible within'},
+];
+
+const uiTypeOptions = [
+  {id: 'poster', label: 'Poster'},
+  {id: 'list', label: 'List'},
+];
+
+const defaultPageOptions = [
+  {id: 'home', label: 'Home (All)'},
+  {id: 'tv', label: 'TV'},
+  {id: 'movies', label: 'Movies'},
+  {id: 'audiobooks', label: 'Audiobooks'},
+];
+
+const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
+  {id: 'system', label: 'System'},
+  {id: 'light', label: 'Light'},
+  {id: 'dark', label: 'Dark'},
+];
+
+const sortOrderOptions: { id: sortOrders; label: string }[] = [
+  {id: 'alphabetical', label: 'A > Z'},
+  {id: 'reverseAlphabetical', label: 'Z > A'},
+  {id: 'lastOpened', label: 'Last opened'},
+  {id: 'recentlyAdded', label: 'Recently added'},
+];
+
 class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -124,49 +167,6 @@ export default function SettingsPrompt() {
   const defaultPageRef = useRef(null);
   const appColorSchemeRef = useRef(null);
   const sortOrderRef = useRef(null);
-
-  const dataSourceOptions = [
-    {id: 'tmdb', label: 'TMDB'},
-    {id: 'tvdb', label: 'TheTVDB'},
-  ];
-
-  const metadataSourceOptions: { id: dataSources | 'auto'; label: string }[] = [
-    { id: 'auto', label: '🌐 Auto' },
-    { id: 'tmdb', label: 'TMDB' },
-    { id: 'tvdb', label: 'TheTVDB' },
-  ];
-
-  const viewTypeOptions = [
-    {id: 'flat', label: 'Flat', title: 'All episodes of all shows visible in one list'},
-    {id: 'show', label: 'Show', title: 'A folder for each show, with all episodes of that show then visible in each folder'},
-    {id: 'show+season', label: 'Show + Season', title: 'A folder for each show and season, with the episodes of that season in the folder'},
-    {id: 'show/season', label: 'Show/Season', title: 'A folder for each show, with a further folder for each season, with episodes then visible within'},
-  ];
-  
-  const uiTypeOptions = [
-    {id: 'poster', label: 'Poster'},
-    {id: 'list', label: 'List'},
-  ];
-
-  const defaultPageOptions = [
-    {id: 'home', label: 'Home (All)'},
-    {id: 'tv', label: 'TV'},
-    {id: 'movies', label: 'Movies'},
-    {id: 'audiobooks', label: 'Audiobooks'},
-  ];
-
-  const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
-    {id: 'system', label: 'System'},
-    {id: 'light', label: 'Light'},
-    {id: 'dark', label: 'Dark'},
-  ];
-
-  const sortOrderOptions: { id: sortOrders; label: string }[] = [
-    {id: 'alphabetical', label: 'A > Z'},
-    {id: 'reverseAlphabetical', label: 'Z > A'},
-    {id: 'lastOpened', label: 'Last opened'},
-    {id: 'recentlyAdded', label: 'Recently added'},
-  ];
 
   const safeDecodeUri = useCallback((uri: string) => {
     try {
@@ -268,7 +268,7 @@ export default function SettingsPrompt() {
     }
   }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder]);
 
-  const save = () => {
+  const save = useCallback(() => {
     try {
       logger.log('Settings', 'Save pressed – evaluating changes');
       let changeCount = 0;
@@ -358,7 +358,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  };
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
