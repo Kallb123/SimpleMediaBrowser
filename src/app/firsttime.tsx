@@ -6,6 +6,7 @@ import { HelloWave } from '@/components/HelloWave';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
+import { useKeyboardScrollFix } from '@/hooks/useKeyboardScrollFix';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
@@ -25,6 +26,7 @@ export default function FirstTime() {
   const dispatch = useDispatch();
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
   const insets = useSafeAreaInsets();
+  const { scrollRef, handleScroll, handleInputFocus } = useKeyboardScrollFix();
 
   logger.log('FirstTime', 'FirstTime screen rendered');
 
@@ -50,7 +52,12 @@ export default function FirstTime() {
     <SafeAreaView style={styles.container}>
     <ThemedView style={styles.container}>
     <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
-    <ScrollView contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}
+      onScroll={handleScroll}
+      scrollEventThrottle={16}
+    >
       <View style={styles.header}>
         <ThemedText type="title">Welcome to Zibo</ThemedText>
         <HelloWave />
@@ -62,6 +69,7 @@ export default function FirstTime() {
         <View style={styles.field}>
           <ThemedTextInput
             onChangeText={onChangePassword}
+            onFocus={handleInputFocus}
             value={password ?? ""}
             placeholder="Leave blank for no password"
             keyboardType="default"
