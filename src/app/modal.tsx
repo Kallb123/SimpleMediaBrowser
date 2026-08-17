@@ -2,7 +2,7 @@ import { View, Platform, Button } from 'react-native';
 import { Link, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import { ThemedText } from '@/components/ThemedText';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { selectMediaSources } from '@/store/settingsReducer';

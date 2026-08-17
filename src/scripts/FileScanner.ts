@@ -10,7 +10,7 @@ import type { IMediaSource } from "@/store/settingsReducer";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
 import type { SmbJsonData } from "@/scripts/SmbTypes";
-import { SMB_THUMB_REGEX, smbThumbFilename } from "@/scripts/SmbTypes";
+import { SMB_THUMB_REGEX } from "@/scripts/SmbTypes";
 
 export interface IMediaObject {
     ids: {
@@ -237,7 +237,7 @@ const PROGRESS_DISPATCH_INTERVAL = 10;
 /** Lightweight promise-based semaphore used to cap concurrency. */
 class Semaphore {
     private available: number;
-    private readonly queue: Array<() => void> = [];
+    private readonly queue: (() => void)[] = [];
 
     constructor(limit: number) {
         this.available = limit;
@@ -332,7 +332,7 @@ interface StreamState {
     /** Buffered TV episode payloads waiting to be dispatched as a batch. */
     episodeBatch: MergeEpisodePayload[];
     /** Buffered movie objects (with their folder key) waiting to be dispatched. */
-    movieBatch: Array<{ movie: IMediaObject; folderKey: string }>;
+    movieBatch: { movie: IMediaObject; folderKey: string }[];
     /**
      * Tracks which movie paths have already been flushed to Redux, keyed by
      * folder key.  Used to dispatch `setMoviePoster` updates when a poster
@@ -988,7 +988,7 @@ export class FileScanner {
         // Subdirectories to recurse into, collected during the synchronous pass
         // over this directory's entries so that we can fan them out in parallel
         // after processing all files at the current level.
-        const subdirs: Array<{ uri: string; pathParts: string[] }> = [];
+        const subdirs: { uri: string; pathParts: string[] }[] = [];
 
         for (let i = 0; i < contents.length; i++) {
             const resolvedUri = contents[i];
