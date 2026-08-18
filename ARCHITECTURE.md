@@ -336,6 +336,23 @@ snapshot, separate from the filesystem `smb.json` export.
 `drawerUnlocked` (parent-mode gate), and `selectedItems` (a `Set` of
 namespaced override keys for multi-select bulk actions).
 
+Selection is built up with one long press followed by plain taps: while
+`selectedItems` is empty a tap navigates/opens as usual and a long press
+selects the first item, after which a tap on any *selectable* item toggles it
+instead. The deliberate trade-off is that a show folder cannot be entered
+while a selection is active (season folders and audiobooks aren't selectable,
+so they still navigate) — Cancel in the selection toolbar restores normal
+tapping. The toolbar exposes Hide, Merge (2+ shows) and a **More** overflow
+menu holding the bulk metadata actions: *Fetch metadata* and *Reset metadata*
+(both clear the cached provider state for the selection, then re-enrich via
+`MetadataService.enrichSelection`; only Reset also drops the user's own
+overrides) and *Generate thumbnails* (`FileScanner.regenerateThumbnailsFor`,
+which discards the cached video thumbnails first so the "already cached" skip
+doesn't apply). Both bulk paths run through `FileScanner` so they report
+progress on the normal scan banner and honour its Stop button, and both end by
+clearing expo-image's memory cache — refreshed art reuses the same file URIs,
+so the old bitmaps would otherwise stay on screen.
+
 The drawer (`(drawer)/_layout.tsx`) gates Settings, Debug Logs, and the
 Edit Mode toggle behind `drawerUnlocked`, which requires the
 `settingsPassword` (if set in settings) to unlock. This "parent mode" lets a

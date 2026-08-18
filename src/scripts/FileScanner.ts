@@ -801,57 +801,7 @@ export class FileScanner {
             const uncached = allMediaFiles.filter((m) => !thumbnailCache.has(m.path));
             logger.log('FileScanner', `Generating thumbnails for ${uncached.length} uncached file(s) (${allMediaFiles.length - uncached.length} already cached)`);
             if (uncached.length > 0) {
-                let thumbSuccess = 0;
-                let thumbFail = 0;
-                let thumbCompleted = 0;
-                const thumbTotal = uncached.length;
-                // Announce the thumbnail phase so the UI can show a progress bar.
-                // Only entered when there is at least one thumbnail to generate,
-                // so thumbnailsTotal is always > 0 here.
-                store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound: allMediaFiles.length, thumbnailsDone: 0, thumbnailsTotal: thumbTotal, metadataDone: 0, metadataTotal: 0 }));
-                await Promise.allSettled(
-                    uncached.map(async (media) => {
-                        // Skip cancelled items before acquiring the semaphore so we
-                        // don't needlessly hold a concurrency slot.
-                        if (this._cancelRequested) return;
-                        // Throttle concurrency so weaker devices are not overwhelmed.
-                        await thumbSemaphore.acquire();
-                        try {
-                            if (this._cancelRequested) {
-                                return;
-                            }
-                            const thumbnail = await this.generateThumbnail(media.path);
-                            if (!thumbnail) {
-                                throw new Error('No thumbnail returned by expo-video');
-                            }
-                            // Attempt to persist the thumbnail to disk so it survives restarts.
-                            const diskUri = await this.persistThumbnail(media.path, thumbnail);
-                            if (diskUri) {
-                                thumbnailCache.set(media.path, diskUri);
-                                diskIndex[media.path] = diskUri;
-                            } else {
-                                // Disk-persist failed; keep the VideoThumbnail for this session only.
-                                thumbnailCache.set(media.path, thumbnail);
-                            }
-                            thumbSuccess++;
-                        } catch (e) {
-                            thumbFail++;
-                            logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
-                        } finally {
-                            thumbSemaphore.release();
-                            thumbCompleted++;
-                            store.dispatch(setScanProgress({
-                                phase: 'thumbnails',
-                                filesFound: allMediaFiles.length,
-                                thumbnailsDone: thumbCompleted,
-                                thumbnailsTotal: thumbTotal,
-                                metadataDone: 0,
-                                metadataTotal: 0,
-                            }));
-                        }
-                    }),
-                );
-                logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+                await this.generateThumbnailsFor(uncached, diskIndex, thumbSemaphore, allMediaFiles.length);
                 // Persist the updated index (existing entries + any newly generated ones).
                 saveThumbnailIndex(diskIndex);
             } else {
@@ -862,6 +812,140 @@ export class FileScanner {
         }
         } catch (e) {
             logger.error('FileScanner', `scanAllSources threw an error`, e);
+            throw e;
+        } finally {
+            store.dispatch(setIsScanning(false));
+        }
+    }
+
+    /**
+     * Generates and persists a thumbnail for each of the given media files, honouring
+     * `thumbSemaphore` for concurrency and dispatching `thumbnails`-phase progress as
+     * each file completes.  `diskIndex` is mutated in place with any newly persisted
+     * URIs; the caller is responsible for writing it back via {@link saveThumbnailIndex}.
+     *
+     * @param files      Media files to generate thumbnails for (already filtered by the caller).
+     * @param diskIndex  Thumbnail index to record newly persisted URIs in.
+     * @param thumbSemaphore Concurrency limiter shared with the calling operation.
+     * @param filesFound Value to report as `filesFound` in the progress banner.
+     */
+    private async generateThumbnailsFor(
+        files: { path: string; filename: string }[],
+        diskIndex: ThumbnailIndex,
+        thumbSemaphore: Semaphore,
+        filesFound: number,
+    ): Promise<void> {
+        let thumbSuccess = 0;
+        let thumbFail = 0;
+        let thumbCompleted = 0;
+        const thumbTotal = files.length;
+        // Announce the thumbnail phase so the UI can show a progress bar. Callers only
+        // invoke this with at least one file, so thumbnailsTotal is always > 0 here.
+        store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound, thumbnailsDone: 0, thumbnailsTotal: thumbTotal, metadataDone: 0, metadataTotal: 0 }));
+        await Promise.allSettled(
+            files.map(async (media) => {
+                // Skip cancelled items before acquiring the semaphore so we
+                // don't needlessly hold a concurrency slot.
+                if (this._cancelRequested) return;
+                // Throttle concurrency so weaker devices are not overwhelmed.
+                await thumbSemaphore.acquire();
+                try {
+                    if (this._cancelRequested) {
+                        return;
+                    }
+                    const thumbnail = await this.generateThumbnail(media.path);
+                    if (!thumbnail) {
+                        throw new Error('No thumbnail returned by expo-video');
+                    }
+                    // Attempt to persist the thumbnail to disk so it survives restarts.
+                    const diskUri = await this.persistThumbnail(media.path, thumbnail);
+                    if (diskUri) {
+                        thumbnailCache.set(media.path, diskUri);
+                        diskIndex[media.path] = diskUri;
+                    } else {
+                        // Disk-persist failed; keep the VideoThumbnail for this session only.
+                        thumbnailCache.set(media.path, thumbnail);
+                    }
+                    thumbSuccess++;
+                } catch (e) {
+                    thumbFail++;
+                    logger.warn('FileScanner', `Thumbnail failed for ${media.filename}`, e);
+                } finally {
+                    thumbSemaphore.release();
+                    thumbCompleted++;
+                    store.dispatch(setScanProgress({
+                        phase: 'thumbnails',
+                        filesFound,
+                        thumbnailsDone: thumbCompleted,
+                        thumbnailsTotal: thumbTotal,
+                        metadataDone: 0,
+                        metadataTotal: 0,
+                    }));
+                }
+            }),
+        );
+        logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
+    }
+
+    /**
+     * Force-regenerates video thumbnails for a specific set of media files, discarding any
+     * cached thumbnail first so the normal "already cached" skip does not apply.
+     *
+     * Unlike the scan-time pass this deliberately ignores the `enableThumbnailGeneration`
+     * setting: it only runs in response to an explicit user request for these files.
+     * Progress is reported through the same scan banner, so {@link cancelScan} aborts it.
+     */
+    async regenerateThumbnailsFor(files: { path: string; filename: string }[]): Promise<void> {
+        logger.log('FileScanner', `regenerateThumbnailsFor: ${files.length} file(s) requested`);
+        if (files.length === 0) return;
+        this._cancelRequested = false;
+        store.dispatch(setIsScanning(true));
+        try {
+            const diskIndex = loadThumbnailIndex();
+            // Drop the cached entry and delete the persisted JPEG for each file, otherwise
+            // persistThumbnail() would short-circuit on the existing file and we'd re-cache
+            // the very thumbnail the user asked to replace.
+            for (const media of files) {
+                thumbnailCache.delete(media.path);
+                const existingUri = diskIndex[media.path];
+                delete diskIndex[media.path];
+                const candidates = [existingUri, new File(THUMBNAILS_DIR, thumbnailFilename(media.path)).uri];
+                for (const uri of candidates) {
+                    if (!uri) continue;
+                    try {
+                        const file = new File(uri);
+                        if (file.exists) file.delete();
+                    } catch (e) {
+                        logger.warn('FileScanner', `Failed to delete stale thumbnail ${uri}`, e);
+                    }
+                }
+            }
+            await this.generateThumbnailsFor(files, diskIndex, new Semaphore(MAX_CONCURRENT_THUMBNAILS), files.length);
+            saveThumbnailIndex(diskIndex);
+        } catch (e) {
+            logger.error('FileScanner', 'regenerateThumbnailsFor threw an error', e);
+            throw e;
+        } finally {
+            store.dispatch(setIsScanning(false));
+        }
+    }
+
+    /**
+     * Force-refetches provider metadata for a specific set of shows and movies.
+     *
+     * The caller is expected to have already cleared the cached poster/still state for
+     * these items (MetadataService skips anything that still has a cached poster on disk).
+     * Progress is reported through the same scan banner, so {@link cancelScan} aborts it.
+     */
+    async refetchMetadataFor(showNames: string[], moviePaths: string[]): Promise<void> {
+        logger.log('FileScanner', `refetchMetadataFor: ${showNames.length} show(s), ${moviePaths.length} movie(s)`);
+        if (showNames.length === 0 && moviePaths.length === 0) return;
+        this._cancelRequested = false;
+        store.dispatch(setIsScanning(true));
+        try {
+            await MetadataService.getInstance().enrichSelection(showNames, moviePaths, () => this._cancelRequested);
+        } catch (e) {
+            logger.error('FileScanner', 'refetchMetadataFor threw an error', e);
             throw e;
         } finally {
             store.dispatch(setIsScanning(false));
