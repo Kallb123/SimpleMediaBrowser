@@ -33,7 +33,7 @@ import {
   type dataSources,
 } from '@/store/libraryReducer';
 import { selectTmdbApiKey, selectTvdbApiKey, selectTvdbPin, selectDataSource } from '@/store/settingsReducer';
-import { useKeyboardScrollFix } from '@/hooks/useKeyboardScrollFix';
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
 import { File, Directory, Paths } from 'expo-file-system';
 import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
@@ -154,7 +154,7 @@ export default function EditItemScreen() {
   // roughly the header's height on-device. useHeaderHeight() reads the
   // actual rendered header height from React Navigation directly.
   const headerHeight = useHeaderHeight();
-  const { scrollRef, handleScroll, handleInputFocus } = useKeyboardScrollFix();
+  const { scrollViewProps, extraBottomSpace, handleInputFocus, handleInputBlur } = useKeyboardAwareScroll();
 
   const existingOverride = mediaOverrides[itemKey] ?? {};
 
@@ -760,12 +760,10 @@ export default function EditItemScreen() {
     <ThemedView style={styles.screen}>
       <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={headerHeight}>
       <ScrollView
-        ref={scrollRef}
+        {...scrollViewProps}
         style={styles.container}
-        contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}
+        contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom + extraBottomSpace }]}
         keyboardShouldPersistTaps="handled"
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
       >
         <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
         <View style={styles.header}>
@@ -782,6 +780,7 @@ export default function EditItemScreen() {
               value={titleInput}
               onChangeText={setTitleInput}
               onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               placeholder="Override display title"
             />
           </View>
@@ -791,6 +790,7 @@ export default function EditItemScreen() {
               value={sortTitleInput}
               onChangeText={setSortTitleInput}
               onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               placeholder="Override sort order (e.g. 'Dark Knight, The')"
             />
             <ThemedText style={styles.hint}>
@@ -804,6 +804,7 @@ export default function EditItemScreen() {
                 value={yearInput}
                 onChangeText={setYearInput}
                 onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
                 placeholder="Release year (e.g. 2012)"
                 keyboardType="number-pad"
               />
@@ -878,6 +879,7 @@ export default function EditItemScreen() {
                 value={audiobookQuery}
                 onChangeText={setAudiobookQuery}
                 onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
                 placeholder="Search audiobooks…"
                 style={styles.searchInput}
                 onSubmitEditing={handleAudiobookSearch}
@@ -1004,6 +1006,7 @@ export default function EditItemScreen() {
                 value={posterSearchQuery}
                 onChangeText={setPosterSearchQuery}
                 onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
                 placeholder={posterProvider === 'tvdb' ? 'Search TheTVDB…' : 'Search TMDB…'}
                 style={styles.searchInput}
                 onSubmitEditing={handlePosterSearch}
@@ -1278,6 +1281,7 @@ export default function EditItemScreen() {
                 value={rematchQuery}
                 onChangeText={setRematchQuery}
                 onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
                 placeholder={rematchProvider === 'tvdb' ? 'Search TheTVDB…' : 'Search TMDB…'}
                 style={styles.searchInput}
                 onSubmitEditing={handleRematchSearch}

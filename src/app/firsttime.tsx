@@ -5,7 +5,7 @@ import { HelloWave } from '@/components/HelloWave';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
-import { useKeyboardScrollFix } from '@/hooks/useKeyboardScrollFix';
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
@@ -25,7 +25,7 @@ export default function FirstTime() {
   const dispatch = useDispatch();
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
   const insets = useSafeAreaInsets();
-  const { scrollRef, handleScroll, handleInputFocus } = useKeyboardScrollFix();
+  const { scrollViewProps, extraBottomSpace, handleInputFocus, handleInputBlur } = useKeyboardAwareScroll();
 
   logger.log('FirstTime', 'FirstTime screen rendered');
 
@@ -52,10 +52,8 @@ export default function FirstTime() {
     <ThemedView style={styles.container}>
     <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
     <ScrollView
-      ref={scrollRef}
-      contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}
-      onScroll={handleScroll}
-      scrollEventThrottle={16}
+      {...scrollViewProps}
+      contentContainerStyle={[styles.contentContainer, contentPlatformStyle, { paddingBottom: 20 + extraBottomSpace }]}
     >
       <View style={styles.header}>
         <ThemedText type="title">Welcome to Zibo</ThemedText>
@@ -69,6 +67,7 @@ export default function FirstTime() {
           <ThemedTextInput
             onChangeText={onChangePassword}
             onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
             value={password ?? ""}
             placeholder="Leave blank for no password"
             keyboardType="default"

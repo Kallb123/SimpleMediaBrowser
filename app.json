@@ -3,7 +3,7 @@
     "name": "Zibo",
     "owner": "kallb123",
     "slug": "SimpleMediaBrowser",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "zibo",
@@ -20,7 +20,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "net.nawt.simplemediabrowser",
-      "versionCode": 60
+      "versionCode": 61
     },
     "web": {
       "output": "static",
