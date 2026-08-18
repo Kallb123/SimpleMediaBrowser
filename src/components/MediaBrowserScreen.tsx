@@ -1,20 +1,20 @@
-import { Alert, BackHandler, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, BackHandler, Modal, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { File } from 'expo-file-system';
+import { Image } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder } from '@/store/settingsReducer';
 import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
-import { MetadataService } from '@/scripts/MetadataService';
 import { store } from '@/store/store';
 import { FlashList, FlashListRef, ViewToken } from '@shopify/flash-list';
-import { IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
+import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes, sortOrders } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
@@ -636,11 +636,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const scanProgress = useSelector(selectScanProgress);
 
   const handleCancelScan = useCallback(() => {
-    import('@/scripts/FileScanner').then(({ FileScanner }) => {
-      FileScanner.getInstance().cancelScan();
-    }).catch((e) => {
-      logger.warn('MediaBrowserScreen', 'Failed to request scan cancellation', e);
-    });
+    FileScanner.getInstance().cancelScan();
   }, []);
 
   // Shows/movies/audiobooks whose source was unreachable during the last scan (e.g. a
@@ -897,6 +893,19 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const shouldShowToolbar = editMode && selectedItems.size >= 1;
   const shouldShowMerge = selectedShowKeys.length >= 2;
 
+  // Overflow menu for the selection toolbar's less-common bulk actions.
+  const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
+  const closeSelectionMenu = useCallback(() => setSelectionMenuOpen(false), []);
+  const runSelectionMenuAction = useCallback((action: () => void) => {
+    setSelectionMenuOpen(false);
+    action();
+  }, []);
+  // The menu belongs to the toolbar, so it must not outlive it (e.g. when the selection is
+  // cleared by an action or by leaving edit mode).
+  useEffect(() => {
+    if (!shouldShowToolbar) setSelectionMenuOpen(false);
+  }, [shouldShowToolbar]);
+
   const deleteLocalFile = useCallback((uri?: string) => {
     if (!uri) return;
     try {
@@ -909,21 +918,49 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     }
   }, []);
 
-  const performResetSelectedMetadata = useCallback(async () => {
-    const selectedKeys = Array.from(selectedItems);
-    if (selectedKeys.length === 0) return;
+  /**
+   * Resolves the current selection to the concrete library objects it refers to.
+   * Selection keys carry `parsedPath` (the decoded URI) while Redux entries and the
+   * thumbnail cache are keyed by `path` (the raw SAF URI), so the objects have to be
+   * looked up rather than the key suffix used directly.
+   */
+  const resolveSelection = useCallback(() => {
+    const state = store.getState();
+    const library = state.libraryReducer.mediaLibrary;
+    const shows = selectedShowKeys.filter((showName) => library[showName]);
+    const movies = (state.libraryReducer.movies as IMediaObject[])
+      .filter((movie) => selectedMoviePaths.includes(movie.parsedPath));
+    const episodes = Object.values(library)
+      .flatMap((show) => Object.values(show.seasons).flatMap((season) => Object.values(season.episodes)))
+      .filter((ep) => selectedEpisodePaths.includes(ep.parsedPath));
+    // Selecting a show implicitly selects its episodes for per-file actions (thumbnails).
+    const episodesOfSelectedShows = shows.flatMap((showName) =>
+      Object.values(library[showName].seasons).flatMap((season) => Object.values(season.episodes)),
+    );
+    return { shows, movies, episodes, episodesOfSelectedShows };
+  }, [selectedShowKeys, selectedMoviePaths, selectedEpisodePaths]);
 
-    const selectedShows = selectedShowKeys;
-    const selectedMoviesForRefresh = selectedMoviePaths;
-    const selectedEpisodes = selectedEpisodePaths;
-
-    // Clear selected overrides first, then clear metadata state and downloaded files.
-    for (const key of selectedKeys) {
-      dispatch(clearMediaOverride(key));
+  /**
+   * Clears cached provider metadata for the given selection — the poster/still URIs in
+   * Redux plus the downloaded files behind them — so the next enrichment pass refetches
+   * them instead of skipping them as already cached.
+   *
+   * `alsoClearOverrides` additionally drops the user's own edits, which is what Reset
+   * does; a plain force-refetch leaves overrides in place so they keep winning over
+   * provider data.
+   */
+  const clearSelectedMetadata = useCallback((
+    selection: ReturnType<typeof resolveSelection>,
+    alsoClearOverrides: boolean,
+  ) => {
+    if (alsoClearOverrides) {
+      for (const key of selectedItems) {
+        dispatch(clearMediaOverride(key));
+      }
     }
 
     const state = store.getState();
-    for (const showName of selectedShows) {
+    for (const showName of selection.shows) {
       const show = state.libraryReducer.mediaLibrary[showName];
       if (show?.poster) {
         deleteLocalFile(show.poster);
@@ -936,64 +973,115 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
       dispatch(clearShowMetadata(showName));
     }
 
-    for (const moviePath of selectedMoviesForRefresh) {
-      const movie = state.libraryReducer.movies.find((m: IMediaObject) => m.path === moviePath);
-      if (movie?.poster) {
-        deleteLocalFile(movie.poster);
-      }
-      dispatch(clearMovieMetadata(moviePath));
+    for (const movie of selection.movies) {
+      deleteLocalFile(movie.poster);
+      dispatch(clearMovieMetadata(movie.path));
     }
 
-    for (const episodePath of selectedEpisodes) {
-      const episode = Object.values(state.libraryReducer.mediaLibrary).flatMap((show) =>
-        Object.values(show.seasons).flatMap((season) => Object.values(season.episodes)),
-      ).find((ep) => ep.path === episodePath);
-      if (episode?.resolvedThumbnail) {
-        deleteLocalFile(episode.resolvedThumbnail);
-      }
-      dispatch(clearEpisodeMetadata(episodePath));
+    for (const episode of selection.episodes) {
+      deleteLocalFile(episode.resolvedThumbnail);
+      dispatch(clearEpisodeMetadata(episode.path));
     }
+  }, [dispatch, selectedItems, deleteLocalFile]);
 
+  /**
+   * Refreshed posters and thumbnails are written back to the same file URIs they had
+   * before (both filenames are derived deterministically from the item), so expo-image
+   * would keep serving the pre-refresh bitmaps from its in-memory cache. Dropping that
+   * cache forces the visible images to be re-read from disk.
+   */
+  const clearImageMemoryCache = useCallback(() => {
+    Image.clearMemoryCache().catch((e: unknown) => {
+      logger.warn('MediaBrowserScreen', 'Failed to clear the image memory cache', e);
+    });
+  }, []);
+
+  /**
+   * Clears the selection's cached provider metadata and refetches it from the configured
+   * provider.  `alsoClearOverrides` is what separates Reset (drop the user's own edits
+   * too) from Force fetch metadata (keep them).
+   */
+  const refetchSelectedMetadata = useCallback(async (alsoClearOverrides: boolean) => {
+    const selection = resolveSelection();
+    clearSelectedMetadata(selection, alsoClearOverrides);
     clearItemSelection();
-
-    // Re-read the refreshed state for the selected subset before metadata enrichment.
-    const refreshedState = store.getState();
-    const librarySubset: IMediaLibrary = {};
-    for (const showName of selectedShows) {
-      const show = refreshedState.libraryReducer.mediaLibrary[showName];
-      if (show) librarySubset[showName] = show;
-    }
-    for (const episodePath of selectedEpisodes) {
-      const showEntry = Object.entries(refreshedState.libraryReducer.mediaLibrary).find(([, show]) =>
-        Object.values(show.seasons).some((season) =>
-          Object.values(season.episodes).some((ep) => ep.path === episodePath),
-        ),
-      );
-      if (showEntry) {
-        const [showName, show] = showEntry;
-        librarySubset[showName] = show;
-      }
-    }
-    const moviesSubset = refreshedState.libraryReducer.movies.filter((movie: IMediaObject) => selectedMoviesForRefresh.includes(movie.parsedPath));
-
     try {
-      await MetadataService.getInstance().enrichAll(librarySubset, moviesSubset);
+      await FileScanner.getInstance().refetchMetadataFor(
+        selection.shows,
+        selection.movies.map((movie) => movie.parsedPath),
+      );
     } catch (e) {
       logger.warn('MediaBrowserScreen', 'Failed to refresh metadata for selected items', e);
+    } finally {
+      clearImageMemoryCache();
     }
-  }, [dispatch, selectedItems, selectedShowKeys, selectedMoviePaths, selectedEpisodePaths, clearItemSelection, deleteLocalFile]);
+  }, [resolveSelection, clearSelectedMetadata, clearItemSelection, clearImageMemoryCache]);
+
+  /** Force-regenerates video thumbnails for every media file covered by the selection. */
+  const regenerateSelectedThumbnails = useCallback(async () => {
+    const selection = resolveSelection();
+    // Deduplicate by path so an episode that is both selected itself and covered by its
+    // selected show is only regenerated once.
+    const byPath = new Map<string, { path: string; filename: string }>();
+    for (const media of [...selection.movies, ...selection.episodes, ...selection.episodesOfSelectedShows]) {
+      byPath.set(media.path, { path: media.path, filename: media.filename });
+    }
+    clearItemSelection();
+    try {
+      await FileScanner.getInstance().regenerateThumbnailsFor(Array.from(byPath.values()));
+    } catch (e) {
+      logger.warn('MediaBrowserScreen', 'Failed to regenerate thumbnails for selected items', e);
+    } finally {
+      clearImageMemoryCache();
+    }
+  }, [resolveSelection, clearItemSelection, clearImageMemoryCache]);
+
+  /**
+   * Returns true (after telling the user) when a scan or refresh is already running.
+   * The bulk actions drive the same progress banner and cancel flag, so they must not
+   * overlap with an in-flight scan.
+   */
+  const warnIfBusy = useCallback(() => {
+    if (!isScanning) return false;
+    Alert.alert('Library busy', 'A scan or metadata refresh is already running. Wait for it to finish and try again.');
+    return true;
+  }, [isScanning]);
 
   const handleResetMetadata = useCallback(() => {
-    if (selectedItems.size === 0) return;
+    if (selectedItems.size === 0 || warnIfBusy()) return;
     Alert.alert(
       'Reset metadata',
       'This will remove overrides and downloaded metadata for the selected items, then refresh their metadata from the configured provider.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset', style: 'destructive', onPress: () => { void performResetSelectedMetadata(); } },
+        { text: 'Reset', style: 'destructive', onPress: () => { void refetchSelectedMetadata(true); } },
       ],
     );
-  }, [selectedItems.size, performResetSelectedMetadata]);
+  }, [selectedItems.size, refetchSelectedMetadata, warnIfBusy]);
+
+  const handleForceFetchMetadata = useCallback(() => {
+    if (selectedItems.size === 0 || warnIfBusy()) return;
+    Alert.alert(
+      'Fetch metadata',
+      'This will discard the downloaded posters and episode data for the selected items and fetch them again from the configured provider. Your own edits are kept.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Fetch', onPress: () => { void refetchSelectedMetadata(false); } },
+      ],
+    );
+  }, [selectedItems.size, refetchSelectedMetadata, warnIfBusy]);
+
+  const handleForceGenerateThumbnails = useCallback(() => {
+    if (selectedItems.size === 0 || warnIfBusy()) return;
+    Alert.alert(
+      'Generate thumbnails',
+      'This will discard the cached video thumbnails for the selected items and generate them again. This can take a while for a large selection.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Generate', onPress: () => { void regenerateSelectedThumbnails(); } },
+      ],
+    );
+  }, [selectedItems.size, regenerateSelectedThumbnails, warnIfBusy]);
 
   /**
    * Marks all currently selected items as hidden by setting `hidden: true` in their
@@ -1104,10 +1192,20 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               // Any editable item can be long-pressed in edit mode to select it.
               const overrideKey = getItemOverrideKey(item);
               const isSelected = editMode && overrideKey !== null && selectedItems.has(overrideKey);
+              const toggleSelection = editMode && overrideKey !== null
+                ? () => toggleItemSelection(overrideKey)
+                : undefined;
 
-              // Folders always navigate; files always open in player.
+              // Outside a selection: folders navigate, files open in the player. Once the
+              // first item has been long-pressed, a plain tap toggles selection instead, so
+              // building up a multi-selection doesn't need a long press per item. The
+              // trade-off is that a selectable folder can't be entered while a selection is
+              // active — clear the selection first (or tap a season folder, which is not
+              // selectable and so still navigates).
               let handlePress: () => void;
-              if (item.kind === 'folder') {
+              if (toggleSelection && selectedItems.size > 0) {
+                handlePress = toggleSelection;
+              } else if (item.kind === 'folder') {
                 handlePress = item.onPress;
               } else {
                 handlePress = () => {
@@ -1123,10 +1221,6 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               const onEditPress = editMode && isEditable ? () => openEditScreen(item) : undefined;
 
               if (isListMode) {
-                // In edit mode, long press on any selectable item toggles its selection.
-                const handleLongPress = editMode && overrideKey !== null
-                  ? () => toggleItemSelection(overrideKey)
-                  : undefined;
                 return (
                   <ListItem
                     kind={item.kind}
@@ -1137,7 +1231,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                     isSelected={isSelected}
                     count={item.kind === 'folder' ? item.count : undefined}
                     onPress={handlePress}
-                    onLongPress={handleLongPress}
+                    onLongPress={toggleSelection}
                     onEditPress={onEditPress}
                   />
                 );
@@ -1152,7 +1246,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               // thumbnail reveal is disabled. Outside edit mode: long press reveals
               // the video thumbnail when a poster is also available.
               const handleLongPress = editMode
-                ? (overrideKey !== null ? () => toggleItemSelection(overrideKey) : undefined)
+                ? toggleSelection
                 : hasBothImages
                   ? () => setPressedKey(item.key)
                   : undefined;
@@ -1195,12 +1289,6 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               >
                 <ThemedText style={styles.hideButtonText}>Hide</ThemedText>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.resetButton}
-                onPress={handleResetMetadata}
-              >
-                <ThemedText style={styles.resetButtonText}>Reset</ThemedText>
-              </TouchableOpacity>
               {shouldShowMerge && (
                 <TouchableOpacity
                   style={styles.mergeButton}
@@ -1215,6 +1303,13 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
                 </TouchableOpacity>
               )}
               <TouchableOpacity
+                style={styles.moreButton}
+                onPress={() => setSelectionMenuOpen(true)}
+                accessibilityLabel="More actions for the selected items"
+              >
+                <ThemedText style={styles.moreButtonText}>More</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={styles.mergeCancelButton}
                 onPress={clearItemSelection}
               >
@@ -1222,6 +1317,43 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
               </TouchableOpacity>
             </View>
           )}
+          {/* Overflow menu for the bulk actions that don't fit in the toolbar. Rendered in a
+              Modal so it draws above the list and dismisses on an outside tap. */}
+          <Modal
+            visible={selectionMenuOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={closeSelectionMenu}
+          >
+            <TouchableOpacity
+              style={styles.selectionMenuBackdrop}
+              activeOpacity={1}
+              onPress={closeSelectionMenu}
+            >
+              <View style={[styles.selectionMenu, { marginBottom: MERGE_TOOLBAR_HEIGHT + insets.bottom }]}>
+                <TouchableOpacity
+                  style={styles.selectionMenuItem}
+                  onPress={() => runSelectionMenuAction(handleForceFetchMetadata)}
+                >
+                  <ThemedText style={styles.selectionMenuItemText}>Fetch metadata</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.selectionMenuItem}
+                  onPress={() => runSelectionMenuAction(handleForceGenerateThumbnails)}
+                >
+                  <ThemedText style={styles.selectionMenuItemText}>Generate thumbnails</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.selectionMenuItemLast}
+                  onPress={() => runSelectionMenuAction(handleResetMetadata)}
+                >
+                  <ThemedText style={[styles.selectionMenuItemText, styles.selectionMenuItemDestructiveText]}>
+                    Reset metadata
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </Modal>
         </ThemedView>
       ) : isScanning ? (
         <ThemedView style={styles.stepContainer}>
@@ -1455,16 +1587,49 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 13,
   },
-  resetButton: {
+  moreButton: {
     backgroundColor: '#6a5acd',
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  resetButtonText: {
+  moreButtonText: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 13,
+  },
+  selectionMenuBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  selectionMenu: {
+    // marginBottom is set inline so the menu sits directly above the selection toolbar.
+    marginRight: 12,
+    minWidth: 200,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(28,28,28,0.98)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  selectionMenuItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.15)',
+  },
+  selectionMenuItemLast: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  selectionMenuItemText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  selectionMenuItemDestructiveText: {
+    color: '#ff8a80',
   },
   mergeButton: {
     backgroundColor: '#0a7ea4',

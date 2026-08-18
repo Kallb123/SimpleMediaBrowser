@@ -20,13 +20,21 @@ export class MetadataService {
         return MetadataService._instance;
     }
 
-    /** Enrich the TV library, the movie list, and audiobooks concurrently. */
-    async enrichAll(library: IMediaLibrary, movies: IMediaObject[], audiobooks: IMediaAudiobook[] = [], isCancelled: () => boolean = () => false): Promise<void> {
-        // Read credentials and global settings from the Redux store.
+    /**
+     * Instantiates the configured providers and builds the per-item provider resolvers
+     * used by every enrichment entry point.  The resolvers check, in order: a per-item
+     * `metadataSourceOverride`, the item's own `metadataSource`, then the global setting.
+     *
+     * Authenticates TVDB (short-lived JWT) once per call, so this runs once per
+     * enrichment run rather than per item.
+     */
+    private async buildProviders(): Promise<{
+        resolveShowProvider: (showName: string, show: IMediaShow) => IMetadataProvider | null;
+        resolveMovieProvider: (movie: IMediaObject) => IMetadataProvider | null;
+    }> {
         const settings = store.getState().settingsReducer;
         const globalSource: dataSources = settings.dataSource ?? 'tmdb';
 
-        // Instantiate available providers.
         const tmdbProvider: TmdbProvider | null = settings.tmdbApiKey
             ? new TmdbProvider(settings.tmdbApiKey)
             : null;
@@ -34,14 +42,10 @@ export class MetadataService {
             ? new TvdbProvider(settings.tvdbApiKey, settings.tvdbPin ?? undefined)
             : null;
 
-        // Authenticate TVDB once per enrichment run (short-lived JWT).
         if (tvdbProvider) {
             await tvdbProvider.authenticate();
         }
 
-        if (isCancelled()) return;
-
-        // Provider resolver: checks per-item override → per-show source → global setting.
         const overrides = store.getState().libraryReducer.mediaOverrides;
         const resolveShowProvider = (showName: string, show: IMediaShow): IMetadataProvider | null => {
             const overrideSource = overrides[`show:${showName}`]?.metadataSourceOverride;
@@ -55,6 +59,18 @@ export class MetadataService {
             if (preferred === 'tvdb') return tvdbProvider;
             return tmdbProvider;
         };
+
+        return { resolveShowProvider, resolveMovieProvider };
+    }
+
+    /** Enrich the TV library, the movie list, and audiobooks concurrently. */
+    async enrichAll(library: IMediaLibrary, movies: IMediaObject[], audiobooks: IMediaAudiobook[] = [], isCancelled: () => boolean = () => false): Promise<void> {
+        // Read global settings from the Redux store (credentials are handled in buildProviders).
+        const settings = store.getState().settingsReducer;
+
+        const { resolveShowProvider, resolveMovieProvider } = await this.buildProviders();
+
+        if (isCancelled()) return;
 
         // First pass: collapse shows whose names differ only in punctuation / capitalisation.
         // This ensures we don't make separate requests for e.g. "Grey's Anatomy" and
@@ -139,6 +155,111 @@ export class MetadataService {
                 await this.enrichEpisodes(enrichedLibrary, resolveShowProvider, fetchEpisodeNames, fetchEpisodeThumbnails, progress, dispatchEpisodeProgress, isCancelled);
             }
         }
+    }
+
+    /**
+     * Enriches only the given shows and movies, then their episodes.
+     *
+     * Used by the bulk edit-mode actions, which act on an explicit selection rather than
+     * the whole library.  Deliberately skips the fuzzy-name and provider-ID dedup passes
+     * that {@link enrichAll} runs — those look at the entire library and could merge
+     * entries the user never selected.
+     *
+     * Note this does *not* bypass the "poster already cached" skip in `enrichLibrary` /
+     * `enrichMovies`; callers wanting a forced refetch must clear the cached poster state
+     * for the selection first.
+     *
+     * @param showNames  Redux library keys of the selected shows.
+     * @param moviePaths `parsedPath` values of the selected movies.
+     */
+    async enrichSelection(showNames: string[], moviePaths: string[], isCancelled: () => boolean = () => false): Promise<void> {
+        const settings = store.getState().settingsReducer;
+        const { resolveShowProvider, resolveMovieProvider } = await this.buildProviders();
+
+        if (isCancelled()) return;
+
+        // Read the subsets fresh so any state the caller just cleared is reflected here.
+        const state = store.getState();
+        const librarySubset: IMediaLibrary = {};
+        for (const showName of showNames) {
+            const show = state.libraryReducer.mediaLibrary[showName];
+            if (show) librarySubset[showName] = show;
+        }
+        const moviesSubset = (state.libraryReducer.movies as IMediaObject[])
+            .filter((movie) => moviePaths.includes(movie.parsedPath));
+
+        const selectedShowNames = Object.keys(librarySubset);
+        const metadataTotal = selectedShowNames.length + moviesSubset.length;
+        if (metadataTotal === 0) {
+            logger.log('MetadataService', 'enrichSelection: nothing to enrich');
+            return;
+        }
+        logger.log('MetadataService', `enrichSelection: ${selectedShowNames.length} show(s), ${moviesSubset.length} movie(s)`);
+
+        store.dispatch(setScanProgress({
+            phase: 'enriching',
+            filesFound: 0,
+            thumbnailsDone: 0,
+            thumbnailsTotal: 0,
+            metadataDone: 0,
+            metadataTotal,
+        }));
+        const progress = { done: 0 };
+        const dispatchProgress = () => {
+            store.dispatch(setScanProgress({
+                phase: 'enriching',
+                filesFound: 0,
+                thumbnailsDone: 0,
+                thumbnailsTotal: 0,
+                metadataDone: progress.done,
+                metadataTotal,
+            }));
+        };
+
+        const results = await Promise.allSettled([
+            this.enrichLibrary(librarySubset, resolveShowProvider, progress, dispatchProgress, isCancelled),
+            this.enrichMovies(moviesSubset, resolveMovieProvider, progress, dispatchProgress, isCancelled),
+        ]);
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                logger.error('MetadataService', 'enrichSelection: a task was rejected', result.reason);
+            }
+        }
+
+        if (isCancelled()) return;
+
+        // Episode-level enrichment for the selected shows only.
+        const fetchEpisodeNames = settings.fetchEpisodeNames ?? true;
+        const fetchEpisodeThumbnails = settings.fetchEpisodeThumbnails ?? true;
+        if (selectedShowNames.length > 0 && (fetchEpisodeNames || fetchEpisodeThumbnails)) {
+            // Re-read after poster enrichment so newly resolved provider IDs are picked up.
+            const enrichedLibrary = store.getState().libraryReducer.mediaLibrary;
+            const enrichedSubset: IMediaLibrary = {};
+            let seasonCount = 0;
+            for (const showName of selectedShowNames) {
+                const show = enrichedLibrary[showName];
+                if (!show) continue;
+                enrichedSubset[showName] = show;
+                if (show.ids.tmdb || show.ids.tvdb) seasonCount += Object.keys(show.seasons).length;
+            }
+            if (seasonCount > 0) {
+                const episodeMetadataTotal = progress.done + seasonCount;
+                const dispatchEpisodeProgress = () => {
+                    store.dispatch(setScanProgress({
+                        phase: 'enriching',
+                        filesFound: 0,
+                        thumbnailsDone: 0,
+                        thumbnailsTotal: 0,
+                        metadataDone: progress.done,
+                        metadataTotal: episodeMetadataTotal,
+                    }));
+                };
+                dispatchEpisodeProgress();
+                await this.enrichEpisodes(enrichedSubset, resolveShowProvider, fetchEpisodeNames, fetchEpisodeThumbnails, progress, dispatchEpisodeProgress, isCancelled);
+            }
+        }
+
+        logger.log('MetadataService', 'enrichSelection complete');
     }
 
     /** Fetch posters for every show in the library that does not yet have one cached. */
