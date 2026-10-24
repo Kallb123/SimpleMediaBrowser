@@ -1,7 +1,7 @@
 import { File } from 'expo-file-system';
 import { librarySink } from '@/scripts/librarySink';
 import { scanProgressDispatcher } from '@/scripts/scanProgressDispatcher';
-import { updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
+import { updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, updateShowPoster, setMoviePoster, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, dataSources } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import { fuzzyKey } from '@/scripts/libraryUtils';
@@ -291,8 +291,9 @@ export class MetadataService {
                 const overridePoster = overrides[`show:${showName}`]?.poster;
                 if (overridePoster) {
                     if (new File(overridePoster).exists) {
-                        const existingId = show.ids.tmdb ?? show.ids.tvdb ?? '';
-                        librarySink.dispatch(updateShowMetadata({ showName, providerId: existingId, poster: overridePoster }));
+                        // Poster-only update: updateShowMetadata rewrites ids.tmdb/ids.tvdb (and
+                        // clears the one not matching `source`), which would corrupt the ids.
+                        librarySink.dispatch(updateShowPoster({ showName, poster: overridePoster }));
                         logger.log('MetadataService', `Applying poster override for "${showName}"`);
                         continue;
                     }
@@ -374,8 +375,8 @@ export class MetadataService {
                 const overridePoster = overrides[`movie:${movie.parsedPath}`]?.poster;
                 if (overridePoster) {
                     if (new File(overridePoster).exists) {
-                        const existingId = movie.ids.tmdb ?? movie.ids.tvdb ?? '';
-                        librarySink.dispatch(updateMovieMetadata({ path: movie.path, providerId: existingId, poster: overridePoster }));
+                        // Poster-only update; see enrichLibrary for why not updateMovieMetadata.
+                        librarySink.dispatch(setMoviePoster({ path: movie.path, poster: overridePoster }));
                         logger.log('MetadataService', `Applying poster override for movie "${movie.title}"`);
                         continue;
                     }

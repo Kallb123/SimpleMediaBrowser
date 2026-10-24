@@ -535,19 +535,37 @@ describe('MetadataService', () => {
         expect(lib().mediaLibrary.Bluey.poster).toBe('file:///fresh.jpg');
       });
 
-      // NOTE: suspected bug. The override branch dispatches updateShowMetadata with the
-      // existing id (`ids.tmdb ?? ids.tvdb`) but no `source`, and the reducer defaults the
-      // source to 'tmdb'. So a TVDB-matched show with a poster override has its TVDB id
-      // moved into ids.tmdb (and ids.tvdb cleared), which then makes episode enrichment
-      // (provider.source === 'tvdb' ? ids.tvdb : ids.tmdb) look up the wrong ID space.
-      it('moves a TVDB id into ids.tmdb when applying a poster override (current behaviour)', async () => {
-        seedLibrary({ Bluey: makeShow('Bluey', { ids: { tvdb: '353546', imdb: null, tmdb: null } }) });
+      it.each([
+        ['TMDB-only', { tvdb: null, imdb: null, tmdb: '82728' }],
+        ['TVDB-only', { tvdb: '353546', imdb: null, tmdb: null }],
+        ['both ids (e.g. from an smb.json sidecar)', { tvdb: '353546', imdb: 'tt7678620', tmdb: '82728' }],
+        ['no ids', { tvdb: null, imdb: null, tmdb: null }],
+      ])('leaves ids untouched when applying a poster override: %s', async (_label, ids) => {
+        seedLibrary({ Bluey: makeShow('Bluey', { ids: { ...ids }, title: 'Bluey', year: 2018 }) });
         store.dispatch(setMediaOverride({ key: 'show:Bluey', override: { poster: 'file:///mine.jpg' } }));
         mockExistingFiles.add('file:///mine.jpg');
 
-        await run(makeProvider('tvdb'));
+        await run(makeProvider(ids.tvdb && !ids.tmdb ? 'tvdb' : 'tmdb'));
 
-        expect(lib().mediaLibrary.Bluey.ids).toEqual({ tvdb: null, imdb: null, tmdb: '353546' });
+        const show = lib().mediaLibrary.Bluey;
+        expect(show.ids).toEqual(ids);
+        expect(show.poster).toBe('file:///mine.jpg');
+        expect(show.title).toBe('Bluey');
+        expect(show.year).toBe(2018);
+      });
+
+      it('still fetches episode data from the TVDB id after a poster override on a TVDB show', async () => {
+        seedLibrary({ Bluey: makeShow('Bluey', { ids: { tvdb: '353546', imdb: null, tmdb: null } }) });
+        store.dispatch(setMediaOverride({ key: 'show:Bluey', override: { poster: 'file:///mine.jpg' } }));
+        mockExistingFiles.add('file:///mine.jpg');
+        const provider = makeProvider('tvdb');
+        provider.fetchSeasonEpisodes.mockResolvedValue([{ episodeNumber: 1, title: 'Magic Xylophone', stillUrl: null }]);
+
+        await run(provider);
+        await service.enrichEpisodes(lib().mediaLibrary, () => provider as unknown as IMetadataProvider, true, false, { done: 0 }, jest.fn());
+
+        expect(provider.fetchSeasonEpisodes).toHaveBeenCalledWith('353546', 1);
+        expect(lib().mediaLibrary.Bluey.seasons.s01.episodes.e01.resolvedTitle).toBe('Magic Xylophone');
       });
     });
 
@@ -619,15 +637,20 @@ describe('MetadataService', () => {
       expect(progress.done).toBe(1);
     });
 
-    // NOTE: same suspected bug as for shows - the override path drops the id's source.
-    it('moves a TVDB id into ids.tmdb when applying a poster override (current behaviour)', async () => {
-      store.dispatch(setMovies([makeMovie('Heat', { ids: { tvdb: '55', imdb: null, tmdb: null } })]));
+    it.each([
+      ['TMDB-only', { tvdb: null, imdb: null, tmdb: '949' }],
+      ['TVDB-only', { tvdb: '55', imdb: null, tmdb: null }],
+      ['both ids (e.g. from an smb.json sidecar)', { tvdb: '55', imdb: 'tt0113277', tmdb: '949' }],
+      ['no ids', { tvdb: null, imdb: null, tmdb: null }],
+    ])('leaves ids untouched when applying a poster override: %s', async (_label, ids) => {
+      store.dispatch(setMovies([makeMovie('Heat', { ids: { ...ids } })]));
       store.dispatch(setMediaOverride({ key: 'movie:m/Heat.mkv', override: { poster: 'file:///mine.jpg' } }));
       mockExistingFiles.add('file:///mine.jpg');
 
       await run(makeProvider());
 
-      expect(lib().movies[0].ids).toEqual({ tvdb: null, imdb: null, tmdb: '55' });
+      expect(lib().movies[0].ids).toEqual(ids);
+      expect(lib().movies[0].poster).toBe('file:///mine.jpg');
     });
 
     it('does not touch a movie with no search results', async () => {
@@ -669,6 +692,17 @@ describe('MetadataService', () => {
       expect(mockAudiobook.searchAudiobook).not.toHaveBeenCalled();
       expect(lib().audiobooks[0].poster).toBe('file:///mine.jpg');
       expect(progress.done).toBe(1);
+    });
+
+    it('keeps the iTunes id when applying a cover override', async () => {
+      store.dispatch(setAudiobooks([makeAudiobook('Dune', { ids: { itunes: 'it1' } })]));
+      store.dispatch(setMediaOverride({ key: 'audiobook:Dune', override: { poster: 'file:///mine.jpg' } }));
+      mockExistingFiles.add('file:///mine.jpg');
+
+      await service.enrichAudiobooks(lib().audiobooks as IMediaAudiobook[], provider(), { done: 0 }, jest.fn());
+
+      expect(lib().audiobooks[0].ids.itunes).toBe('it1');
+      expect(lib().audiobooks[0].poster).toBe('file:///mine.jpg');
     });
 
     it('skips audiobooks with an empty title', async () => {
