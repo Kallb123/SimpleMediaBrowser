@@ -17,7 +17,6 @@ describe('normalizeShowName', () => {
     // [raw, name, year]
     ['Bluey (2018)', 'Bluey', 2018],
     ['Bluey [2018]', 'Bluey', 2018],
-    ['Bluey 2018', 'Bluey', 2018],
     ['Bluey', 'Bluey', 0],
     ['Bluey(2018)', 'Bluey', 2018],
     ['Bluey   (2018)   ', 'Bluey', 2018],
@@ -48,9 +47,12 @@ describe('normalizeShowName', () => {
     expect(normalizeShowName(raw)).toEqual({ name, year: 0 });
   });
 
-  // Bare trailing years are only stripped as a whole word, in a plausible range, and not after
-  // a colon/dash; otherwise the number is part of the title.
+  // Only bracketed years count: a bare trailing number is part of the title.
   it.each([
+    ['Bluey 2018', 'Bluey 2018', 0],
+    ['Wonder Woman 1984', 'Wonder Woman 1984', 0],
+    ['Bluey.2018', 'Bluey.2018', 0],
+    ['Bluey_2018', 'Bluey_2018', 0],
     ['Blade Runner 2049', 'Blade Runner 2049', 0],
     ['Cyberpunk 2077', 'Cyberpunk 2077', 0],
     ['Space: 1999', 'Space: 1999', 0],
@@ -65,12 +67,10 @@ describe('normalizeShowName', () => {
     // Implausible bracketed years are kept too.
     ['Show (2049)', 'Show (2049)', 0],
     ['Show [1234]', 'Show [1234]', 0],
-    // Separators other than a space still count.
-    ['Bluey.2018', 'Bluey', 2018],
-    ['Bluey_2018', 'Bluey', 2018],
     // Boundaries of the plausible range.
-    ['Show 1900', 'Show', 1900],
-    [`Show ${new Date().getFullYear() + 1}`, 'Show', new Date().getFullYear() + 1],
+    ['Show (1899)', 'Show (1899)', 0],
+    ['Show (1900)', 'Show', 1900],
+    [`Show (${new Date().getFullYear() + 1})`, 'Show', new Date().getFullYear() + 1],
     [`Show (${new Date().getFullYear() + 2})`, `Show (${new Date().getFullYear() + 2})`, 0],
   ])('year rules for %j -> name %j, year %d', (raw, name, year) => {
     expect(normalizeShowName(raw)).toEqual({ name, year });
@@ -90,7 +90,8 @@ describe('fuzzyKey', () => {
     ['bLuEy', 'bluey'],
     // Year suffix variants
     ['Bluey [2018]', 'bluey'],
-    ['Bluey 2018', 'bluey'],
+    // A bare year is part of the name, so it is not folded away
+    ['Bluey 2018', 'bluey 2018'],
     // Punctuation removed
     ['Marvel: Agents', 'marvel agents'],
     ['Mr. Robot', 'mr robot'],
@@ -122,7 +123,8 @@ describe('fuzzyKey', () => {
     ['The "Show"', 'the show'],
     ['The “Show”', 'the show'],
     ['To be continued…', 'to be continued'],
-    // Years: plausible bare years are still dropped, title numbers kept
+    // Title numbers are kept
+    ['Wonder Woman 1984', 'wonder woman 1984'],
     ['Blade Runner 2049', 'blade runner 2049'],
     ['Space: 1999', 'space 1999'],
   ])('fuzzyKey(%j) -> %j', (input, expected) => {
@@ -140,7 +142,7 @@ describe('buildTmdbSearchQuery', () => {
   it.each([
     ['Breaking Bad (2008)', 'Breaking Bad'],
     ['Breaking Bad [2008]', 'Breaking Bad'],
-    ['Breaking Bad 2008', 'Breaking Bad'],
+    ['Breaking Bad 2008', 'Breaking Bad 2008'],
     ['Breaking Bad', 'Breaking Bad'],
     ['Tom & Jerry', 'Tom and Jerry'],
     ["Grey's Anatomy", 'Greys Anatomy'],
@@ -179,7 +181,7 @@ describe('buildTmdbSearchQuery', () => {
     ['Show12345', 'Show12345'],
     ['Show (2018', 'Show (2018'],
     ['Show 2018)', 'Show 2018)'],
-    ['Bluey.2018', 'Bluey'],
+    ['Wonder Woman 1984', 'Wonder Woman 1984'],
   ])('year-like title %j -> %j', (input, expected) => {
     expect(buildTmdbSearchQuery(input)).toBe(expected);
   });
@@ -331,6 +333,10 @@ describe('parseFilename', () => {
     ['2012.1x02.mkv', { showName: '2012', rawShowName: '2012', showYear: 0, season: 1, episode: 2, title: '' }],
     // A title ending in a non-year number keeps it
     ['Blade.Runner.2049.S01E01.mkv', { showName: 'Blade Runner 2049', rawShowName: 'Blade Runner 2049', showYear: 0, season: 1, episode: 1, title: '' }],
+    // In a release-style filename a bare year right before the episode tag is a release year,
+    // but not after a colon/dash ("Space - 1999").
+    ['Bluey 2018 S01E05.mkv', { showName: 'Bluey', rawShowName: 'Bluey 2018', showYear: 2018, season: 1, episode: 5, title: '' }],
+    ['Space - 1999 - S01E01.mkv', { showName: 'Space - 1999', rawShowName: 'Space - 1999', showYear: 0, season: 1, episode: 1, title: '' }],
   ])('handles year-suffixed and numeric show names: %j', (filename, expected) => {
     expect(parseFilename(filename)).toEqual(expected);
   });
@@ -434,6 +440,13 @@ describe('parseFromPath', () => {
         rawShowName: 'Bluey [2018]',
         showYear: 2018,
         season: 1,
+      });
+    });
+
+    it('treats a bare year in a folder name as part of the show name', () => {
+      expect(parseFromPath('ep.mkv', ['Wonder Woman 1984', 'Season 1'])).toMatchObject({
+        showName: 'Wonder Woman 1984',
+        showYear: 0,
       });
     });
   });

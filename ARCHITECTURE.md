@@ -332,10 +332,12 @@ injected `librarySink` (§5). High-level flow:
    FileScanner, MetadataService, the providers and the UI, which is what keeps
    them free of require cycles; it also holds `isMediaFile`, `parseFilename`,
    `parseFromPath`, the extension sets and `buildTmdbSearchQuery`).
-   `normalizeShowName` strips a plausible trailing year suffix
-   (`"Bluey (2018)"` / `"Bluey 2018"` → `"Bluey"`, year `2018`) but keeps
-   numbers that are part of the title (`"Blade Runner 2049"`, `"Space: 1999"`,
-   a show named `"1923"`); see its doc comment for the exact rules.
+   `normalizeShowName` strips a bracketed trailing year (`"Bluey (2018)"` →
+   `"Bluey"`, year `2018`, the Plex/Jellyfin/Kodi convention); a bare number
+   is kept as part of the title (`"Wonder Woman 1984"`, a show named
+   `"1923"`). The one exception is release-style filenames, where
+   `parseFilename` also treats a bare year right before the episode tag as the
+   release year (`"Bluey.2018.S01E05.mkv"` → `"Bluey"`, 2018).
    `fuzzyKey` further lower-cases, expands `&` → `and`, turns hyphens into
    spaces, and strips punctuation (including typographic apostrophes) so that
    e.g. `"Grey's Anatomy"`, `"Grey’s Anatomy"` and `"Greys Anatomy"` collapse

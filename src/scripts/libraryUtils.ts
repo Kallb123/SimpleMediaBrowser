@@ -135,56 +135,37 @@ function isPlausibleYear(year: number): boolean {
 }
 
 /**
- * Splits a plausible trailing year off `raw`.  Returns `null` when there is no
- * year suffix to strip, or when stripping would leave nothing (the whole name
- * is a year, e.g. the show "1923").  Shared by {@link normalizeShowName} and
+ * Splits a plausible bracketed trailing year ("(YYYY)" / "[YYYY]") off `raw`.  Returns
+ * `null` when there is no year suffix to strip, or when stripping would leave nothing (the
+ * whole name is a year, e.g. "(2018)").  Shared by {@link normalizeShowName} and
  * {@link buildTmdbSearchQuery} so both agree on what counts as a year.
  */
 function splitTrailingYear(raw: string): { base: string; year: number } | null {
-    const text = raw.trim();
-
-    // Bracketed years are a strong signal: balanced "(YYYY)" / "[YYYY]", no separator needed.
-    const bracketed = text.match(/^(.*?)\s*(?:\((\d{4})\)|\[(\d{4})\])$/);
-    if (bracketed) {
-        const year = parseInt(bracketed[2] ?? bracketed[3], 10);
-        const base = bracketed[1].trim();
-        return base && isPlausibleYear(year) ? { base, year } : null;
-    }
-
-    // Bare years are ambiguous ("Bluey 2018" vs "Blade Runner 2049" / "Space: 1999"), so the
-    // year must be a whole word after whitespace/"."/"_" (never "Show12345"), be plausible, and
-    // not follow a colon or dash (which marks it as part of a subtitle, "Space: 1999").
-    const bare = text.match(/^(.*?[^\s.:_-])[\s._]+(\d{4})$/);
-    if (bare) {
-        const year = parseInt(bare[2], 10);
-        return isPlausibleYear(year) ? { base: bare[1].trim(), year } : null;
-    }
-    return null;
+    const bracketed = raw.trim().match(/^(.*?)\s*(?:\((\d{4})\)|\[(\d{4})\])$/);
+    if (!bracketed) return null;
+    const year = parseInt(bracketed[2] ?? bracketed[3], 10);
+    const base = bracketed[1].trim();
+    return base && isPlausibleYear(year) ? { base, year } : null;
 }
 
 /**
  * Strips a trailing year suffix from a raw show/folder name and returns the
  * canonical name together with the extracted year.
  *
- * Year rules:
- *   - Bracketed "(YYYY)" or "[YYYY]" at the end is always stripped, provided it is a
- *     plausible release year (1900 to current year + 1).  Brackets must be balanced.
- *   - A bare trailing "YYYY" is stripped only when it is a whole word after whitespace,
- *     "." or "_" (so "Show12345" is untouched), is plausible, and does not follow a colon or
- *     dash.  Titles ending in an implausible year ("Blade Runner 2049") or a colon-subtitle
- *     year ("Space: 1999") therefore keep the number.  Known limitation: a title whose
- *     number is a plausible year with no colon ("Wonder Woman 1984") is still read as a year.
- *   - A name that is only a year ("1923", "(2018)") is kept whole and reports year 0:
- *     the number is the title, not a release year.
+ * Only a bracketed "(YYYY)" or "[YYYY]" at the end counts as a year: that is the Plex /
+ * Jellyfin / Kodi naming convention, and a bare number is too often part of the title
+ * ("Wonder Woman 1984", "Blade Runner 2049", "Space: 1999").  The year must be plausible
+ * (1900 to current year + 1) and the brackets balanced.  A name that is only a year
+ * ("1923", "(2018)") is kept whole and reports year 0: the number is the title.
+ * (Release-style filenames such as "Show.Name.2018.S01E05.mkv" are handled separately by
+ * {@link parseFilename}, where a bare year right before the episode tag is unambiguous.)
  *
  * Examples:
  *   "Bluey (2018)"        →  name: "Bluey",              year: 2018
  *   "Bluey [2018]"        →  name: "Bluey",              year: 2018
- *   "Bluey 2018"          →  name: "Bluey",              year: 2018
+ *   "Bluey 2018"          →  name: "Bluey 2018",         year: 0
  *   "Bluey"               →  name: "Bluey",              year: 0
- *   "Blade Runner 2049"   →  name: "Blade Runner 2049",  year: 0
- *   "Space: 1999"         →  name: "Space: 1999",        year: 0
- *   "Show12345"           →  name: "Show12345",          year: 0
+ *   "Wonder Woman 1984"   →  name: "Wonder Woman 1984",  year: 0
  *   "1923"                →  name: "1923",               year: 0
  *
  * This allows folders named "Bluey" and "Bluey (2018)" to be merged under the
@@ -194,6 +175,22 @@ function splitTrailingYear(raw: string): { base: string; year: number } | null {
 export function normalizeShowName(raw: string): { name: string; year: number } {
     const split = splitTrailingYear(raw);
     return split ? { name: split.base, year: split.year } : { name: raw.trim(), year: 0 };
+}
+
+/**
+ * {@link normalizeShowName} for the show-name part of a release-style filename (the text
+ * before "S01E05" / "1x05", already cleaned of dots and underscores).  There a bare
+ * trailing year is also accepted ("Bluey.2018.S01E05" → "Bluey", 2018), as long as it is
+ * plausible, separated by whitespace, and not after a colon or dash ("Space - 1999").
+ */
+function normalizeReleaseShowName(raw: string): { name: string; year: number } {
+    const normalized = normalizeShowName(raw);
+    if (normalized.year) return normalized;
+    const bare = raw.trim().match(/^(.*?[^\s:-])\s+(\d{4})$/);
+    if (bare && isPlausibleYear(parseInt(bare[2], 10))) {
+        return { name: bare[1].trim(), year: parseInt(bare[2], 10) };
+    }
+    return normalized;
 }
 
 /**
@@ -236,8 +233,8 @@ export function fuzzyKey(name: string): string {
  * show or movie title.
  *
  * Steps applied (order matters):
- *   1. Strip a trailing year suffix using the same rules as {@link normalizeShowName} –
- *      "Breaking Bad (2008)" → "Breaking Bad", but "Blade Runner 2049" and a title
+ *   1. Strip a bracketed trailing year using the same rules as {@link normalizeShowName} –
+ *      "Breaking Bad (2008)" → "Breaking Bad", but "Wonder Woman 1984" and a title
  *      that is only a year ("1923") are left intact.
  *   2. Replace "&" with "and" – TMDB handles "and" better than bare "&".
  *   3. Strip apostrophes (straight, typographic and backtick), curly double quotes, colons,
@@ -294,7 +291,7 @@ export function parseFilename(filename: string): ParsedMetadata | null {
     );
     if (sxxMatch) {
         const rawShowName = cleanName(sxxMatch[1]);
-        const { name: showName, year: showYear } = normalizeShowName(rawShowName);
+        const { name: showName, year: showYear } = normalizeReleaseShowName(rawShowName);
         return {
             showName,
             rawShowName,
@@ -312,7 +309,7 @@ export function parseFilename(filename: string): ParsedMetadata | null {
     );
     if (nxnnMatch) {
         const rawShowName = cleanName(nxnnMatch[1]);
-        const { name: showName, year: showYear } = normalizeShowName(rawShowName);
+        const { name: showName, year: showYear } = normalizeReleaseShowName(rawShowName);
         return {
             showName,
             rawShowName,
