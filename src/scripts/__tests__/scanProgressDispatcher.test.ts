@@ -1,4 +1,4 @@
-import type { ScanProgress } from '@/store/libraryReducer';
+import type { ScanProgress } from '@/store/scanReducer';
 import type { LibrarySink } from '@/scripts/librarySink';
 
 // The whole point of the LibrarySink refactor: the dispatcher must work without the real
@@ -18,7 +18,7 @@ const progress = (metadataDone: number): ScanProgress => ({
   metadataTotal: 100,
 });
 
-const action = (p: ScanProgress) => ({ type: 'settings/setScanProgress', payload: p });
+const action = (p: ScanProgress) => ({ type: 'scan/setScanProgress', payload: p });
 
 const INTERVAL = 250;
 

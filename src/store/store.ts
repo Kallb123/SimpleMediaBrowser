@@ -3,6 +3,7 @@ import settingsReducer from './settingsReducer'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FLUSH, PAUSE, PERSIST, persistReducer, persistStore, PURGE, REGISTER, REHYDRATE } from 'redux-persist';
 import libraryReducer from './libraryReducer';
+import scanReducer from './scanReducer';
 import { AppState } from 'react-native';
 import { logger } from '@/scripts/Logger';
 import { createLegacyLibraryCapture, createRehydrateErrorGuard, createWriteGate, PERSIST_KEY } from './persistGuards';
@@ -54,9 +55,12 @@ const persistConfig = {
   stateReconciler: legacyCapture.reconciler,
   throttle: PERSIST_THROTTLE_MS,
 };
+// `libraryReducer` (SQLite store) and `scanReducer` (transient scan progress) are not in the
+// whitelist above, so redux-persist never serialises them.
 const rootReducer = combineReducers({
   settingsReducer,
-  libraryReducer
+  libraryReducer,
+  scanReducer,
 });
 
 // Cast back to the plain combined-reducer type so that RootState (inferred from

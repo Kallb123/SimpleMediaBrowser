@@ -1,12 +1,21 @@
+import { useState } from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
+import type { ImageLoadEventData } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { ThemedText } from '@/components/ThemedText';
+import { aspectRatio, needsBackdrop } from '@/utils/posterFit';
 
 type ThumbnailSource = VideoThumbnail | string;
 
 /** Blur strength for the backdrop that fills the letterbox area behind non-portrait art. */
 const BACKDROP_BLUR_RADIUS = 24;
+
+/**
+ * Aspect ratios learned from onLoad, by image URI. Survives cell recycling and remounts so a
+ * poster seen once never needs to re-decide whether it wants a backdrop.
+ */
+const loadedAspectByUri = new Map<string, number>();
 
 export type PosterBoxItem = {
   kind: 'folder' | 'file';
@@ -53,6 +62,31 @@ export function PosterBox({
       ? { uri: item.thumbnailUri }
       : item.thumbnailUri; // VideoThumbnail (SharedRef) passed directly to expo-image
 
+  // FlashList reuses cell views; recyclingKey makes expo-image blank the view when the cell is
+  // rebound instead of briefly showing the previous item's artwork.
+  const isPosterShown = !!item.posterUri && !isRevealed;
+  const recyclingKey = `${item.key}:${isPosterShown ? 'poster' : 'thumb'}`;
+  const sourceUri = displaySource && 'uri' in displaySource ? displaySource.uri : undefined;
+
+  // The blurred backdrop only shows in letterbox bars, and costs a second (blurred) decode per
+  // cell, so skip it when the image already fills the poster-shaped box. VideoThumbnails carry
+  // their size; URI images report theirs via onLoad (until then, assume posters fit and
+  // thumbnails/stills do not, so non-poster art never shows bare bars).
+  const [loaded, setLoaded] = useState<{ key: string; aspect: number } | null>(null);
+  const knownAspect =
+    typeof item.thumbnailUri === 'object' && displaySource === item.thumbnailUri
+      ? aspectRatio(item.thumbnailUri.width, item.thumbnailUri.height)
+      : (sourceUri !== undefined ? loadedAspectByUri.get(sourceUri) : undefined)
+        ?? (loaded?.key === recyclingKey ? loaded.aspect : undefined);
+  const showBackdrop = needsBackdrop(knownAspect, cardWidth / thumbnailHeight, isPosterShown);
+
+  const handleImageLoad = (e: ImageLoadEventData) => {
+    const aspect = aspectRatio(e.source.width, e.source.height);
+    if (aspect === undefined) return;
+    if (sourceUri !== undefined) loadedAspectByUri.set(sourceUri, aspect);
+    setLoaded({ key: recyclingKey, aspect });
+  };
+
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -69,18 +103,23 @@ export function PosterBox({
           <>
             {/* Blurred, cover-scaled copy of the same art fills the letterbox area so
                 non-portrait images (landscape stills, square audiobook covers) sit in a
-                uniform poster-shaped box without cropping or flat empty bars. Portrait
-                posters cover the box exactly, hiding the backdrop entirely. */}
-            <Image
-              source={displaySource}
-              style={styles.thumbnailBackdrop}
-              contentFit="cover"
-              blurRadius={BACKDROP_BLUR_RADIUS}
-            />
+                uniform poster-shaped box without cropping or flat empty bars. Poster-shaped
+                images cover the box exactly, so the backdrop isn't rendered for them. */}
+            {showBackdrop && (
+              <Image
+                source={displaySource}
+                style={styles.thumbnailBackdrop}
+                contentFit="cover"
+                blurRadius={BACKDROP_BLUR_RADIUS}
+                recyclingKey={recyclingKey}
+              />
+            )}
             <Image
               source={displaySource}
               style={styles.thumbnailImage}
               contentFit="contain"
+              recyclingKey={recyclingKey}
+              onLoad={knownAspect === undefined ? handleImageLoad : undefined}
             />
           </>
         ) : (

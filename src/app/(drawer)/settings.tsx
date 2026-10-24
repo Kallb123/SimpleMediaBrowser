@@ -20,6 +20,7 @@ import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { exportJson, importJson, exportToFilesystem } from '@/scripts/ImportExportService';
 import type { JsonExportOptions } from '@/scripts/ImportExportService';
 import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, PORTRAIT_MIN_COLUMNS, mapScaleToColumns } from '@/utils/viewScale';
@@ -419,6 +420,7 @@ export default function SettingsPrompt() {
                 thumbnailsDir.delete();
               }
               dispatch(clearThumbnails());
+              thumbnailCache.clear();
               logger.log('Settings', 'Thumbnail cache cleared');
             } catch (e) {
               logger.error('Settings', 'Exception while clearing thumbnail cache', e as Error);
