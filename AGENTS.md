@@ -53,7 +53,7 @@ npx jest --ci --watchAll=false --passWithNoTests   # test suite
 ```
 
 CI (`.github/workflows/pre-build-test.yaml`) runs typegen, typecheck, lint, and jest
-on every PR into `main`. Run all three locally before considering a change
+on every PR into `main`. Run all four locally before considering a change
 done.
 
 ## Coding conventions

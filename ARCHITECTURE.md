@@ -546,8 +546,10 @@ etc.) can read it; iOS falls back to `Linking.openURL`.
   or Android emulator. `npx expo start --web` boots the UI in a browser for
   headless smoke tests; `metro.config.js` aliases `expo-file-system` to
   `src/shims/expo-file-system.web.ts` (web platform only) because the real
-  module's `File`/`Directory` constructors throw on web. Nothing persists on
-  web and library scanning does not work there.
+  module's `File`/`Directory` constructors throw on web. It also adds `wasm`
+  to Metro's asset extensions and sets COOP/COEP headers on the dev server,
+  which expo-sqlite (the library store) needs on web. Nothing reliable persists
+  on web and library scanning does not work there.
 - **Typed routes**: `experiments.typedRoutes` generates `.expo/types/router.d.ts`
   (gitignored), normally only written by `expo start`. `npm run typegen`
   (`expo customize tsconfig.json`) writes it headlessly in ~2s with no network,

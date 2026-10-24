@@ -18,4 +18,18 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return (upstreamResolveRequest ?? context.resolveRequest)(context, moduleName, platform);
 };
 
+// expo-sqlite (the library store) on web: its worker imports a .wasm file and
+// needs SharedArrayBuffer, i.e. a cross-origin-isolated page. Per the
+// expo-sqlite web setup docs. Neither affects native bundles.
+config.resolver.assetExts.push('wasm');
+const upstreamEnhanceMiddleware = config.server.enhanceMiddleware;
+config.server.enhanceMiddleware = (middleware, server) => {
+  const base = upstreamEnhanceMiddleware ? upstreamEnhanceMiddleware(middleware, server) : middleware;
+  return (req, res, next) => {
+    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    return base(req, res, next);
+  };
+};
+
 module.exports = config;
