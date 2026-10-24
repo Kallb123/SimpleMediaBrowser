@@ -4,9 +4,10 @@ import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { store } from "@/store/store";
-import { setScanList, setMediaLibrary, setMovies, setAudiobooks, setIsScanning, setScanProgress, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
+import { setMediaLibrary, setMovies, setAudiobooks, setIsScanning, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, IAudiobookFile, MergeEpisodePayload, dataSources } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
+import { scanProgressDispatcher } from "@/scripts/scanProgressDispatcher";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
 import type { SmbJsonData } from "@/scripts/SmbTypes";
@@ -476,7 +477,7 @@ export class FileScanner {
         sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
         this._cancelRequested = false;
         store.dispatch(setIsScanning(true));
-        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
+        scanProgressDispatcher.immediate({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 });
         try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
         const movieSources = sources.filter((s) => s.contentType === 'movie');
@@ -751,8 +752,7 @@ export class FileScanner {
 
         // Dispatch a final "collecting done" progress update with the exact total before
         // dispatching the library data, so the UI can show the correct file count.
-        store.dispatch(setScanProgress({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 }));
-        store.dispatch(setScanList(allScanUris));
+        scanProgressDispatcher.immediate({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 });
         store.dispatch(setMediaLibrary(mergedLibrary));
         store.dispatch(setMovies(movies));
         store.dispatch(setAudiobooks(audiobooks));
@@ -814,6 +814,8 @@ export class FileScanner {
             logger.error('FileScanner', `scanAllSources threw an error`, e);
             throw e;
         } finally {
+            // Drop any pending trailing tick so it can't land after the reset below.
+            scanProgressDispatcher.cancel();
             store.dispatch(setIsScanning(false));
         }
     }
@@ -841,7 +843,7 @@ export class FileScanner {
         const thumbTotal = files.length;
         // Announce the thumbnail phase so the UI can show a progress bar. Callers only
         // invoke this with at least one file, so thumbnailsTotal is always > 0 here.
-        store.dispatch(setScanProgress({ phase: 'thumbnails', filesFound, thumbnailsDone: 0, thumbnailsTotal: thumbTotal, metadataDone: 0, metadataTotal: 0 }));
+        scanProgressDispatcher.immediate({ phase: 'thumbnails', filesFound, thumbnailsDone: 0, thumbnailsTotal: thumbTotal, metadataDone: 0, metadataTotal: 0 });
         await Promise.allSettled(
             files.map(async (media) => {
                 // Skip cancelled items before acquiring the semaphore so we
@@ -873,17 +875,19 @@ export class FileScanner {
                 } finally {
                     thumbSemaphore.release();
                     thumbCompleted++;
-                    store.dispatch(setScanProgress({
+                    scanProgressDispatcher.throttled({
                         phase: 'thumbnails',
                         filesFound,
                         thumbnailsDone: thumbCompleted,
                         thumbnailsTotal: thumbTotal,
                         metadataDone: 0,
                         metadataTotal: 0,
-                    }));
+                    });
                 }
             }),
         );
+        // Make sure the last throttled tick (the true final count) reaches the UI.
+        scanProgressDispatcher.flush();
         logger.log('FileScanner', `Thumbnail generation done: ${thumbSuccess} succeeded, ${thumbFail} failed`);
     }
 
@@ -926,6 +930,8 @@ export class FileScanner {
             logger.error('FileScanner', 'regenerateThumbnailsFor threw an error', e);
             throw e;
         } finally {
+            // Drop any pending trailing tick so it can't land after the reset below.
+            scanProgressDispatcher.cancel();
             store.dispatch(setIsScanning(false));
         }
     }
@@ -948,6 +954,8 @@ export class FileScanner {
             logger.error('FileScanner', 'refetchMetadataFor threw an error', e);
             throw e;
         } finally {
+            // Drop any pending trailing tick so it can't land after the reset below.
+            scanProgressDispatcher.cancel();
             store.dispatch(setIsScanning(false));
         }
     }
@@ -982,7 +990,6 @@ export class FileScanner {
           return c;
         });
 
-        store.dispatch(setScanList(filtered.map(f => f.path)));
         logger.log('FileScanner', `scanFolder filtered to ${filtered.length} item(s)`);
 
         // Recursively collect all media files and build the library
@@ -1103,7 +1110,7 @@ export class FileScanner {
                 // scanAllSources once all sources have been collected.
                 progress.filesFound++;
                 if (progress.filesFound % PROGRESS_DISPATCH_INTERVAL === 0) {
-                    store.dispatch(setScanProgress({
+                    scanProgressDispatcher.throttled({
                         phase: 'collecting',
                         filesFound: progress.filesFound,
                         thumbnailsDone: 0,
@@ -1112,7 +1119,7 @@ export class FileScanner {
                         metadataTotal: 0,
                         currentSourceIndex: progress.sourcesTotal > 1 ? progress.currentSourceIndex : undefined,
                         sourcesTotal: progress.sourcesTotal > 1 ? progress.sourcesTotal : undefined,
-                    }));
+                    });
                     // Flush the stream batch so the UI shows newly discovered items.
                     this.flushStreamBatch(streamState, posterMap);
                 }

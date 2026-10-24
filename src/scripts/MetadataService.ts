@@ -1,6 +1,7 @@
 import { File } from 'expo-file-system';
 import { store } from '@/store/store';
-import { updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, setScanProgress, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
+import { scanProgressDispatcher } from '@/scripts/scanProgressDispatcher';
+import { updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, dataSources } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { fuzzyKey } from '@/scripts/FileScanner';
@@ -85,31 +86,28 @@ export class MetadataService {
         const showNames = Object.keys(dedupedLibrary);
         const metadataTotal = showNames.length + movies.length + audiobooks.length;
         // Announce the enriching phase so the UI can show a progress banner.
-        store.dispatch(setScanProgress({
+        scanProgressDispatcher.immediate({
             phase: 'enriching',
             filesFound: 0,
             thumbnailsDone: 0,
             thumbnailsTotal: 0,
             metadataDone: 0,
             metadataTotal,
-        }));
+        });
         // Shared mutable progress state threaded through both enrichment tasks so TV + movie
         // completions both contribute to the same running total.
         const progress = { done: 0 };
-        // Dispatch progress every N items to avoid flooding Redux for large libraries,
-        // and always on the final item so the counter reaches 100%.
-        const METADATA_PROGRESS_INTERVAL = 5;
+        // Per-item ticks are rate-limited (with a trailing dispatch, flushed below) to avoid
+        // flooding Redux for large libraries.
         const makeDispatchProgress = (currentTotal: number) => () => {
-            if (progress.done % METADATA_PROGRESS_INTERVAL === 0 || progress.done === currentTotal) {
-                store.dispatch(setScanProgress({
-                    phase: 'enriching',
-                    filesFound: 0,
-                    thumbnailsDone: 0,
-                    thumbnailsTotal: 0,
-                    metadataDone: progress.done,
-                    metadataTotal: currentTotal,
-                }));
-            }
+            scanProgressDispatcher.throttled({
+                phase: 'enriching',
+                filesFound: 0,
+                thumbnailsDone: 0,
+                thumbnailsTotal: 0,
+                metadataDone: progress.done,
+                metadataTotal: currentTotal,
+            });
         };
         const dispatchProgress = makeDispatchProgress(metadataTotal);
         const results = await Promise.allSettled([
@@ -122,6 +120,8 @@ export class MetadataService {
                 logger.error('MetadataService', 'enrichAll: a task was rejected', result.reason);
             }
         }
+        // Make sure the last throttled tick (the true final count) reaches the UI.
+        scanProgressDispatcher.flush();
 
         if (isCancelled()) return;
 
@@ -143,16 +143,17 @@ export class MetadataService {
             }
             if (seasonCount > 0) {
                 const episodeMetadataTotal = progress.done + seasonCount;
-                store.dispatch(setScanProgress({
+                scanProgressDispatcher.immediate({
                     phase: 'enriching',
                     filesFound: 0,
                     thumbnailsDone: 0,
                     thumbnailsTotal: 0,
                     metadataDone: progress.done,
                     metadataTotal: episodeMetadataTotal,
-                }));
+                });
                 const dispatchEpisodeProgress = makeDispatchProgress(episodeMetadataTotal);
                 await this.enrichEpisodes(enrichedLibrary, resolveShowProvider, fetchEpisodeNames, fetchEpisodeThumbnails, progress, dispatchEpisodeProgress, isCancelled);
+                scanProgressDispatcher.flush();
             }
         }
     }
@@ -196,24 +197,24 @@ export class MetadataService {
         }
         logger.log('MetadataService', `enrichSelection: ${selectedShowNames.length} show(s), ${moviesSubset.length} movie(s)`);
 
-        store.dispatch(setScanProgress({
+        scanProgressDispatcher.immediate({
             phase: 'enriching',
             filesFound: 0,
             thumbnailsDone: 0,
             thumbnailsTotal: 0,
             metadataDone: 0,
             metadataTotal,
-        }));
+        });
         const progress = { done: 0 };
         const dispatchProgress = () => {
-            store.dispatch(setScanProgress({
+            scanProgressDispatcher.throttled({
                 phase: 'enriching',
                 filesFound: 0,
                 thumbnailsDone: 0,
                 thumbnailsTotal: 0,
                 metadataDone: progress.done,
                 metadataTotal,
-            }));
+            });
         };
 
         const results = await Promise.allSettled([
@@ -225,6 +226,8 @@ export class MetadataService {
                 logger.error('MetadataService', 'enrichSelection: a task was rejected', result.reason);
             }
         }
+        // Make sure the last throttled tick (the true final count) reaches the UI.
+        scanProgressDispatcher.flush();
 
         if (isCancelled()) return;
 
@@ -244,18 +247,19 @@ export class MetadataService {
             }
             if (seasonCount > 0) {
                 const episodeMetadataTotal = progress.done + seasonCount;
-                const dispatchEpisodeProgress = () => {
-                    store.dispatch(setScanProgress({
+                const dispatchEpisodeProgress = (immediate = false) => {
+                    scanProgressDispatcher[immediate ? 'immediate' : 'throttled']({
                         phase: 'enriching',
                         filesFound: 0,
                         thumbnailsDone: 0,
                         thumbnailsTotal: 0,
                         metadataDone: progress.done,
                         metadataTotal: episodeMetadataTotal,
-                    }));
+                    });
                 };
-                dispatchEpisodeProgress();
+                dispatchEpisodeProgress(true);
                 await this.enrichEpisodes(enrichedSubset, resolveShowProvider, fetchEpisodeNames, fetchEpisodeThumbnails, progress, dispatchEpisodeProgress, isCancelled);
+                scanProgressDispatcher.flush();
             }
         }
 
