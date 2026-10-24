@@ -85,6 +85,9 @@ SimpleMediaBrowser/
     │   ├── libraryUtils.ts          # Pure, dependency-free helpers + shared types (IMediaObject, normalizeShowName, fuzzyKey, buildTmdbSearchQuery, filename/path parsers, extension checks)
     │   ├── librarySink.ts           # LibrarySink interface ({ dispatch, getState }) + setLibrarySink(); how scanner/enrichment reach Redux without importing the store
     │   ├── scanProgressDispatcher.ts # Shared throttled scan-progress dispatcher (built on throttledDispatch.ts, dispatches through the sink)
+    │   ├── throttledDispatch.ts     # Pure leading/trailing rate limiter (scan progress, thumbnail-cache notifications)
+    │   ├── batchedDispatch.ts       # Pure accumulator: queue items, send as one batch every N items / T ms (metadata enrichment)
+    │   ├── thumbnailCache.ts        # Observable Map of generated video thumbnails (path → URI); subscribe/getVersion for useSyncExternalStore
     │   ├── SmbTypes.ts              # Shared types for the smb.json sidecar file format
     │   ├── ImportExportService.ts   # JSON state backup/restore + filesystem (smb.json) metadata export
     │   ├── LibraryStore.ts          # SQLite-backed library persistence (one row per show), incremental autosave
@@ -102,12 +105,13 @@ SimpleMediaBrowser/
     │   ├── persistGuards.ts         # Pure, unit-testable guards used by store.ts: legacy-library capture, write gate, rehydrate-error guard
     │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave (deps injectable)
     │   ├── rehydrateRecovery.ts     # Failure counter, "offer recovery" decision and Start fresh for an unreadable persist:root (#228)
-    │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides, scan progress
+    │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides (+ applyLibraryActions batch action)
+    │   ├── scanReducer.ts           # Transient scan state: isScanning + scanProgress (never persisted)
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
     ├── contexts/EditModeContext.tsx # React context: edit-mode on/off, drawer lock state, multi-select for edit mode
     ├── constants/                   # Colors.ts, theme.ts (spacing/typography tokens), StorageKeys.ts (AsyncStorage keys)
-    ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks)
+    ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks), useThumbnailVersion
     ├── utils/viewScale.ts           # Maps the user's view-scale setting to a grid column count
     └── types/                       # Ambient type declarations (require.context, *.css modules)
 ```
@@ -168,7 +172,7 @@ rendering, and playback launch.
 
 ## 5. State Management
 
-Redux Toolkit with two slices, combined in `store/store.ts`:
+Redux Toolkit with three slices, combined in `store/store.ts`:
 
 - **`settingsReducer`** — user configuration: `mediaSources` (array of SAF
   folder URIs with a `contentType` of `tv`/`movie`/`audiobook` and an
@@ -179,8 +183,17 @@ Redux Toolkit with two slices, combined in `store/store.ts`:
   `appColorScheme`, and `settingsPassword` (parent-mode lock).
 - **`libraryReducer`** — everything produced by scanning/enrichment:
   `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`,
-  `mediaOverrides` (user edits, keyed by namespaced string — see §7),
-  and `isScanning` / `scanProgress` (transient).
+  `mediaOverrides` (user edits, keyed by namespaced string — see §7) and the
+  legacy `thumbnails` map. Everything in this slice is persisted (see below).
+  Besides the usual reducers it handles `applyLibraryActions(actions[])`, which
+  applies several library actions as one dispatch (one subscriber
+  notification) — used by `MetadataService` to batch enrichment updates.
+- **`scanReducer`** (`store/scanReducer.ts`) — transient scan state only:
+  `isScanning` and `scanProgress` (`ScanProgress`: phase + counters). It is kept
+  out of `libraryReducer` on purpose: progress ticks several times a second, and
+  in the library slice each one would change `libraryReducer`'s identity (what
+  library autosave and the browse screens key off). It is not in the redux-persist
+  whitelist and has no SQLite counterpart, so nothing ever serialises it.
 
 Persistence is split in two so a large library can't take the settings down
 with it (issue #222: on Android AsyncStorage reads an entry through a ~2 MB
@@ -205,8 +218,8 @@ roughly 2,000 episodes):
   so a failure leaves the previous state intact and the unsaved diff is
   retried on the next save. expo-sqlite reads rows through its own bundled
   sqlite3, not Android's CursorWindow, so there is no ~2 MB per-row limit.
-  Transient `isScanning`/`scanProgress` are never persisted. The
-  `hydrateLibrary` reducer loads it into the slice.
+  The `hydrateLibrary` reducer loads it into the slice. Scan state lives in
+  `scanReducer` and is never persisted.
 
 Startup (`startLibraryPersistence()`, memoised, never rejects), after
 redux-persist has bootstrapped:
@@ -292,6 +305,19 @@ root `_layout.tsx`. Every `librarySink.getState()` forwards to the real
 `getState()` at the call site (nothing is cached), and using it before it is
 wired throws a clear error. Tests call `setLibrarySink(fake)` (or `null` to
 reset) instead of mocking the store module.
+
+**Thumbnails are not in Redux.** Generated video thumbnails live in
+`scripts/thumbnailCache.ts`: a Map (media path → `file://` URI, or an in-session
+`VideoThumbnail` ref, which is not serialisable) made observable. It exposes
+`subscribe` / `getVersion` for `useSyncExternalStore`, and change notifications
+are rate-limited (250 ms, leading + trailing) so a thumbnail pass doesn't
+re-render subscribers once per image. `hooks/useThumbnailVersion.ts` returns the
+version, and `MediaBrowserScreen` uses it as the `displayItems` memo dependency
+(this replaced the old `scanProgress.thumbnailsDone` cache-buster, which tied
+browse rebuilds to scan-progress state). `smb_thumbnails/index.json` stays the
+persistence layer; `FileScanner` loads it into the cache. The `thumbnails` field
+of `libraryReducer` (and its `kv` row) is a leftover that the scanner and UI no
+longer use.
 
 ## 6. Core Data Model
 
@@ -407,7 +433,7 @@ injected `librarySink` (§5). High-level flow:
    whole operation).
 7. **Thumbnail generation** — if enabled, generates video-frame thumbnails
    (`expo-video`'s `generateThumbnailsAsync` + `expo-image-manipulator`) for
-   every file not already in `thumbnailCache`, bounded by a second semaphore
+   every file not already in `thumbnailCache` (§5), bounded by a second semaphore
    (`MAX_CONCURRENT_THUMBNAILS = 3`, CPU-bound so kept low). Successful
    thumbnails are persisted to `smb_thumbnails/` and indexed in
    `smb_thumbnails/index.json` so they survive app restarts; failures fall
@@ -416,12 +442,12 @@ injected `librarySink` (§5). High-level flow:
    numerous points (`_cancelRequested`); partial Redux state from a
    cancelled scan is left in place rather than rolled back.
 
-`scanProgress` (in `libraryReducer`) tracks a `phase` (`collecting` |
+`scanProgress` (in `scanReducer`, not `libraryReducer`) tracks a `phase` (`collecting` |
 `enriching` | `thumbnails`) plus counts, driving the progress UI in
 `MediaBrowserScreen`. `FileScanner` and `MetadataService` both send it through
 the shared `scanProgressDispatcher` (`scripts/scanProgressDispatcher.ts`,
 built on `scripts/throttledDispatch.ts`), because every update notifies all store
-subscribers (including library autosave) and rebuilds the browse screens: per-item ticks go through
+subscribers (including library autosave) and re-renders every screen showing progress: per-item ticks go through
 `.throttled` (at most one per 250 ms, with a trailing update so the final
 count lands), phase starts through `.immediate` (which drops any pending tick
 so it can't overwrite the new phase), phase ends call `.flush`, and each scan
@@ -442,6 +468,14 @@ movies, and audiobooks concurrently (`Promise.allSettled`). It:
 - Uses `AudiobookProvider` (iTunes Search API — no key needed) for
   audiobook cover art/author lookup whenever audiobooks exist and poster
   fetching is enabled, independent of whether a TMDB/TVDB key is set.
+- Batches its library updates: `enrichLibrary` / `enrichMovies` /
+  `enrichAudiobooks` / `enrichEpisodes` each collect their per-item actions
+  (`updateShowMetadata`, `updateMovieMetadata`, `updateSeasonEpisodeMetadata`, ...)
+  in a `createBatcher` (`scripts/batchedDispatch.ts`) and dispatch them as one
+  `applyLibraryActions` every 25 items or 300 ms, whichever comes first, instead of
+  one dispatch (and one subscriber notification) per item. Each method flushes its
+  batch before returning, so callers that read the library back afterwards (e.g.
+  `enrichAll` before episode enrichment and provider-id dedup) always see every update.
 - Reports `scanProgress` (`metadataDone`/`metadataTotal`) after every item via
   the rate-limited `scanProgressDispatcher` (see §7), flushing at the end of
   each phase so the counter reaches 100%.

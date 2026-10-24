@@ -10,10 +10,13 @@ import { Link, Stack, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder } from '@/store/settingsReducer';
-import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
+import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectMediaOverrides } from '@/store/libraryReducer';
+import { selectIsScanning, selectScanProgress } from '@/store/scanReducer';
 import { store } from '@/store/store';
 import { FlashList } from '@shopify/flash-list';
-import { FileScanner, thumbnailCache } from '@/scripts/FileScanner';
+import { FileScanner } from '@/scripts/FileScanner';
+import { thumbnailCache } from '@/scripts/thumbnailCache';
+import { useThumbnailVersion } from '@/hooks/useThumbnailVersion';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { IMediaLibrary, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes, sortOrders } from '@/store/settingsReducer';
@@ -641,6 +644,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
 
   const isScanning = useSelector(selectIsScanning);
   const scanProgress = useSelector(selectScanProgress);
+  const thumbnailVersion = useThumbnailVersion();
 
   const handleCancelScan = useCallback(() => {
     FileScanner.getInstance().cancelScan();
@@ -707,10 +711,9 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
 
   const displayItems = useMemo(
     () => buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, sortOrder),
-    // scanProgress.thumbnailsDone is included so the memo re-runs each time a
-    // thumbnail is added to thumbnailCache during the thumbnail generation phase.
+    // thumbnailVersion changes (rate-limited) when thumbnailCache gains or loses entries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, scanProgress.thumbnailsDone, sortOrder],
+    [mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, thumbnailVersion, sortOrder],
   );
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0;

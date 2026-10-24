@@ -1,7 +1,9 @@
 import { File } from 'expo-file-system';
 import { librarySink } from '@/scripts/librarySink';
 import { scanProgressDispatcher } from '@/scripts/scanProgressDispatcher';
-import { updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, updateShowPoster, setMoviePoster, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
+import { createBatcher } from '@/scripts/batchedDispatch';
+import type { UnknownAction } from '@reduxjs/toolkit';
+import { applyLibraryActions, updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, updateShowPoster, setMoviePoster, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, dataSources } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import { fuzzyKey } from '@/scripts/libraryUtils';
@@ -10,6 +12,11 @@ import type { IMetadataProvider } from '@/scripts/providers/IMetadataProvider';
 import { TmdbProvider } from '@/scripts/providers/TmdbProvider';
 import { TvdbProvider } from '@/scripts/providers/TvdbProvider';
 import { AudiobookProvider } from '@/scripts/providers/AudiobookProvider';
+
+/** Metadata actions are applied to the library in batches of at most this many... */
+const METADATA_BATCH_MAX_ITEMS = 25;
+/** ...or after this long, so results still appear promptly when items are slow (network-bound). */
+const METADATA_BATCH_INTERVAL_MS = 300;
 
 export class MetadataService {
     private static _instance: MetadataService | null = null;
@@ -62,6 +69,22 @@ export class MetadataService {
         };
 
         return { resolveShowProvider, resolveMovieProvider };
+    }
+
+    /**
+     * Collects the per-item metadata actions of one enrichment pass and applies them to the
+     * library as a single `applyLibraryActions` dispatch per batch. Dispatching each action
+     * on its own notified every store subscriber (library autosave, all mounted browse
+     * screens) once per show/movie/season. Callers must `flush()` when their pass ends.
+     */
+    private createLibraryBatcher() {
+        return createBatcher<UnknownAction>(
+            (actions) => {
+                librarySink.dispatch(actions.length === 1 ? actions[0] : applyLibraryActions(actions));
+            },
+            METADATA_BATCH_MAX_ITEMS,
+            METADATA_BATCH_INTERVAL_MS,
+        );
     }
 
     /** Enrich the TV library, the movie list, and audiobooks concurrently. */
@@ -276,6 +299,7 @@ export class MetadataService {
     ): Promise<void> {
         const showNames = Object.keys(library);
         logger.log('MetadataService', `enrichLibrary: ${showNames.length} show(s) to process`);
+        const batch = this.createLibraryBatcher();
 
         const overrides = librarySink.getState().libraryReducer.mediaOverrides;
 
@@ -293,7 +317,7 @@ export class MetadataService {
                     if (new File(overridePoster).exists) {
                         // Poster-only update: updateShowMetadata rewrites ids.tmdb/ids.tvdb (and
                         // clears the one not matching `source`), which would corrupt the ids.
-                        librarySink.dispatch(updateShowPoster({ showName, poster: overridePoster }));
+                        batch.add(updateShowPoster({ showName, poster: overridePoster }));
                         logger.log('MetadataService', `Applying poster override for "${showName}"`);
                         continue;
                     }
@@ -332,7 +356,7 @@ export class MetadataService {
                 }
 
                 const localUri = await provider.downloadShowPoster(bestResult.id, bestResult.posterUrl);
-                librarySink.dispatch(updateShowMetadata({
+                batch.add(updateShowMetadata({
                     showName,
                     providerId: bestResult.id,
                     source: provider.source,
@@ -349,6 +373,8 @@ export class MetadataService {
             }
         }
 
+        // Apply the last partial batch before callers read the library back.
+        batch.flush();
         logger.log('MetadataService', 'enrichLibrary complete');
     }
 
@@ -361,6 +387,7 @@ export class MetadataService {
         isCancelled: () => boolean = () => false,
     ): Promise<void> {
         logger.log('MetadataService', `enrichMovies: ${movies.length} movie(s) to process`);
+        const batch = this.createLibraryBatcher();
 
         const overrides = librarySink.getState().libraryReducer.mediaOverrides;
 
@@ -376,7 +403,7 @@ export class MetadataService {
                 if (overridePoster) {
                     if (new File(overridePoster).exists) {
                         // Poster-only update; see enrichLibrary for why not updateMovieMetadata.
-                        librarySink.dispatch(setMoviePoster({ path: movie.path, poster: overridePoster }));
+                        batch.add(setMoviePoster({ path: movie.path, poster: overridePoster }));
                         logger.log('MetadataService', `Applying poster override for movie "${movie.title}"`);
                         continue;
                     }
@@ -404,7 +431,7 @@ export class MetadataService {
                 }
 
                 const localUri = await provider.downloadMoviePoster(best.id, best.posterUrl);
-                librarySink.dispatch(updateMovieMetadata({ path: movie.path, providerId: best.id, source: provider.source, poster: localUri }));
+                batch.add(updateMovieMetadata({ path: movie.path, providerId: best.id, source: provider.source, poster: localUri }));
                 logger.log('MetadataService', `Movie "${searchTitle}" → ${provider.source} ID ${best.id}, poster cached at ${localUri}`);
             } catch (e) {
                 logger.warn('MetadataService', `Error enriching movie "${searchTitle}"`, e);
@@ -414,6 +441,8 @@ export class MetadataService {
             }
         }
 
+        // Apply the last partial batch before callers read the library back.
+        batch.flush();
         logger.log('MetadataService', 'enrichMovies complete');
     }
 
@@ -429,6 +458,7 @@ export class MetadataService {
         isCancelled: () => boolean = () => false,
     ): Promise<void> {
         logger.log('MetadataService', `enrichAudiobooks: ${audiobooks.length} audiobook(s) to process`);
+        const batch = this.createLibraryBatcher();
 
         const overrides = librarySink.getState().libraryReducer.mediaOverrides;
 
@@ -443,7 +473,7 @@ export class MetadataService {
                 const overrideCover = overrides[`audiobook:${audiobook.folderKey}`]?.poster;
                 if (overrideCover) {
                     if (new File(overrideCover).exists) {
-                        librarySink.dispatch(updateAudiobookMetadata({ folderKey: audiobook.folderKey, poster: overrideCover }));
+                        batch.add(updateAudiobookMetadata({ folderKey: audiobook.folderKey, poster: overrideCover }));
                         logger.log('MetadataService', `Applying cover override for audiobook "${audiobook.title}"`);
                         continue;
                     }
@@ -470,7 +500,7 @@ export class MetadataService {
                 }
 
                 const localUri = await provider.downloadCover(best.id, best.coverUrl);
-                librarySink.dispatch(updateAudiobookMetadata({
+                batch.add(updateAudiobookMetadata({
                     folderKey: audiobook.folderKey,
                     itunesId: best.id,
                     author: best.author,
@@ -485,6 +515,8 @@ export class MetadataService {
             }
         }
 
+        // Apply the last partial batch before callers read the library back.
+        batch.flush();
         logger.log('MetadataService', 'enrichAudiobooks complete');
     }
 
@@ -503,6 +535,7 @@ export class MetadataService {
         isCancelled: () => boolean = () => false,
     ): Promise<void> {
         logger.log('MetadataService', 'enrichEpisodes: starting episode metadata enrichment');
+        const batch = this.createLibraryBatcher();
 
         for (const [showName, show] of Object.entries(library) as [string, IMediaShow][]) {
             if (isCancelled()) {
@@ -567,7 +600,7 @@ export class MetadataService {
                     }
 
                     if (Object.keys(episodeUpdates).length > 0) {
-                        librarySink.dispatch(updateSeasonEpisodeMetadata({ showName, seasonKey, episodeUpdates }));
+                        batch.add(updateSeasonEpisodeMetadata({ showName, seasonKey, episodeUpdates }));
                         logger.log('MetadataService', `"${showName}" S${season.seasonNumber}: updated ${Object.keys(episodeUpdates).length} episode(s) via ${provider.source}`);
                     }
                 } catch (e) {
@@ -579,6 +612,8 @@ export class MetadataService {
             }
         }
 
+        // Apply the last partial batch before callers read the library back.
+        batch.flush();
         logger.log('MetadataService', 'enrichEpisodes complete');
     }
 

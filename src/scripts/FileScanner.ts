@@ -4,30 +4,18 @@ import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { librarySink } from "@/scripts/librarySink";
-import { setMediaLibrary, setMovies, setAudiobooks, setIsScanning, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
+import { setMediaLibrary, setMovies, setAudiobooks, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaAudiobook, IAudiobookFile, MergeEpisodePayload } from "@/store/libraryReducer";
+import { setIsScanning } from "@/store/scanReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { scanProgressDispatcher } from "@/scripts/scanProgressDispatcher";
 import { logger } from "@/scripts/Logger";
+import { thumbnailCache } from "@/scripts/thumbnailCache";
 import { MetadataService } from "@/scripts/MetadataService";
 import { NON_DIRECTORY_EXTENSIONS, episodeKeyFor, isMediaFile, normalizeShowName, parseFilename, parseFromPath, unnumberedEpisodeKey } from "@/scripts/libraryUtils";
 import type { IMediaObject, ParsedMetadata, dataSources } from "@/scripts/libraryUtils";
 import type { SmbJsonData } from "@/scripts/SmbTypes";
 import { SMB_THUMB_REGEX } from "@/scripts/SmbTypes";
-
-/**
- * Cross-session cache of thumbnail sources keyed by media file path.
- *
- * Values are either:
- * - A `string` local `file://` URI loaded from the persistent on-disk index at
- *   startup, or written there after a thumbnail is first generated.
- * - A `VideoThumbnail` SharedRef for thumbnails whose disk-persist step failed
- *   (in-session fallback only; they will be regenerated on the next restart).
- *
- * Because `VideoThumbnail` is non-serialisable it cannot be stored in Redux;
- * string URIs for thumbnails that were already persisted are used instead.
- */
-export const thumbnailCache = new Map<string, VideoThumbnail | string>();
 
 /** Persistent directory where generated thumbnail JPEG files are stored. */
 const THUMBNAILS_DIR = new Directory(Paths.document, 'smb_thumbnails');
