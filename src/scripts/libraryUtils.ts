@@ -264,6 +264,15 @@ export function isMediaFile(filename: string, sourceType: 'tv' | 'movie' | 'audi
     return sourceType === 'audiobook' ? AUDIO_EXTENSIONS.has(ext) : VIDEO_EXTENSIONS.has(ext);
 }
 
+/**
+ * The entries of `files` that are audio files (judged by extension via
+ * {@link isMediaFile}), in their original order.  Used to number the parts of a
+ * multi-part audiobook so stray non-audio entries never count.
+ */
+export function audioPartFiles<T extends { filename: string }>(files: T[]): T[] {
+    return files.filter((f) => isMediaFile(f.filename, 'audiobook'));
+}
+
 /** Replace dots/underscores with spaces and trim the string. */
 function cleanName(raw: string): string {
     return raw.replace(/[\._]+/g, ' ').trim();

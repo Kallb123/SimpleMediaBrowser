@@ -2,6 +2,7 @@ import {
   AUDIO_EXTENSIONS,
   NON_DIRECTORY_EXTENSIONS,
   VIDEO_EXTENSIONS,
+  audioPartFiles,
   buildTmdbSearchQuery,
   episodeKeyFor,
   unnumberedEpisodeKey,
@@ -261,6 +262,40 @@ describe('isMediaFile', () => {
     }
     for (const ext of AUDIO_EXTENSIONS) expect(VIDEO_EXTENSIONS.has(ext)).toBe(false);
     for (const ext of VIDEO_EXTENSIONS) expect(NON_DIRECTORY_EXTENSIONS.has(ext)).toBe(false);
+  });
+});
+
+describe('audioPartFiles', () => {
+  const file = (filename: string) => ({ filename, path: `/book/${filename}` });
+
+  it('keeps only audio files, dropping non-audio and extensionless entries', () => {
+    const files = [
+      file('cover.jpg'),
+      file('notes.txt'),
+      file('Part 1.mp3'),
+      file('Part 2.M4B'),
+      file('README'),
+    ];
+    expect(audioPartFiles(files).map((f) => f.filename)).toEqual(['Part 1.mp3', 'Part 2.M4B']);
+  });
+
+  it('preserves the original order and the original objects', () => {
+    const a = file('b.mp3');
+    const b = file('cover.png');
+    const c = file('a.flac');
+    const result = audioPartFiles([a, b, c]);
+    expect(result).toEqual([a, c]);
+    expect(result[0]).toBe(a);
+    expect(result[1]).toBe(c);
+  });
+
+  it('matches extensions case-insensitively', () => {
+    expect(audioPartFiles([file('A.MP3'), file('b.Opus'), file('c.mP3')])).toHaveLength(3);
+  });
+
+  it('returns an empty array when nothing is audio', () => {
+    expect(audioPartFiles([file('cover.jpg'), file('episode.mkv')])).toEqual([]);
+    expect(audioPartFiles([])).toEqual([]);
   });
 });
 
