@@ -36,7 +36,7 @@ import { selectTmdbApiKey, selectTvdbApiKey, selectTvdbPin, selectDataSource } f
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
 import { File, Directory, Paths } from 'expo-file-system';
-import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
+import { buildTmdbSearchQuery } from '@/scripts/libraryUtils';
 import { MetadataService } from '@/scripts/MetadataService';
 import { TvdbProvider } from '@/scripts/providers/TvdbProvider';
 import { AudiobookProvider } from '@/scripts/providers/AudiobookProvider';

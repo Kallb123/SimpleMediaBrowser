@@ -1,10 +1,10 @@
 import { File } from 'expo-file-system';
-import { store } from '@/store/store';
+import { librarySink } from '@/scripts/librarySink';
 import { scanProgressDispatcher } from '@/scripts/scanProgressDispatcher';
 import { updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, dataSources } from '@/store/libraryReducer';
-import type { IMediaObject } from '@/scripts/FileScanner';
-import { fuzzyKey } from '@/scripts/FileScanner';
+import type { IMediaObject } from '@/scripts/libraryUtils';
+import { fuzzyKey } from '@/scripts/libraryUtils';
 import { logger } from '@/scripts/Logger';
 import type { IMetadataProvider } from '@/scripts/providers/IMetadataProvider';
 import { TmdbProvider } from '@/scripts/providers/TmdbProvider';
@@ -33,7 +33,7 @@ export class MetadataService {
         resolveShowProvider: (showName: string, show: IMediaShow) => IMetadataProvider | null;
         resolveMovieProvider: (movie: IMediaObject) => IMetadataProvider | null;
     }> {
-        const settings = store.getState().settingsReducer;
+        const settings = librarySink.getState().settingsReducer;
         const globalSource: dataSources = settings.dataSource ?? 'tmdb';
 
         const tmdbProvider: TmdbProvider | null = settings.tmdbApiKey
@@ -47,7 +47,7 @@ export class MetadataService {
             await tvdbProvider.authenticate();
         }
 
-        const overrides = store.getState().libraryReducer.mediaOverrides;
+        const overrides = librarySink.getState().libraryReducer.mediaOverrides;
         const resolveShowProvider = (showName: string, show: IMediaShow): IMetadataProvider | null => {
             const overrideSource = overrides[`show:${showName}`]?.metadataSourceOverride;
             const preferred = overrideSource ?? show.metadataSource ?? globalSource;
@@ -67,7 +67,7 @@ export class MetadataService {
     /** Enrich the TV library, the movie list, and audiobooks concurrently. */
     async enrichAll(library: IMediaLibrary, movies: IMediaObject[], audiobooks: IMediaAudiobook[] = [], isCancelled: () => boolean = () => false): Promise<void> {
         // Read global settings from the Redux store (credentials are handled in buildProviders).
-        const settings = store.getState().settingsReducer;
+        const settings = librarySink.getState().settingsReducer;
 
         const { resolveShowProvider, resolveMovieProvider } = await this.buildProviders();
 
@@ -78,7 +78,7 @@ export class MetadataService {
         // "Greys Anatomy" that would otherwise remain as two distinct library entries.
         this.deduplicateByFuzzyName();
         // Re-read the library after fuzzy dedup so we don't enrich entries that were merged.
-        const dedupedLibrary = store.getState().libraryReducer.mediaLibrary;
+        const dedupedLibrary = librarySink.getState().libraryReducer.mediaLibrary;
 
         // Audiobook cover art comes from the keyless iTunes Search API.
         const audiobookProvider = new AudiobookProvider();
@@ -133,7 +133,7 @@ export class MetadataService {
         const fetchEpisodeNames = settings.fetchEpisodeNames ?? true;
         const fetchEpisodeThumbnails = settings.fetchEpisodeThumbnails ?? true;
         if (fetchEpisodeNames || fetchEpisodeThumbnails) {
-            const enrichedLibrary = store.getState().libraryReducer.mediaLibrary;
+            const enrichedLibrary = librarySink.getState().libraryReducer.mediaLibrary;
             // Count seasons for shows that now have a provider ID.
             let seasonCount = 0;
             for (const show of Object.values(enrichedLibrary) as IMediaShow[]) {
@@ -174,13 +174,13 @@ export class MetadataService {
      * @param moviePaths `parsedPath` values of the selected movies.
      */
     async enrichSelection(showNames: string[], moviePaths: string[], isCancelled: () => boolean = () => false): Promise<void> {
-        const settings = store.getState().settingsReducer;
+        const settings = librarySink.getState().settingsReducer;
         const { resolveShowProvider, resolveMovieProvider } = await this.buildProviders();
 
         if (isCancelled()) return;
 
         // Read the subsets fresh so any state the caller just cleared is reflected here.
-        const state = store.getState();
+        const state = librarySink.getState();
         const librarySubset: IMediaLibrary = {};
         for (const showName of showNames) {
             const show = state.libraryReducer.mediaLibrary[showName];
@@ -236,7 +236,7 @@ export class MetadataService {
         const fetchEpisodeThumbnails = settings.fetchEpisodeThumbnails ?? true;
         if (selectedShowNames.length > 0 && (fetchEpisodeNames || fetchEpisodeThumbnails)) {
             // Re-read after poster enrichment so newly resolved provider IDs are picked up.
-            const enrichedLibrary = store.getState().libraryReducer.mediaLibrary;
+            const enrichedLibrary = librarySink.getState().libraryReducer.mediaLibrary;
             const enrichedSubset: IMediaLibrary = {};
             let seasonCount = 0;
             for (const showName of selectedShowNames) {
@@ -277,7 +277,7 @@ export class MetadataService {
         const showNames = Object.keys(library);
         logger.log('MetadataService', `enrichLibrary: ${showNames.length} show(s) to process`);
 
-        const overrides = store.getState().libraryReducer.mediaOverrides;
+        const overrides = librarySink.getState().libraryReducer.mediaOverrides;
 
         for (const showName of showNames) {
             if (isCancelled()) {
@@ -292,7 +292,7 @@ export class MetadataService {
                 if (overridePoster) {
                     if (new File(overridePoster).exists) {
                         const existingId = show.ids.tmdb ?? show.ids.tvdb ?? '';
-                        store.dispatch(updateShowMetadata({ showName, providerId: existingId, poster: overridePoster }));
+                        librarySink.dispatch(updateShowMetadata({ showName, providerId: existingId, poster: overridePoster }));
                         logger.log('MetadataService', `Applying poster override for "${showName}"`);
                         continue;
                     }
@@ -331,7 +331,7 @@ export class MetadataService {
                 }
 
                 const localUri = await provider.downloadShowPoster(bestResult.id, bestResult.posterUrl);
-                store.dispatch(updateShowMetadata({
+                librarySink.dispatch(updateShowMetadata({
                     showName,
                     providerId: bestResult.id,
                     source: provider.source,
@@ -361,7 +361,7 @@ export class MetadataService {
     ): Promise<void> {
         logger.log('MetadataService', `enrichMovies: ${movies.length} movie(s) to process`);
 
-        const overrides = store.getState().libraryReducer.mediaOverrides;
+        const overrides = librarySink.getState().libraryReducer.mediaOverrides;
 
         for (const movie of movies) {
             if (isCancelled()) {
@@ -375,7 +375,7 @@ export class MetadataService {
                 if (overridePoster) {
                     if (new File(overridePoster).exists) {
                         const existingId = movie.ids.tmdb ?? movie.ids.tvdb ?? '';
-                        store.dispatch(updateMovieMetadata({ path: movie.path, providerId: existingId, poster: overridePoster }));
+                        librarySink.dispatch(updateMovieMetadata({ path: movie.path, providerId: existingId, poster: overridePoster }));
                         logger.log('MetadataService', `Applying poster override for movie "${movie.title}"`);
                         continue;
                     }
@@ -403,7 +403,7 @@ export class MetadataService {
                 }
 
                 const localUri = await provider.downloadMoviePoster(best.id, best.posterUrl);
-                store.dispatch(updateMovieMetadata({ path: movie.path, providerId: best.id, source: provider.source, poster: localUri }));
+                librarySink.dispatch(updateMovieMetadata({ path: movie.path, providerId: best.id, source: provider.source, poster: localUri }));
                 logger.log('MetadataService', `Movie "${searchTitle}" → ${provider.source} ID ${best.id}, poster cached at ${localUri}`);
             } catch (e) {
                 logger.warn('MetadataService', `Error enriching movie "${searchTitle}"`, e);
@@ -429,7 +429,7 @@ export class MetadataService {
     ): Promise<void> {
         logger.log('MetadataService', `enrichAudiobooks: ${audiobooks.length} audiobook(s) to process`);
 
-        const overrides = store.getState().libraryReducer.mediaOverrides;
+        const overrides = librarySink.getState().libraryReducer.mediaOverrides;
 
         for (const audiobook of audiobooks) {
             if (isCancelled()) {
@@ -442,7 +442,7 @@ export class MetadataService {
                 const overrideCover = overrides[`audiobook:${audiobook.folderKey}`]?.poster;
                 if (overrideCover) {
                     if (new File(overrideCover).exists) {
-                        store.dispatch(updateAudiobookMetadata({ folderKey: audiobook.folderKey, poster: overrideCover }));
+                        librarySink.dispatch(updateAudiobookMetadata({ folderKey: audiobook.folderKey, poster: overrideCover }));
                         logger.log('MetadataService', `Applying cover override for audiobook "${audiobook.title}"`);
                         continue;
                     }
@@ -469,7 +469,7 @@ export class MetadataService {
                 }
 
                 const localUri = await provider.downloadCover(best.id, best.coverUrl);
-                store.dispatch(updateAudiobookMetadata({
+                librarySink.dispatch(updateAudiobookMetadata({
                     folderKey: audiobook.folderKey,
                     itunesId: best.id,
                     author: best.author,
@@ -566,7 +566,7 @@ export class MetadataService {
                     }
 
                     if (Object.keys(episodeUpdates).length > 0) {
-                        store.dispatch(updateSeasonEpisodeMetadata({ showName, seasonKey, episodeUpdates }));
+                        librarySink.dispatch(updateSeasonEpisodeMetadata({ showName, seasonKey, episodeUpdates }));
                         logger.log('MetadataService', `"${showName}" S${season.seasonNumber}: updated ${Object.keys(episodeUpdates).length} episode(s) via ${provider.source}`);
                     }
                 } catch (e) {
@@ -593,7 +593,7 @@ export class MetadataService {
      * @param source     Which provider resolved the match. Defaults to 'tmdb'.
      */
     async rematchSingleShow(showName: string, providerId: string, source: dataSources = 'tmdb'): Promise<void> {
-        const settings = store.getState().settingsReducer;
+        const settings = librarySink.getState().settingsReducer;
         const fetchNames = settings.fetchEpisodeNames ?? true;
         const fetchThumbnails = settings.fetchEpisodeThumbnails ?? true;
         if (!fetchNames && !fetchThumbnails) return;
@@ -613,10 +613,10 @@ export class MetadataService {
         }
 
         // Clear stale episode data from the previous match.
-        store.dispatch(clearShowEpisodeMetadata(showName));
+        librarySink.dispatch(clearShowEpisodeMetadata(showName));
 
         // Read the library after the clear so episodes have a blank slate.
-        const library = store.getState().libraryReducer.mediaLibrary;
+        const library = librarySink.getState().libraryReducer.mediaLibrary;
         const show = library[showName];
         if (!show) return;
 
@@ -655,7 +655,7 @@ export class MetadataService {
      * multiple do, the alphabetically first key is used for determinism.
      */
     private deduplicateByFuzzyName(): void {
-        const library = store.getState().libraryReducer.mediaLibrary;
+        const library = librarySink.getState().libraryReducer.mediaLibrary;
 
         // Group library keys by their normalised fuzzy key.
         const byFuzzyKey = new Map<string, string[]>();
@@ -681,7 +681,7 @@ export class MetadataService {
                 'MetadataService',
                 `Deduplicating by fuzzy name "${fk}": keeping "${keepKey}", merging [${removeKeys.map((k) => `"${k}"`).join(', ')}]`,
             );
-            store.dispatch(mergeDuplicateShows({ keepKey, removeKeys }));
+            librarySink.dispatch(mergeDuplicateShows({ keepKey, removeKeys }));
         }
     }
 
@@ -693,7 +693,7 @@ export class MetadataService {
      * Checks both TMDB and TVDB IDs independently.
      */
     private deduplicateByProviderIds(): void {
-        const library = store.getState().libraryReducer.mediaLibrary;
+        const library = librarySink.getState().libraryReducer.mediaLibrary;
 
         for (const idField of ['tmdb', 'tvdb'] as const) {
             const byId = new Map<string, string[]>();
@@ -717,7 +717,7 @@ export class MetadataService {
                     'MetadataService',
                     `Deduplicating by ${idField} ID ${id}: keeping "${keepKey}", merging [${removeKeys.map((k) => `"${k}"`).join(', ')}]`,
                 );
-                store.dispatch(mergeDuplicateShows({ keepKey, removeKeys }));
+                librarySink.dispatch(mergeDuplicateShows({ keepKey, removeKeys }));
             }
         }
     }

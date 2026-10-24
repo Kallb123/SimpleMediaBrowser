@@ -1,4 +1,4 @@
-import { IMediaObject } from '@/scripts/FileScanner';
+import type { IMediaObject } from '@/scripts/libraryUtils';
 import { DirectoryLink } from './DirectoryLink';
 import { FileLink } from './FileLink';
 

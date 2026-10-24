@@ -20,6 +20,7 @@ src/
 ├── app/            Expo Router screens (file-based routing). Real navigation is under (drawer)/.
 ├── components/     UI components. MediaBrowserScreen.tsx is the core browsing screen.
 ├── scripts/        Non-UI logic: FileScanner (scanning), MetadataService + providers/ (TMDB/TVDB/iTunes),
+│                   libraryUtils (pure helpers + IMediaObject, no imports), librarySink (injected store access),
 │                   ImportExportService, Logger, openMedia
 ├── store/          Redux Toolkit slices: settingsReducer, libraryReducer (+ store.ts persistence config)
 ├── contexts/       EditModeContext (edit mode / parent-lock UI state)
@@ -64,7 +65,10 @@ automated safety net.
   field, matching the existing `select*` naming pattern.
 - **Non-UI logic lives in `src/scripts/`**, not inside components. Follow
   the existing singleton pattern (`getInstance()`) for stateful services
-  like `FileScanner` and `MetadataService`.
+  like `FileScanner` and `MetadataService`. Those two (and
+  `scanProgressDispatcher`) must not import `@/store/store`; use
+  `librarySink` from `scripts/librarySink.ts`. Keep `libraryUtils.ts` free of
+  runtime imports so it never reintroduces a require cycle.
 - **New metadata providers** must implement `IMetadataProvider`
   (`scripts/providers/IMetadataProvider.ts`) and be wired into both
   `MetadataService`'s `resolve*Provider` closures and the `dataSources`
@@ -84,7 +88,7 @@ automated safety net.
 
 - There is no existing Jest test suite — `jest-expo` is configured as the
   preset (`package.json`), so it's ready to use if you add coverage. Favor
-  adding tests for pure logic (`FileScanner.ts`'s `normalizeShowName`,
+  adding tests for pure logic (`libraryUtils.ts`'s `normalizeShowName`,
   `fuzzyKey`, `buildTmdbSearchQuery`; provider response parsing) over
   UI/component tests, since the app is Android-only and hard to drive
   headlessly.
@@ -110,6 +114,8 @@ automated safety net.
 | Looking for... | Start here |
 |---|---|
 | How scanning works | `src/scripts/FileScanner.ts`, ARCHITECTURE.md §7 |
+| Pure helpers (name normalising, filename parsing) / `IMediaObject` | `src/scripts/libraryUtils.ts` |
+| How scanner/enrichment reach Redux (sink wiring) | `src/scripts/librarySink.ts`, `src/store/wireServices.ts`, ARCHITECTURE.md §5 |
 | How TMDB/TVDB matching works | `src/scripts/MetadataService.ts`, `src/scripts/providers/`, ARCHITECTURE.md §8 |
 | The `smb.json` sidecar format | `src/scripts/SmbTypes.ts`, ARCHITECTURE.md §9 |
 | Redux state shape | `src/store/libraryReducer.ts`, `src/store/settingsReducer.ts`, ARCHITECTURE.md §5-6 |

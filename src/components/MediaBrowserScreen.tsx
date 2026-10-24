@@ -13,7 +13,8 @@ import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOr
 import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { store } from '@/store/store';
 import { FlashList } from '@shopify/flash-list';
-import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
+import { FileScanner, thumbnailCache } from '@/scripts/FileScanner';
+import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { IMediaLibrary, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes, sortOrders } from '@/store/settingsReducer';
 import { logger } from '@/scripts/Logger';
