@@ -22,7 +22,7 @@ TV shows (with seasons/episodes), movies, and audiobooks.
 |---|---|
 | Framework | Expo SDK 55 / React Native 0.83, React 19 |
 | Navigation | Expo Router (file-based routing) — drawer + stack |
-| State | Redux Toolkit + redux-persist (AsyncStorage-backed) |
+| State | Redux Toolkit; settings via redux-persist (AsyncStorage), library via file store (`LibraryStore`) |
 | File access | `expo-file-system` (new `File`/`Directory` API) + SAF (`expo-file-system/legacy`'s `StorageAccessFramework`) |
 | Metadata | TMDB and TheTVDB REST APIs (TV/movies), iTunes Search API (audiobook cover art, keyless) |
 | Video | `expo-video` (thumbnail generation via `expo-image-manipulator`) |
@@ -84,6 +84,7 @@ SimpleMediaBrowser/
     │   ├── MetadataService.ts       # Orchestrates TMDB/TVDB/iTunes enrichment, fuzzy show dedup
     │   ├── SmbTypes.ts              # Shared types for the smb.json sidecar file format
     │   ├── ImportExportService.ts   # JSON state backup/restore + filesystem (smb.json) metadata export
+    │   ├── LibraryStore.ts          # File-backed library persistence (manifest + per-show shards), incremental autosave
     │   ├── Logger.ts                # In-memory + on-disk logger, singleton, used everywhere via `logger`
     │   ├── openMedia.ts             # Hands a media file off to an external player via Android intent
     │   └── providers/
@@ -93,7 +94,8 @@ SimpleMediaBrowser/
     │       └── AudiobookProvider.ts # iTunes Search API client (no key required)
     │
     ├── store/                       # Redux Toolkit slices
-    │   ├── store.ts                 # configureStore, redux-persist config, transient-state transform
+    │   ├── store.ts                 # configureStore, redux-persist (settings only), legacy-library reconciler, write gate
+    │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the file store, hydrate Redux, start autosave
     │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides, scan progress
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
@@ -117,7 +119,8 @@ Entry point: `index.js` → `expo-router/entry` (configured via `"main"` in
    standalone builds have no Metro console), and resolves the effective
    color scheme (`system` | `light` | `dark` from settings).
 3. Once fonts are ready, it awaits `redux-persist` rehydration
-   (`persistor.getState().bootstrapped`), then checks the
+   (`waitForPersistBootstrap()`), then awaits `startLibraryPersistence()` (§5)
+   so the library is in Redux before routing, then checks the
    `firstTimeSetup` AsyncStorage key (`StorageKeys.FIRST_TIME_SETUP_KEY`).
    - Not set / not `"false"` → `router.replace('/firsttime')`.
    - Otherwise → redirect to the user's configured `defaultPage`
@@ -167,21 +170,57 @@ Redux Toolkit with two slices, combined in `store/store.ts`:
   `mediaOverrides` (user edits, keyed by namespaced string — see §7),
   and `isScanning` / `scanProgress` (transient).
 
-Persistence (`store/store.ts`): `redux-persist` backed by
-`@react-native-async-storage/async-storage`, whitelisting both slices via
-`autoMergeLevel1`. A custom `createTransform` (`scanStateTransform`) strips
-`isScanning`/`scanProgress` before writing to storage and always resets them
-to their initial values on rehydrate (it also drops the legacy `scanList`
-field, removed from the slice, from older persisted blobs) — this exists because a slice's own
-REHYDRATE handler can't win against redux-persist's post-merge write, so a
-transform is the only reliable place to keep transient scan state from
-"getting stuck" as `true` after an app restart mid-scan.
+Persistence is split in two so a large library can't take the settings down
+with it (issue #222: on Android AsyncStorage reads an entry through a ~2 MB
+CursorWindow, so one `persist:root` blob holding the whole library broke past
+roughly 2,000 episodes):
 
-Both slices are persisted as a single `persist:root` AsyncStorage entry, so
-writes are throttled (`throttle: 1000` in `persistConfig`) and `store.ts`
-calls `persistor.flush()` when the app goes to `background`/`inactive`, so a
-pending change (e.g. a `lastOpened` stamp before handing off to an external
-player) is not lost.
+- **Settings** (`store/store.ts`): `redux-persist` over
+  `@react-native-async-storage/async-storage`, key `persist:root`,
+  `whitelist: ['settingsReducer']`. Writes are throttled (`throttle: 1000`)
+  and `store.ts` calls `persistor.flush()` when the app goes to
+  `background`/`inactive`, so a pending change (e.g. a `lastOpened` stamp
+  before handing off to an external player) is not lost.
+- **Library** (`scripts/LibraryStore.ts`, driven by `store/libraryPersistence.ts`):
+  files under `library/` in the document directory — a manifest, one shard
+  per show, and separate files for movies, audiobooks, overrides and
+  thumbnails. Redux still holds the whole library in memory (same slice,
+  reducers and selectors); `LibraryStore` autosaves incrementally (only
+  changed shards, throttled, atomic write-then-rename, manifest written last,
+  flushed when the app backgrounds). Transient `isScanning`/`scanProgress`
+  are never persisted. The `hydrateLibrary` reducer loads it into the slice.
+
+Startup (`startLibraryPersistence()`, memoised, never rejects), after
+redux-persist has bootstrapped:
+
+1. Store exists → `hydrateLibrary`, start autosave, allow settings writes.
+   Any `libraryReducer` still in `persist:root` is stale and discarded.
+2. No store yet (fresh install or first launch after upgrading) → take the
+   legacy `libraryReducer` blob, write it to the file store (empty if none),
+   hydrate, start autosave, allow settings writes. This is the one-time
+   migration. If the write fails, Redux is still hydrated for the session
+   but autosave and settings writes stay off, so the library remains in
+   `persist:root` and the migration is retried next launch.
+3. Store exists but can't be read (corruption / newer version) → alert, no
+   hydrate and no autosave, so nothing is overwritten; settings writes are
+   allowed (the migration already happened earlier).
+
+Two guards in `store.ts` make this safe:
+
+- **Legacy capture.** redux-persist's `autoMergeLevel1` merges every inbound
+  key whatever the `whitelist`, so a custom `stateReconciler` strips
+  `libraryReducer` from the inbound blob, stashes it for the migration
+  (`takeLegacyPersistedLibrary()`) and delegates the rest to `autoMergeLevel1`.
+- **Write gate.** After the first `REHYDRATE`, redux-persist writes the
+  whitelisted keys as the *whole* new `persist:root` value, which is what
+  drops the legacy library from it. `persistConfig.storage` is therefore a
+  wrapper whose `setItem` waits for `allowPersistWrites()` (called only once
+  the library is safely in the file store). If `REHYDRATE` carries an `err`
+  (read failure, or redux-persist's 5 s timeout) a middleware blocks settings
+  writes for the rest of the session, since state is then defaults and the
+  next write would overwrite the stored settings. An existing file store
+  still loads and autosaves then, but the migration is skipped, since the
+  unreadable `persist:root` may hold the only copy of the legacy library.
 
 Components read state via `react-redux`'s `useSelector`/`useDispatch` (typed
 wrappers in `hooks/useRedux.ts`) and the named selectors exported from each
@@ -302,8 +341,8 @@ per-source-folder `metadataSource` → global `settings.dataSource`.**
 `enriching` | `thumbnails`) plus counts, driving the progress UI in
 `MediaBrowserScreen`. `FileScanner` and `MetadataService` both send it through
 the shared `scanProgressDispatcher` (`scripts/scanProgressDispatcher.ts`,
-built on `scripts/throttledDispatch.ts`), because every update re-persists the
-library and rebuilds the browse screens: per-item ticks go through
+built on `scripts/throttledDispatch.ts`), because every update notifies all store
+subscribers (including library autosave) and rebuilds the browse screens: per-item ticks go through
 `.throttled` (at most one per 250 ms, with a trailing update so the final
 count lands), phase starts through `.immediate` (which drops any pending tick
 so it can't overwrite the new phase), phase ends call `.flush`, and each scan
