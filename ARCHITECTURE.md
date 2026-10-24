@@ -37,8 +37,8 @@ make sense on those platforms (see §10).
 
 ```
 SimpleMediaBrowser/
-├── App.tsx                      # Unused legacy entry point; real entry is expo-router (see index.js)
-├── index.js                     # Entry: registers expo-router root ("expo-router/entry" in package.json)
+├── App.tsx                      # Root component: <ExpoRoot> over require.context('./src/app')
+├── index.js                     # Entry ("main" in package.json): registerRootComponent(App)
 ├── app.json                     # Expo app config (name, package id, plugins, expo-router root="src/app")
 │                                # Note: `android.package` is still `net.nawt.simplemediabrowser` and the EAS
 │                                # `slug` is still `SimpleMediaBrowser` — both are store/build identity and
@@ -118,9 +118,18 @@ SimpleMediaBrowser/
 
 ## 4. Application Bootstrap & Navigation
 
-Entry point: `index.js` → `expo-router/entry` (configured via `"main"` in
-`package.json` and `expo-router` `root = "src/app"` in `app.json`), which mounts
-`src/app/_layout.tsx` as the router root. The plugin `root` must point at
+Entry point: `index.js` (`"main"` in `package.json`) calls
+`registerRootComponent(App)`, and `App.tsx` mounts `<ExpoRoot>` with
+`require.context('./src/app')`, which makes `src/app/_layout.tsx` the router
+root. Dev and release builds both start this way. Until 2.4.1 `"main"` was
+`expo-router/entry` locally, but the EAS workflow rewrote it to
+`expo/AppEntry.js` (i.e. `App.tsx`) before building, so only CI builds used
+`App.tsx`. That split is why local gradle builds failed to open while CI
+builds worked (#123): `expo-router/entry` reads the route root from the
+plugin config below, which was wrong at the time.
+
+The `expo-router` plugin `root = "src/app"` in `app.json` still matters for
+typed routes and the web export. It must point at
 the folder that directly holds `_layout.tsx` (`src/app`), not at `src`: Expo
 turns it into `extra.router.root`, which both the dev server and
 `export:embed` (release/EAS bundles) feed into `EXPO_ROUTER_APP_ROOT`. With
@@ -621,8 +630,8 @@ Worth knowing before you go hunting for "why is there a duplicate of X":
   used only by the unused template screens above. When editing themed
   primitives, double-check which file the screen you're touching actually
   imports.
-- `App.tsx` at the repo root is an unused legacy RN entry point; the real
-  entry is `expo-router/entry` per `package.json`'s `"main"` field.
+- `App.tsx` at the repo root is the real root component (via `index.js`),
+  not template scaffolding; see §4.
 - Jest coverage lives in `__tests__/` folders next to the code
   (`jest-expo` preset). Scan/enrichment logic is testable without the real
   store: pure helpers are in `scripts/libraryUtils.ts`, and
