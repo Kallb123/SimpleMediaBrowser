@@ -19,6 +19,7 @@ A local media browser for Android. Point it at folders on your device or network
 - **Metadata overrides** — An edit-mode allows changes to any items title, poster, or other metadata and override what was fetched automatically.
 - **Flexible display options** — Choose between grid and list layouts, adjust poster/thumbnail scale, and select landscape or portrait orientation modes.
 - **Parent-mode** — Includes password-protection for all settings pages, so that the usual user is limited to selecting media to watch. If the password is forgotten, "Forgot password?" on the unlock screen presents a small daily arithmetic challenge (computed from today's date, no internet required) that clears the password when solved.
+- **Bedtime mode** — Optional parental control: during configured hours (e.g. 19:00–07:00) only the libraries you choose (audiobooks by default) open freely. Restricted sections, including Home, show a bed icon in the menu and need the settings password to open. Checked each time the app is opened.
 - **Dark & light theme** — Follows the system colour scheme automatically.
 - **Debug log viewer** — An in-app log screen captures scan and metadata activity to help diagnose issues without needing a connected debugger.
 

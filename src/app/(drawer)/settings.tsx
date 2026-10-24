@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, sortOrders, selectSortOrder, setSortOrder } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { exportJson, importJson, exportToFilesystem } from '@/scripts/ImportExportService';
 import type { JsonExportOptions } from '@/scripts/ImportExportService';
+import { formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
 import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, PORTRAIT_MIN_COLUMNS, mapScaleToColumns } from '@/utils/viewScale';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
@@ -70,6 +71,38 @@ const sortOrderOptions: { id: sortOrders; label: string }[] = [
   {id: 'lastOpened', label: 'Last opened'},
   {id: 'recentlyAdded', label: 'Recently added'},
 ];
+
+const BEDTIME_STEP_MINUTES = 15;
+const bedtimeGridTimes: string[] = Array.from(
+  { length: (24 * 60) / BEDTIME_STEP_MINUTES },
+  (_, i) => formatTimeOfDay(i * BEDTIME_STEP_MINUTES),
+);
+
+// Canonical order, also used to compare/persist the allowed-types selection.
+const bedtimeTypeOptions: { id: contentTypes; label: string }[] = [
+  {id: 'tv', label: 'TV'},
+  {id: 'movie', label: 'Movies'},
+  {id: 'audiobook', label: 'Audiobooks'},
+];
+
+// "7:00" -> "07:00" so stored values line up with dropdown option ids; malformed values are left as-is.
+const normaliseBedtimeTime = (value: string): string => {
+  const minutes = parseTimeOfDay(value);
+  return minutes === null ? value : formatTimeOfDay(minutes);
+};
+
+// 15-minute grid, plus any stored value that isn't on it (so it is still shown and selectable).
+const buildBedtimeTimeOptions = (...stored: string[]): { id: string; label: string }[] => {
+  const ids = new Set(bedtimeGridTimes);
+  for (const value of stored) ids.add(normaliseBedtimeTime(value));
+  return Array.from(ids)
+    .sort((a, b) => (parseTimeOfDay(a) ?? Infinity) - (parseTimeOfDay(b) ?? Infinity))
+    .map(id => ({ id, label: id }));
+};
+
+// Canonical-ordered, de-duplicated copy of an allowed-types selection.
+const canonicalBedtimeTypes = (types: readonly contentTypes[]): contentTypes[] =>
+  bedtimeTypeOptions.map(o => o.id).filter(id => types.includes(id));
 
 class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {
@@ -135,6 +168,10 @@ export default function SettingsPrompt() {
   const [fetchEpisodeThumbnails, setLocalFetchEpisodeThumbnails] = useState(true);
   const [appColorScheme, setLocalAppColorScheme] = useState('system' as appColorSchemes);
   const [sortOrder, setLocalSortOrder] = useState('alphabetical' as sortOrders);
+  const [bedtimeEnabled, setLocalBedtimeEnabled] = useState(false);
+  const [bedtimeStart, setLocalBedtimeStart] = useState('19:00');
+  const [bedtimeEnd, setLocalBedtimeEnd] = useState('07:00');
+  const [bedtimeAllowedTypes, setLocalBedtimeAllowedTypes] = useState(['audiobook'] as contentTypes[]);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
@@ -161,6 +198,10 @@ export default function SettingsPrompt() {
   const settingsFetchEpisodeThumbnails = useSelector(selectFetchEpisodeThumbnails);
   const settingsAppColorScheme = useSelector(selectAppColorScheme);
   const settingsSortOrder = useSelector(selectSortOrder);
+  const settingsBedtimeEnabled = useSelector(selectBedtimeEnabled);
+  const settingsBedtimeStart = useSelector(selectBedtimeStart);
+  const settingsBedtimeEnd = useSelector(selectBedtimeEnd);
+  const settingsBedtimeAllowedTypes = useSelector(selectBedtimeAllowedTypes);
 
   const dataSourceRef = useRef(null);
   const mediaStructureRef = useRef(null);
@@ -168,6 +209,13 @@ export default function SettingsPrompt() {
   const defaultPageRef = useRef(null);
   const appColorSchemeRef = useRef(null);
   const sortOrderRef = useRef(null);
+  const bedtimeStartRef = useRef(null);
+  const bedtimeEndRef = useRef(null);
+
+  const bedtimeTimeOptions = useMemo(
+    () => buildBedtimeTimeOptions(settingsBedtimeStart, settingsBedtimeEnd),
+    [settingsBedtimeStart, settingsBedtimeEnd],
+  );
 
   const safeDecodeUri = useCallback((uri: string) => {
     try {
@@ -264,10 +312,25 @@ export default function SettingsPrompt() {
         (sortOrderRef.current as any).selectIndex(sortOrderIndex);
       }
       setLocalSortOrder(settingsSortOrder);
+
+      setLocalBedtimeEnabled(settingsBedtimeEnabled);
+      const normalisedBedtimeStart = normaliseBedtimeTime(settingsBedtimeStart);
+      const normalisedBedtimeEnd = normaliseBedtimeTime(settingsBedtimeEnd);
+      const bedtimeStartIndex = bedtimeTimeOptions.findIndex(o => o.id === normalisedBedtimeStart);
+      if (bedtimeStartRef.current && bedtimeStartIndex >= 0) {
+        (bedtimeStartRef.current as any).selectIndex(bedtimeStartIndex);
+      }
+      setLocalBedtimeStart(normalisedBedtimeStart);
+      const bedtimeEndIndex = bedtimeTimeOptions.findIndex(o => o.id === normalisedBedtimeEnd);
+      if (bedtimeEndRef.current && bedtimeEndIndex >= 0) {
+        (bedtimeEndRef.current as any).selectIndex(bedtimeEndIndex);
+      }
+      setLocalBedtimeEnd(normalisedBedtimeEnd);
+      setLocalBedtimeAllowedTypes(canonicalBedtimeTypes(settingsBedtimeAllowedTypes));
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]);
 
   const save = useCallback(() => {
     try {
@@ -354,12 +417,32 @@ export default function SettingsPrompt() {
         dispatch(setSortOrder(sortOrder));
         changeCount++;
       }
+      if (bedtimeEnabled !== settingsBedtimeEnabled) {
+        logger.log('Settings', `Persisting: bedtimeEnabled changed ${settingsBedtimeEnabled} → ${bedtimeEnabled}`);
+        dispatch(setBedtimeEnabled(bedtimeEnabled));
+        changeCount++;
+      }
+      if (bedtimeStart && bedtimeStart !== normaliseBedtimeTime(settingsBedtimeStart)) {
+        logger.log('Settings', `Persisting: bedtimeStart changed ${settingsBedtimeStart} → ${bedtimeStart}`);
+        dispatch(setBedtimeStart(bedtimeStart));
+        changeCount++;
+      }
+      if (bedtimeEnd && bedtimeEnd !== normaliseBedtimeTime(settingsBedtimeEnd)) {
+        logger.log('Settings', `Persisting: bedtimeEnd changed ${settingsBedtimeEnd} → ${bedtimeEnd}`);
+        dispatch(setBedtimeEnd(bedtimeEnd));
+        changeCount++;
+      }
+      if (bedtimeAllowedTypes.length > 0 && bedtimeAllowedTypes.join(',') !== canonicalBedtimeTypes(settingsBedtimeAllowedTypes).join(',')) {
+        logger.log('Settings', `Persisting: bedtimeAllowedTypes changed ${settingsBedtimeAllowedTypes.join(',')} → ${bedtimeAllowedTypes.join(',')}`);
+        dispatch(setBedtimeAllowedTypes(bedtimeAllowedTypes));
+        changeCount++;
+      }
       logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
       router.replace('/(drawer)/(home)');
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder]);
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
@@ -537,6 +620,56 @@ export default function SettingsPrompt() {
     );
   }, [dispatch]);
 
+  const toggleBedtimeType = useCallback((type: contentTypes, value: boolean) => {
+    try {
+      setLocalBedtimeAllowedTypes(prev => {
+        // At least one library must stay available during bedtime (the switch for the last one is disabled).
+        const next = value ? [...prev, type] : prev.filter(t => t !== type);
+        return next.length > 0 ? canonicalBedtimeTypes(next) : prev;
+      });
+    } catch (e) {
+      logger.error('Settings', 'Exception while toggling bedtime library', e as Error);
+    }
+  }, []);
+
+  const renderBedtimeTimeDropdown = (
+    ref: React.RefObject<null>,
+    storedValue: string,
+    onSelect: (value: string) => void,
+    errorMessage: string,
+  ) => (
+    <SelectDropdown
+      ref={ref}
+      data={bedtimeTimeOptions}
+      defaultValue={bedtimeTimeOptions.find(o => o.id === normaliseBedtimeTime(storedValue))}
+      disabled={!bedtimeEnabled}
+      onSelect={(selectedItem) => {
+        try {
+          onSelect(selectedItem.id);
+        } catch (e) {
+          logger.error('Settings', errorMessage, e as Error);
+        }
+      }}
+      renderButton={(selectedItem, isOpened) => (
+        <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }, !bedtimeEnabled && styles.bedtimeDisabled]}>
+          <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+            {(selectedItem && selectedItem.label) || 'Please select...'}
+          </Text>
+          <Text>{isOpened ? "🔼" : "🔽"}</Text>
+        </View>
+      )}
+      renderItem={(item, index, isSelected) => (
+        <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+          <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+        </View>
+      )}
+      showsVerticalScrollIndicator={false}
+      dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+    />
+  );
+
+  const bedtimeStartsEqualEnd = parseTimeOfDay(bedtimeStart) !== null && parseTimeOfDay(bedtimeStart) === parseTimeOfDay(bedtimeEnd);
+
   const handleExportJson = useCallback(async () => {
     try {
       const options: JsonExportOptions = {
@@ -616,6 +749,66 @@ export default function SettingsPrompt() {
             secureTextEntry={true}
           />
         </View>
+      </View>
+
+      {/* Bedtime */}
+      <View style={styles.section}>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>Bedtime</ThemedText>
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Enable bedtime mode:</ThemedText>
+          <Switch
+            value={bedtimeEnabled}
+            onValueChange={(value) => {
+              try {
+                setLocalBedtimeEnabled(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling bedtime mode', e as Error);
+              }
+            }}
+          />
+        </View>
+        <ThemedText style={styles.emptyText}>
+          During bedtime only the libraries chosen below can be opened freely. Home and the other libraries are marked with a bed icon in the menu and need the settings password to open. Bedtime is checked each time the app is opened.
+        </ThemedText>
+        {bedtimeEnabled && !password && (
+          <ThemedText style={styles.warningText}>
+            No settings password is set, so anyone can unlock the bedtime libraries. Set a password under Access.
+          </ThemedText>
+        )}
+        <View style={styles.row}>
+          <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>Start time:</ThemedText>
+          {renderBedtimeTimeDropdown(bedtimeStartRef, settingsBedtimeStart, setLocalBedtimeStart, 'Exception while selecting bedtime start')}
+        </View>
+        <View style={styles.row}>
+          <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>End time:</ThemedText>
+          {renderBedtimeTimeDropdown(bedtimeEndRef, settingsBedtimeEnd, setLocalBedtimeEnd, 'Exception while selecting bedtime end')}
+        </View>
+        <ThemedText style={styles.emptyText}>
+          If the end time is earlier than the start time, bedtime runs overnight (for example 19:00 to 07:00).
+        </ThemedText>
+        {bedtimeStartsEqualEnd && (
+          <ThemedText style={styles.warningText}>
+            Start and end time are the same, so bedtime will never apply.
+          </ThemedText>
+        )}
+        <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>Available during bedtime:</ThemedText>
+        {bedtimeTypeOptions.map(option => {
+          const checked = bedtimeAllowedTypes.includes(option.id);
+          const isLastChecked = checked && bedtimeAllowedTypes.length === 1;
+          return (
+            <View key={option.id} style={styles.row}>
+              <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>{option.label}</ThemedText>
+              <Switch
+                value={checked}
+                disabled={!bedtimeEnabled || isLastChecked}
+                onValueChange={(value) => toggleBedtimeType(option.id, value)}
+              />
+            </View>
+          );
+        })}
+        <ThemedText style={styles.emptyText}>
+          At least one library must stay available during bedtime.
+        </ThemedText>
       </View>
 
       {/* Media Sources */}
@@ -1137,6 +1330,13 @@ const styles = StyleSheet.create({
   emptyText: {
     opacity: 0.5,
     fontStyle: 'italic',
+  },
+  warningText: {
+    color: DESTRUCTIVE_COLOR,
+    fontSize: 13,
+  },
+  bedtimeDisabled: {
+    opacity: 0.4,
   },
   scanStatus: {
     opacity: 0.7,
