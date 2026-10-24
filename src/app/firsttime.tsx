@@ -37,7 +37,7 @@ export default function FirstTime() {
     dispatch(setEnableThumbnailGeneration(enableThumbnailGeneration));
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
     logger.log('FirstTime', 'First-time setup key written to AsyncStorage. Navigating to home.');
-    router.replace('/(drawer)');
+    router.replace('/(drawer)/(home)');
   }, [password, enableThumbnailGeneration, dispatch]);
 
   const contentPlatformStyle = Platform.select({

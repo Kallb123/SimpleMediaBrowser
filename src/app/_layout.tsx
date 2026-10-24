@@ -107,7 +107,7 @@ function AppRoot() {
           ? '/(drawer)/movies'
           : defaultPage === 'audiobooks'
             ? '/(drawer)/audiobooks'
-            : '/(drawer)';
+            : '/(drawer)/(home)';
       logger.log('RootLayout', `First-time setup already complete – redirecting to ${route}`);
       router.replace(route);
     }
