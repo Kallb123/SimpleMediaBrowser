@@ -165,16 +165,23 @@ Redux Toolkit with two slices, combined in `store/store.ts`:
 - **`libraryReducer`** — everything produced by scanning/enrichment:
   `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`,
   `mediaOverrides` (user edits, keyed by namespaced string — see §7),
-  `isScanning` / `scanProgress` (transient), and the raw `scanList`.
+  and `isScanning` / `scanProgress` (transient).
 
 Persistence (`store/store.ts`): `redux-persist` backed by
 `@react-native-async-storage/async-storage`, whitelisting both slices via
 `autoMergeLevel1`. A custom `createTransform` (`scanStateTransform`) strips
 `isScanning`/`scanProgress` before writing to storage and always resets them
-to their initial values on rehydrate — this exists because a slice's own
+to their initial values on rehydrate (it also drops the legacy `scanList`
+field, removed from the slice, from older persisted blobs) — this exists because a slice's own
 REHYDRATE handler can't win against redux-persist's post-merge write, so a
 transform is the only reliable place to keep transient scan state from
 "getting stuck" as `true` after an app restart mid-scan.
+
+Both slices are persisted as a single `persist:root` AsyncStorage entry, so
+writes are throttled (`throttle: 1000` in `persistConfig`) and `store.ts`
+calls `persistor.flush()` when the app goes to `background`/`inactive`, so a
+pending change (e.g. a `lastOpened` stamp before handing off to an external
+player) is not lost.
 
 Components read state via `react-redux`'s `useSelector`/`useDispatch` (typed
 wrappers in `hooks/useRedux.ts`) and the named selectors exported from each
@@ -293,7 +300,14 @@ per-source-folder `metadataSource` → global `settings.dataSource`.**
 
 `scanProgress` (in `libraryReducer`) tracks a `phase` (`collecting` |
 `enriching` | `thumbnails`) plus counts, driving the progress UI in
-`MediaBrowserScreen`.
+`MediaBrowserScreen`. `FileScanner` and `MetadataService` both send it through
+the shared `scanProgressDispatcher` (`scripts/scanProgressDispatcher.ts`,
+built on `scripts/throttledDispatch.ts`), because every update re-persists the
+library and rebuilds the browse screens: per-item ticks go through
+`.throttled` (at most one per 250 ms, with a trailing update so the final
+count lands), phase starts through `.immediate` (which drops any pending tick
+so it can't overwrite the new phase), phase ends call `.flush`, and each scan
+entry point calls `.cancel` before `setIsScanning(false)` resets progress.
 
 ## 8. Metadata Enrichment (`MetadataService.ts` + providers)
 
@@ -310,8 +324,9 @@ movies, and audiobooks concurrently (`Promise.allSettled`). It:
 - Uses `AudiobookProvider` (iTunes Search API — no key needed) for
   audiobook cover art/author lookup whenever audiobooks exist and poster
   fetching is enabled, independent of whether a TMDB/TVDB key is set.
-- Dispatches throttled `scanProgress` updates (`metadataDone`/`metadataTotal`,
-  every `METADATA_PROGRESS_INTERVAL = 5` items and always on the last one).
+- Reports `scanProgress` (`metadataDone`/`metadataTotal`) after every item via
+  the rate-limited `scanProgressDispatcher` (see §7), flushing at the end of
+  each phase so the counter reaches 100%.
 
 All providers implement `IMetadataProvider` (`providers/IMetadataProvider.ts`)
 — `searchShow`, `searchMovie`, `downloadShowPoster`, `downloadMoviePoster`,

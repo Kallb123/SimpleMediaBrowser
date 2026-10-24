@@ -363,6 +363,9 @@ const mediaSectionOptions = {
   headerShown: false,
   // Leaving a section resets it to its root, so it is always entered at the top level.
   popToTopOnBlur: true,
+  // Sections stay mounted once visited; without freezing, every visited section
+  // rebuilds its item list on each library update (e.g. every scan progress tick).
+  freezeOnBlur: true,
 };
 
 const styles = StyleSheet.create({

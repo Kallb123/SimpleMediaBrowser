@@ -137,8 +137,6 @@ export interface IMediaAudiobook {
     unavailable?: boolean;
 }
 
-export type IRawScanList = string[];
-
 /**
  * Payload for a single episode entry streamed to Redux during scanning.
  * Exported so FileScanner can build typed batch arrays without importing
@@ -202,7 +200,6 @@ interface LibraryState {
   mediaLibrary: IMediaLibrary;
   movies: IMediaObject[];
   audiobooks: IMediaAudiobook[];
-  scanList: IRawScanList;
   isScanning: boolean;
   thumbnails: { [path: string]: string };
   /**
@@ -230,7 +227,6 @@ const initialState: LibraryState = {
   mediaLibrary: {},
   movies: [],
   audiobooks: [],
-  scanList: [],
   isScanning: false,
   thumbnails: {},
   mediaOverrides: {},
@@ -243,15 +239,6 @@ export const settingsSlice = createSlice({
   initialState,
   reducers: {
     // Use the PayloadAction type to declare the contents of `action.payload`
-    addToScanList: (state, action: PayloadAction<string>) => {
-      state.scanList.push(action.payload);
-    },
-    setScanList: (state, action: PayloadAction<string[]>) => {
-      state.scanList = action.payload;
-    },
-    clearScanList: (state, action: PayloadAction<string>) => {
-      state.scanList = [];
-    },
     setMediaLibrary: (state, action: PayloadAction<IMediaLibrary>) => {
       state.mediaLibrary = action.payload;
     },
@@ -661,10 +648,9 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addToScanList, setScanList, clearScanList, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
-export const selectScanList = (state: RootState) => state.libraryReducer.scanList;
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
 export const selectMovies = (state: RootState) => state.libraryReducer.movies;
 export const selectAudiobooks = (state: RootState) => state.libraryReducer.audiobooks ?? [];
