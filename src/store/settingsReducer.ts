@@ -38,6 +38,13 @@ interface SettingsState {
   fetchEpisodeThumbnails: boolean
   appColorScheme: appColorSchemes
   sortOrder: sortOrders
+  bedtimeEnabled: boolean
+  /** "HH:MM" local time at which bedtime mode starts. */
+  bedtimeStart: string
+  /** "HH:MM" local time at which bedtime mode ends (may be earlier than start to cross midnight). */
+  bedtimeEnd: string
+  /** Content types that stay accessible while bedtime mode is in effect. */
+  bedtimeAllowedTypes: contentTypes[]
 }
 
 // Define the initial state using that type
@@ -59,7 +66,15 @@ const initialState: SettingsState = {
   fetchEpisodeThumbnails: true,
   appColorScheme: 'system',
   sortOrder: 'alphabetical',
+  bedtimeEnabled: false,
+  bedtimeStart: '19:00',
+  bedtimeEnd: '07:00',
+  bedtimeAllowedTypes: ['audiobook'],
 }
+
+// Stable fallback for persisted state that predates bedtime mode, so selectors don't
+// return a fresh array (and force re-renders) on every call.
+const DEFAULT_BEDTIME_ALLOWED_TYPES: contentTypes[] = ['audiobook'];
 
 export const settingsSlice = createSlice({
   name: 'settings',
@@ -127,10 +142,22 @@ export const settingsSlice = createSlice({
     setSortOrder: (state, action: PayloadAction<sortOrders>) => {
       state.sortOrder = action.payload;
     },
+    setBedtimeEnabled: (state, action: PayloadAction<boolean>) => {
+      state.bedtimeEnabled = action.payload;
+    },
+    setBedtimeStart: (state, action: PayloadAction<string>) => {
+      state.bedtimeStart = action.payload;
+    },
+    setBedtimeEnd: (state, action: PayloadAction<string>) => {
+      state.bedtimeEnd = action.payload;
+    },
+    setBedtimeAllowedTypes: (state, action: PayloadAction<contentTypes[]>) => {
+      state.bedtimeAllowedTypes = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -156,5 +183,10 @@ export const selectAppColorScheme = (state: RootState): appColorSchemes =>
   (state.settingsReducer.appColorScheme ?? 'system') as appColorSchemes;
 export const selectSortOrder = (state: RootState): sortOrders =>
   (state.settingsReducer.sortOrder ?? 'alphabetical') as sortOrders;
+export const selectBedtimeEnabled = (state: RootState) => state.settingsReducer.bedtimeEnabled ?? false;
+export const selectBedtimeStart = (state: RootState) => state.settingsReducer.bedtimeStart ?? '19:00';
+export const selectBedtimeEnd = (state: RootState) => state.settingsReducer.bedtimeEnd ?? '07:00';
+export const selectBedtimeAllowedTypes = (state: RootState) =>
+  state.settingsReducer.bedtimeAllowedTypes ?? DEFAULT_BEDTIME_ALLOWED_TYPES;
 
 export default settingsSlice.reducer
