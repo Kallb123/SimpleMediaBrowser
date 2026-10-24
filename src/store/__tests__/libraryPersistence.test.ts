@@ -2,6 +2,11 @@ import { hydrateLibrary } from '../libraryReducer';
 import { runLibraryPersistence } from '../libraryPersistence';
 import type { LibraryPersistenceDeps } from '../libraryPersistence';
 
+// libraryPersistence.ts imports AsyncStorage for the real recovery deps (not used by these tests).
+jest.mock('@react-native-async-storage/async-storage', () =>
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
+
 jest.mock('@/scripts/Logger', () => ({
   logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
@@ -51,6 +56,11 @@ let dispatch: jest.Mock;
 let getLibraryState: jest.Mock;
 let subscribe: jest.Mock;
 let alert: jest.Mock;
+let getRehydrateError: jest.Mock;
+let recordFailure: jest.Mock;
+let clearFailure: jest.Mock;
+let confirmStartFresh: jest.Mock;
+let startFresh: jest.Mock;
 
 function run(): Promise<void> {
   const deps: LibraryPersistenceDeps = {
@@ -63,6 +73,13 @@ function run(): Promise<void> {
     getLibraryState: getLibraryState as any,
     subscribe: subscribe as any,
     alert: alert as any,
+    getRehydrateError: getRehydrateError as any,
+    recovery: {
+      recordFailure: recordFailure as any,
+      clearFailure: clearFailure as any,
+      confirmStartFresh: confirmStartFresh as any,
+      startFresh: startFresh as any,
+    },
   };
   return runLibraryPersistence(deps);
 }
@@ -79,6 +96,12 @@ beforeEach(() => {
   getLibraryState = jest.fn().mockReturnValue({});
   subscribe = jest.fn();
   alert = jest.fn();
+  getRehydrateError = jest.fn().mockReturnValue(new Error('read failed'));
+  // A first, non-size failure by default: no recovery offer.
+  recordFailure = jest.fn(async (message: string) => ({ consecutiveFailures: 1, lastError: message, lastFailedAt: 0 }));
+  clearFailure = jest.fn().mockResolvedValue(undefined);
+  confirmStartFresh = jest.fn().mockResolvedValue(false);
+  startFresh = jest.fn(async () => { calls.push('startFresh'); });
 });
 
 describe('runLibraryPersistence', () => {
@@ -171,6 +194,96 @@ describe('runLibraryPersistence', () => {
     expect(dispatch).toHaveBeenCalledWith(hydrateLibrary(stored as any));
     expect(calls).toEqual(['hydrate', 'autosave', 'allow']);
     expect(alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('successful settings rehydrate: clears any recorded failures and never offers recovery', async () => {
+    await run();
+
+    expect(clearFailure).toHaveBeenCalledTimes(1);
+    expect(recordFailure).not.toHaveBeenCalled();
+    expect(confirmStartFresh).not.toHaveBeenCalled();
+  });
+
+  it('single transient failure: records it, shows the plain notice, never offers or performs a reset', async () => {
+    didRehydrateFail.mockReturnValue(true);
+
+    await run();
+
+    expect(recordFailure).toHaveBeenCalledWith('read failed');
+    expect(confirmStartFresh).not.toHaveBeenCalled();
+    expect(startFresh).not.toHaveBeenCalled();
+    expect(clearFailure).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(writeAll).not.toHaveBeenCalled();
+    expect(allowWrites).not.toHaveBeenCalled();
+  });
+
+  describe('persistent failure', () => {
+    beforeEach(() => {
+      didRehydrateFail.mockReturnValue(true);
+      recordFailure.mockImplementation(async (message: string) => ({ consecutiveFailures: 2, lastError: message, lastFailedAt: 0 }));
+    });
+
+    it('offers the choice after repeated failures, and "Keep trying" changes nothing', async () => {
+      confirmStartFresh.mockResolvedValue(false);
+
+      await run();
+
+      expect(confirmStartFresh).toHaveBeenCalledTimes(1);
+      expect(startFresh).not.toHaveBeenCalled();
+      expect(clearFailure).not.toHaveBeenCalled(); // the count keeps growing until it is resolved
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(writeAll).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(allowWrites).not.toHaveBeenCalled();
+    });
+
+    it('offers the choice straight away for a size failure', async () => {
+      recordFailure.mockImplementation(async (message: string) => ({ consecutiveFailures: 1, lastError: message, lastFailedAt: 0 }));
+      getRehydrateError.mockReturnValue(new Error('Row too big to fit into CursorWindow requiredPos=0, totalRows=1'));
+
+      await run();
+
+      expect(confirmStartFresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('"Start fresh": removes the entry first, then creates the empty library store, hydrates and allows writes', async () => {
+      confirmStartFresh.mockResolvedValue(true);
+
+      await run();
+
+      expect(startFresh).toHaveBeenCalledTimes(1);
+      expect(clearFailure).toHaveBeenCalledTimes(1);
+      expect(writeAll).toHaveBeenCalledWith(EMPTY);
+      expect(dispatch).toHaveBeenCalledWith(hydrateLibrary(EMPTY));
+      expect(calls).toEqual(['startFresh', 'writeAll', 'hydrate', 'autosave', 'allow']);
+      expect(alert).not.toHaveBeenCalled();
+    });
+
+    it('"Start fresh" with an existing library store keeps that library', async () => {
+      confirmStartFresh.mockResolvedValue(true);
+      const stored = { ...EMPTY, movies: [{ path: 'stored' }] };
+      load.mockResolvedValue(stored);
+
+      await run();
+
+      expect(writeAll).not.toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledWith(hydrateLibrary(stored as any));
+      expect(calls).toEqual(['startFresh', 'hydrate', 'autosave', 'allow']);
+    });
+
+    it('"Start fresh" that cannot remove the entry: alerts, stays blocked and skips the migration', async () => {
+      confirmStartFresh.mockResolvedValue(true);
+      startFresh.mockRejectedValue(new Error('delete failed'));
+
+      await run();
+
+      expect(clearFailure).not.toHaveBeenCalled();
+      expect(alert).toHaveBeenCalledTimes(1);
+      expect(writeAll).not.toHaveBeenCalled();
+      expect(takeLegacy).not.toHaveBeenCalled();
+      expect(allowWrites).not.toHaveBeenCalled();
+    });
   });
 
   it('autosave reads the persisted subset of the library slice', async () => {

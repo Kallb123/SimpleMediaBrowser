@@ -39,7 +39,7 @@ make sense on those platforms (see §10).
 SimpleMediaBrowser/
 ├── App.tsx                      # Unused legacy entry point; real entry is expo-router (see index.js)
 ├── index.js                     # Entry: registers expo-router root ("expo-router/entry" in package.json)
-├── app.json                     # Expo app config (name, package id, plugins, expo-router root="src")
+├── app.json                     # Expo app config (name, package id, plugins, expo-router root="src/app")
 │                                # Note: `android.package` is still `net.nawt.simplemediabrowser` and the EAS
 │                                # `slug` is still `SimpleMediaBrowser` — both are store/build identity and
 │                                # must not be renamed, they predate the Zibo rebrand.
@@ -101,6 +101,7 @@ SimpleMediaBrowser/
     │   ├── wireServices.ts          # Side-effect module: setLibrarySink(store); imported once by the root layout
     │   ├── persistGuards.ts         # Pure, unit-testable guards used by store.ts: legacy-library capture, write gate, rehydrate-error guard
     │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave (deps injectable)
+    │   ├── rehydrateRecovery.ts     # Failure counter, "offer recovery" decision and Start fresh for an unreadable persist:root (#228)
     │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides, scan progress
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
@@ -114,8 +115,14 @@ SimpleMediaBrowser/
 ## 4. Application Bootstrap & Navigation
 
 Entry point: `index.js` → `expo-router/entry` (configured via `"main"` in
-`package.json` and `expo-router.root = "src"` in `app.json`), which mounts
-`src/app/_layout.tsx` as the router root.
+`package.json` and `expo-router` `root = "src/app"` in `app.json`), which mounts
+`src/app/_layout.tsx` as the router root. The plugin `root` must point at
+the folder that directly holds `_layout.tsx` (`src/app`), not at `src`: Expo
+turns it into `extra.router.root`, which both the dev server and
+`export:embed` (release/EAS bundles) feed into `EXPO_ROUTER_APP_ROOT`. With
+`"src"` the whole of `src/` becomes the route tree (`./app/+html.tsx`,
+`./components/*`, ... all counted as routes) and expo-router throws
+`Invalid route ./app/+html.tsx` when it builds it.
 
 `RootLayout` (`_layout.tsx`):
 1. Wraps the app in the Redux `<Provider store={store}>`.
@@ -234,6 +241,38 @@ they are unit-tested directly) and wired up in `store.ts`, make this safe:
   next write would overwrite the stored settings. An existing library store
   still loads and autosaves then, but the migration is skipped, since the
   unreadable `persist:root` may hold the only copy of the legacy library.
+
+**Unreadable `persist:root` recovery** (`store/rehydrateRecovery.ts`, driven from
+`runLibraryPersistence`; issue #228). The guards above are the right default for
+a one-off read failure but a dead end when the entry can never be read (e.g. a
+pre-#227 library blob past the ~2 MB CursorWindow limit: "Row too big to fit
+into CursorWindow"). So each failed settings rehydrate is counted in its own
+small AsyncStorage entry (`StorageKeys.REHYDRATE_FAILURE_KEY`, kept apart from
+`persist:root` so it stays readable) together with the error message, and a
+successful rehydrate clears it. `shouldOfferRecovery()` (pure) returns true at
+>= 2 consecutive failed launches or when the message matches
+`/CursorWindow|Row too big/i`. Then, instead of the plain "Could not load your
+settings" notice, startup shows a **Start fresh** / **Keep trying** prompt (the
+splash stays up until answered; dismissing counts as Keep trying):
+
+- **Keep trying** — today's behaviour: writes stay blocked, nothing is removed,
+  the migration is skipped, and the prompt returns next launch.
+- **Start fresh** (`performStartFresh`), in this order: remove `persist:root`
+  (if that fails, stop: writes stay blocked and an alert is shown); remove the
+  first-time-setup flag so first-time setup shows as on a fresh install;
+  re-arm the write gate (`gate.unblock()` — blocked state cleared, but writes
+  are *held again* until `allow()`); clear the failure record. Then the normal
+  fresh-install branch runs: an empty library store is written (or an existing
+  one is loaded and kept), the library is hydrated, autosave starts, and
+  `allowWrites()` releases the held settings writes. Nothing can write defaults
+  over the old entry before the choice, and no settings write precedes the
+  library store being initialised. No app reload is needed (and `expo-updates`
+  is not a dependency).
+
+A single transient failure (count 1, no size error) only shows the plain notice
+and never removes or overwrites anything. Every decision is logged through
+`logger` (tag `LibraryPersistence` / `RehydrateRecovery`). Salvaging the old
+data by reading the raw RKStorage SQLite row in chunks is not implemented.
 
 `libraryPersistence.ts` keeps its startup logic in `runLibraryPersistence(deps)`,
 which takes the store, `LibraryStore`, gate functions and `Alert` as plain
@@ -504,11 +543,22 @@ etc.) can read it; iOS falls back to `Linking.openURL`.
 
 - **Local dev**: `npm install`, `npx expo start` (Metro), run in a
   [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-  or Android emulator.
+  or Android emulator. `npx expo start --web` boots the UI in a browser for
+  headless smoke tests; `metro.config.js` aliases `expo-file-system` to
+  `src/shims/expo-file-system.web.ts` (web platform only) because the real
+  module's `File`/`Directory` constructors throw on web. It also adds `wasm`
+  to Metro's asset extensions and sets COOP/COEP headers on the dev server,
+  which expo-sqlite (the library store) needs on web. Nothing reliable persists
+  on web and library scanning does not work there.
+- **Typed routes**: `experiments.typedRoutes` generates `.expo/types/router.d.ts`
+  (gitignored), normally only written by `expo start`. `npm run typegen`
+  (`expo customize tsconfig.json`) writes it headlessly in ~2s with no network,
+  so run it before `npx tsc --noEmit` to type-check `href`/`router.push` targets.
 - **Release APK**: `npx expo prebuild && cd android && ./gradlew assembleRelease`
   (see README for the full Windows setup and `build.ps1`).
 - **CI** (`.github/workflows/`):
-  - `pre-build-test.yaml` — on PRs into `main`: `npx tsc --noEmit`,
+  - `pre-build-test.yaml` — on PRs into `main`: `npm run typegen` (typed-route
+    declarations), `npx tsc --noEmit`,
     `npm run lint` (`expo lint` / `eslint-config-expo` flat config), and
     `npx jest --ci --watchAll=false --passWithNoTests` (suites live in
     `__tests__/` folders next to the code; see AGENTS.md).
@@ -532,7 +582,7 @@ Worth knowing before you go hunting for "why is there a duplicate of X":
   default template's "About" modal, not app-specific UI.
 - Two component naming conventions coexist side-by-side:
   **PascalCase** (`ThemedText.tsx`, `ThemedView.tsx`, `Collapsible.tsx`,
-  `ExternalLink.tsx`, `HelloWave.tsx`) is what the real `(drawer)` screens
+  `HelloWave.tsx`) is what the real `(drawer)` screens
   and `MediaBrowserScreen` actually import; **kebab-case** duplicates are
   used only by the unused template screens above. When editing themed
   primitives, double-check which file the screen you're touching actually

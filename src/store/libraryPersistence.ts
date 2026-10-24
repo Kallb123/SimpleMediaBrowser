@@ -1,8 +1,18 @@
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '@/scripts/Logger';
 import { LibraryStore, pickPersistedLibrary } from '@/scripts/LibraryStore';
 import type { PersistedLibrary } from '@/scripts/LibraryStore';
 import { hydrateLibrary } from './libraryReducer';
+import {
+  buildRecoveryPrompt,
+  clearRehydrateFailure,
+  errorMessage,
+  performStartFresh,
+  recordRehydrateFailure,
+  shouldOfferRecovery,
+} from './rehydrateRecovery';
+import type { RehydrateFailureRecord } from './rehydrateRecovery';
 
 const TAG = 'LibraryPersistence';
 
@@ -22,6 +32,19 @@ export interface LibraryPersistenceDeps {
   getLibraryState(): object;
   subscribe(listener: () => void): () => void;
   alert(title: string, message: string): void;
+  /** The error that failed the settings rehydrate (only meaningful when `didRehydrateFail()`). */
+  getRehydrateError(): unknown;
+  /** Handling for a `persist:root` that keeps failing to load (see rehydrateRecovery.ts). */
+  recovery: {
+    /** Counts this launch's failed rehydrate and returns the updated record. Never rejects. */
+    recordFailure(message: string): Promise<RehydrateFailureRecord>;
+    /** Forgets recorded failures. Never rejects. */
+    clearFailure(): Promise<void>;
+    /** Asks the user; resolves true for "Start fresh", false for "Keep trying". */
+    confirmStartFresh(record: RehydrateFailureRecord): Promise<boolean>;
+    /** Removes the unreadable `persist:root` and re-arms the write gate; rejects, changing nothing, if it can't. */
+    startFresh(): Promise<void>;
+  };
 }
 
 let started: Promise<void> | undefined;
@@ -48,7 +71,7 @@ export function startLibraryPersistence(): Promise<void> {
 // store.ts is required lazily so that importing this module (e.g. from a test of
 // runLibraryPersistence) doesn't create the real store.
 function buildDeps(): LibraryPersistenceDeps {
-  const { store, allowPersistWrites, didPersistRehydrateFail, takeLegacyPersistedLibrary, waitForPersistBootstrap }: typeof import('./store') =
+  const { store, allowPersistWrites, didPersistRehydrateFail, getPersistRehydrateError, unblockPersistWrites, takeLegacyPersistedLibrary, waitForPersistBootstrap }: typeof import('./store') =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('./store');
   return {
@@ -61,7 +84,31 @@ function buildDeps(): LibraryPersistenceDeps {
     getLibraryState: () => store.getState().libraryReducer,
     subscribe: store.subscribe,
     alert: (title, message) => Alert.alert(title, message),
+    getRehydrateError: getPersistRehydrateError,
+    recovery: {
+      recordFailure: (message) => recordRehydrateFailure(AsyncStorage, message),
+      clearFailure: () => clearRehydrateFailure(AsyncStorage),
+      confirmStartFresh: confirmStartFreshAlert,
+      startFresh: () => performStartFresh({ storage: AsyncStorage, unblockWrites: unblockPersistWrites }),
+    },
   };
+}
+
+/** Blocks startup (the splash screen stays up) until the user picks "Start fresh" or "Keep trying". */
+function confirmStartFreshAlert(record: RehydrateFailureRecord): Promise<boolean> {
+  const { title, message } = buildRecoveryPrompt(record);
+  return new Promise<boolean>((resolve) => {
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: 'Keep trying', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Start fresh', style: 'destructive', onPress: () => resolve(true) },
+      ],
+      // Dismissing without choosing counts as "Keep trying": never delete on an accident.
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
 }
 
 export async function runLibraryPersistence(deps: LibraryPersistenceDeps): Promise<void> {
@@ -72,13 +119,13 @@ export async function runLibraryPersistence(deps: LibraryPersistenceDeps): Promi
   // `persist:root` for this session. The SQLite store doesn't depend on it, so an
   // existing library still loads and autosaves; only the migration is skipped
   // (see below), since persist:root may still hold the only copy of the legacy library.
-  const settingsFailed = deps.didRehydrateFail();
-  if (settingsFailed) {
-    logger.error(TAG, 'Settings failed to load; settings will not be saved this session');
-    deps.alert(
-      'Could not load your settings',
-      'Your saved settings could not be read, so settings changes will not be saved this session. Restart the app to try again.',
-    );
+  // A single failure never changes that. Only a persistent one (see
+  // rehydrateRecovery.ts) lets the user choose to discard the unreadable entry.
+  let settingsFailed = deps.didRehydrateFail();
+  if (!settingsFailed) {
+    await deps.recovery.clearFailure();
+  } else {
+    settingsFailed = !(await recoverFromSettingsFailure(deps));
   }
 
   const { libraryStore } = deps;
@@ -137,6 +184,48 @@ export async function runLibraryPersistence(deps: LibraryPersistenceDeps): Promi
   } else {
     logger.log(TAG, `Migrated ${summary(lib)} from persist:root in ${elapsed}ms`);
   }
+}
+
+/**
+ * Handles a failed settings rehydrate: counts it, and either shows the usual
+ * notice (a single, possibly transient failure) or, for a persistent one, asks
+ * whether to start fresh. Returns true only if the user chose "Start fresh" and
+ * `persist:root` was removed, i.e. the session can proceed like a fresh install.
+ */
+async function recoverFromSettingsFailure(deps: LibraryPersistenceDeps): Promise<boolean> {
+  const message = errorMessage(deps.getRehydrateError());
+  logger.error(TAG, `Settings failed to load; settings will not be saved this session (${message})`);
+  const record = await deps.recovery.recordFailure(message);
+
+  if (!shouldOfferRecovery(record)) {
+    logger.warn(TAG, `Settings failed to load (${record.consecutiveFailures} launch(es) in a row); keeping stored data and not offering recovery yet`);
+    deps.alert(
+      'Could not load your settings',
+      'Your saved settings could not be read, so settings changes will not be saved this session. Restart the app to try again.',
+    );
+    return false;
+  }
+
+  logger.warn(TAG, `Settings failed to load on ${record.consecutiveFailures} launch(es) in a row (${message}); offering to start fresh`);
+  if (!(await deps.recovery.confirmStartFresh(record))) {
+    logger.log(TAG, 'User chose "Keep trying": leaving persist:root untouched and not saving settings this session');
+    return false;
+  }
+
+  logger.warn(TAG, 'User chose "Start fresh": discarding unreadable persist:root');
+  try {
+    await deps.recovery.startFresh();
+  } catch (e) {
+    logger.error(TAG, 'Start fresh failed; persist:root left in place and settings will not be saved this session', e);
+    deps.alert(
+      'Could not start fresh',
+      'The unreadable saved settings could not be removed, so nothing will be saved this session. Restart the app to try again.',
+    );
+    return false;
+  }
+  await deps.recovery.clearFailure();
+  logger.log(TAG, 'Start fresh complete: settings writes re-enabled once the library store is ready');
+  return true;
 }
 
 function startAutoSave(deps: LibraryPersistenceDeps): void {

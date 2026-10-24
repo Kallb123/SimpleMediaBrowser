@@ -24,6 +24,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # .expo/types is gitignored and normally only written by `expo start`;
+      # generate the typed-route declarations so tsc can catch bad hrefs.
+      - name: Generate typed-route declarations
+        run: npm run typegen
+
       - name: TypeScript type-check
         run: npx tsc --noEmit
 

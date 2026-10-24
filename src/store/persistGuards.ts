@@ -62,11 +62,14 @@ export function createLegacyLibraryCapture() {
 //
 // Hence storage writes wait for `open()` (called by libraryPersistence once
 // the library is hydrated/migrated), and `block()` turns them into no-ops for
-// the rest of the session.
+// the rest of the session. The one exception is the user-confirmed "Start
+// fresh" recovery for a `persist:root` that can never be read, which calls
+// `unblock()` after removing the entry.
 export function createWriteGate(base: Storage) {
   let open!: () => void;
-  const opened = new Promise<void>((resolve) => { open = resolve; });
+  let opened = new Promise<void>((resolve) => { open = resolve; });
   let blocked = false;
+  let blockReason: unknown;
 
   const storage: Storage = {
     getItem: (key: string) => base.getItem(key),
@@ -85,12 +88,31 @@ export function createWriteGate(base: Storage) {
     storage,
     /** Lets queued and future writes through. */
     allow: () => open(),
-    /** Permanently turns writes into no-ops (also wakes writes already waiting). */
-    block: () => {
+    /**
+     * Turns writes into no-ops (also wakes writes already waiting). `reason` is
+     * the error that made it necessary. Lasts for the session unless the user
+     * explicitly chooses to discard the unreadable data (see `unblock`).
+     */
+    block: (reason?: unknown) => {
       blocked = true;
+      blockReason = reason;
       open();
     },
+    /**
+     * Only for the "Start fresh" recovery (rehydrateRecovery.ts), after the
+     * unreadable `persist:root` has been removed. Writes are held again until
+     * `allow()`, exactly as at startup, so settings are not written before the
+     * library store is initialised.
+     */
+    unblock: () => {
+      if (!blocked) return;
+      blocked = false;
+      blockReason = undefined;
+      opened = new Promise<void>((resolve) => { open = resolve; });
+    },
     isBlocked: () => blocked,
+    /** The error passed to `block()`, if any. */
+    getBlockReason: () => blockReason,
   };
 }
 
@@ -102,7 +124,7 @@ export function createRehydrateErrorGuard(gate: Pick<ReturnType<typeof createWri
   return () => (next) => (action: any) => {
     if (action?.type === REHYDRATE && action.key === PERSIST_KEY && action.err) {
       logger.error('Store', 'Failed to rehydrate persisted settings; blocking settings writes for this session so stored data is not overwritten', action.err);
-      gate.block();
+      gate.block(action.err);
     }
     return next(action);
   };
