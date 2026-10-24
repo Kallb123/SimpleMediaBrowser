@@ -1,9 +1,9 @@
 import { librarySink } from '@/scripts/librarySink';
-import { setScanProgress } from '@/store/libraryReducer';
-import type { ScanProgress } from '@/store/libraryReducer';
+import { setScanProgress } from '@/store/scanReducer';
+import type { ScanProgress } from '@/store/scanReducer';
 import { createThrottledDispatcher } from '@/scripts/throttledDispatch';
 
-/** ~4 dispatches/s: each one re-serialises the persisted library and rebuilds every mounted browse screen. */
+/** ~4 dispatches/s: each one notifies every store subscriber (including library autosave) and re-renders the screens showing progress. */
 const SCAN_PROGRESS_INTERVAL_MS = 250;
 
 /**

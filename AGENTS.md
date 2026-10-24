@@ -22,7 +22,7 @@ src/
 ├── scripts/        Non-UI logic: FileScanner (scanning), MetadataService + providers/ (TMDB/TVDB/iTunes),
 │                   libraryUtils (pure helpers + IMediaObject, no imports), librarySink (injected store access),
 │                   ImportExportService, Logger, openMedia
-├── store/          Redux Toolkit slices: settingsReducer, libraryReducer (+ store.ts persistence config)
+├── store/          Redux Toolkit slices: settingsReducer, libraryReducer, scanReducer (transient, not persisted) (+ store.ts persistence config)
 ├── contexts/       EditModeContext (edit mode / parent-lock UI state)
 ├── constants/      Colors, theme tokens, AsyncStorage keys
 ├── hooks/          Theme/color-scheme hooks, typed Redux hooks

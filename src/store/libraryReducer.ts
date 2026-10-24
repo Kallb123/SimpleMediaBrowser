@@ -1,4 +1,5 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createAction, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { Action, UnknownAction } from '@reduxjs/toolkit';
 import type { RootState } from './store';
 import type { IMediaObject, dataSources } from '@/scripts/libraryUtils';
 // Type-only: LibraryStore imports types from this module, so a value import would be a cycle.
@@ -169,29 +170,6 @@ export interface MergeEpisodePayload {
   metadataSource?: dataSources;
 }
 
-/** Progress information for an in-progress scan. */
-export interface ScanProgress {
-  /** Current phase of the scan. */
-  phase: 'idle' | 'collecting' | 'thumbnails' | 'enriching';
-  /** Number of media files found so far during the collecting phase. */
-  filesFound: number;
-  /** Number of thumbnails successfully generated or failed so far. */
-  thumbnailsDone: number;
-  /** Total number of thumbnails to generate (set when the thumbnail phase begins). */
-  thumbnailsTotal: number;
-  /** Number of metadata items (shows + movies) processed so far during enrichment. */
-  metadataDone: number;
-  /** Total number of metadata items to process during enrichment. */
-  metadataTotal: number;
-  /**
-   * 1-based index of the source currently being collected.
-   * Only present during the 'collecting' phase when there is more than one source.
-   */
-  currentSourceIndex?: number;
-  /** Total number of sources being scanned. Only present when there is more than one source. */
-  sourcesTotal?: number;
-}
-
 export type contentTypes = 'tv' | 'movie' | 'audiobook';
 export type { dataSources };
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
@@ -202,7 +180,6 @@ export interface LibraryState {
   mediaLibrary: IMediaLibrary;
   movies: IMediaObject[];
   audiobooks: IMediaAudiobook[];
-  isScanning: boolean;
   thumbnails: { [path: string]: string };
   /**
    * User-supplied overrides keyed by a namespaced string:
@@ -211,28 +188,15 @@ export interface LibraryState {
    *   "episode:<path>"       – for an episode file
    */
   mediaOverrides: { [key: string]: IMediaOverride };
-  /** Live progress information updated during an active scan. */
-  scanProgress: ScanProgress;
 }
-
-export const INITIAL_SCAN_PROGRESS: ScanProgress = {
-  phase: 'idle',
-  filesFound: 0,
-  thumbnailsDone: 0,
-  thumbnailsTotal: 0,
-  metadataDone: 0,
-  metadataTotal: 0,
-};
 
 // Define the initial state using that type
 const initialState: LibraryState = {
   mediaLibrary: {},
   movies: [],
   audiobooks: [],
-  isScanning: false,
   thumbnails: {},
   mediaOverrides: {},
-  scanProgress: INITIAL_SCAN_PROGRESS,
 }
 
 export const settingsSlice = createSlice({
@@ -243,8 +207,7 @@ export const settingsSlice = createSlice({
     // Use the PayloadAction type to declare the contents of `action.payload`
     /**
      * Replaces the persisted parts of the library with what was loaded from the
-     * SQLite library store at startup (see `libraryPersistence.ts`). Transient scan state
-     * (`isScanning` / `scanProgress`) is deliberately left alone.
+     * SQLite library store at startup (see `libraryPersistence.ts`).
      */
     hydrateLibrary: (state, action: PayloadAction<PersistedLibrary>) => {
       state.mediaLibrary = action.payload.mediaLibrary;
@@ -301,17 +264,6 @@ export const settingsSlice = createSlice({
       const audiobook = state.audiobooks.find((a) => a.folderKey === action.payload);
       if (!audiobook) return;
       audiobook.poster = '';
-    },
-    setIsScanning: (state, action: PayloadAction<boolean>) => {
-      state.isScanning = action.payload;
-      // Reset progress to idle when scanning stops so stale values are not shown
-      // on the next scan's initial render.
-      if (!action.payload) {
-        state.scanProgress = INITIAL_SCAN_PROGRESS;
-      }
-    },
-    setScanProgress: (state, action: PayloadAction<ScanProgress>) => {
-      state.scanProgress = action.payload;
     },
     setThumbnail: (state, action: PayloadAction<{ path: string; uri: string }>) => {
       state.thumbnails[action.payload.path] = action.payload.uri;
@@ -662,16 +614,14 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setIsScanning, setScanProgress, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
 export const selectMovies = (state: RootState) => state.libraryReducer.movies;
 export const selectAudiobooks = (state: RootState) => state.libraryReducer.audiobooks ?? [];
-export const selectIsScanning = (state: RootState) => state.libraryReducer.isScanning;
 export const selectThumbnails = (state: RootState) => state.libraryReducer.thumbnails;
 export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;
-export const selectScanProgress = (state: RootState) => state.libraryReducer.scanProgress;
 
 /** Latest `lastOpened` timestamp among a season's episodes, or undefined if none were ever opened. */
 export function getSeasonLastOpened(season: IMediaSeason): number | undefined {
@@ -719,4 +669,16 @@ export function getShowFirstDetected(show: IMediaShow): number | undefined {
   return latest;
 }
 
-export default settingsSlice.reducer
+/**
+ * Applies several library actions as ONE dispatch, so store subscribers (library autosave,
+ * every mounted browse screen) are notified once for the whole batch instead of once per
+ * action. Used by MetadataService to coalesce its per-item metadata updates during enrichment.
+ */
+export const applyLibraryActions = createAction<UnknownAction[]>('settings/applyLibraryActions');
+
+export default function libraryReducer(state: LibraryState | undefined, action: Action): LibraryState {
+  if (applyLibraryActions.match(action)) {
+    return action.payload.reduce<LibraryState>((acc, a) => settingsSlice.reducer(acc, a), state ?? settingsSlice.getInitialState());
+  }
+  return settingsSlice.reducer(state, action);
+}

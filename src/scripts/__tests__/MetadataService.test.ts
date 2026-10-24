@@ -6,6 +6,7 @@ import libraryReducer, {
   setMovies,
 } from '@/store/libraryReducer';
 import type { IMediaAudiobook, IMediaLibrary, IMediaShow } from '@/store/libraryReducer';
+import scanReducer from '@/store/scanReducer';
 import settingsReducer, { setDataSource, setTmdbApiKey, setTvdbApiKey } from '@/store/settingsReducer';
 import { setLibrarySink } from '@/scripts/librarySink';
 import type { LibrarySink } from '@/scripts/librarySink';
@@ -130,7 +131,7 @@ const makeAudiobook = (folderKey: string, extra: Partial<IMediaAudiobook> = {}):
 });
 
 const makeStore = () => configureStore({
-  reducer: { libraryReducer, settingsReducer },
+  reducer: { libraryReducer, settingsReducer, scanReducer },
   // Fixtures are plain data; skip the dev-only checks to keep the tests fast.
   middleware: (getDefault) => getDefault({ serializableCheck: false, immutableCheck: false }),
 });
@@ -400,6 +401,28 @@ describe('MetadataService', () => {
       expect(show.year).toBe(2018);
       expect(progress.done).toBe(1);
       expect(dispatchProgress).toHaveBeenCalledTimes(1);
+    });
+
+    it('applies results in batches: one store notification per batch, not per show', async () => {
+      const names = Array.from({ length: 30 }, (_, i) => `Show ${String(i).padStart(2, '0')}`);
+      seedLibrary(Object.fromEntries(names.map((n) => [n, makeShow(n)])));
+      const provider = makeProvider('tmdb');
+      provider.searchShow.mockImplementation(async (name: string) => [
+        { id: name, title: name, year: 2020, posterUrl: 'https://img/p.jpg', posterThumbUrl: null },
+      ]);
+      provider.downloadShowPoster.mockImplementation(async (id: string) => `file:///posters/${id}.jpg`);
+      const onChange = jest.fn();
+      const unsubscribe = store.subscribe(onChange);
+
+      await run(provider);
+      unsubscribe();
+
+      // 30 results with a max batch of 25 => one full batch, then the remainder on completion.
+      expect(onChange).toHaveBeenCalledTimes(2);
+      for (const n of names) {
+        expect(lib().mediaLibrary[n].ids.tmdb).toBe(n);
+        expect(lib().mediaLibrary[n].poster).toBe(`file:///posters/${n}.jpg`);
+      }
     });
 
     it('stores a TVDB provider result under ids.tvdb (and clears ids.tmdb)', async () => {
@@ -750,7 +773,7 @@ describe('MetadataService', () => {
       expect(show.seasons.s01.episodes.e03).toBeUndefined();
 
       // The last progress update reflects completed work (1 show + 1 season).
-      expect(lib().scanProgress).toMatchObject({ phase: 'enriching', metadataDone: 2, metadataTotal: 2 });
+      expect(store.getState().scanReducer.scanProgress).toMatchObject({ phase: 'enriching', metadataDone: 2, metadataTotal: 2 });
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
