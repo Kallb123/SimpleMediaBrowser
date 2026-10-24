@@ -182,15 +182,67 @@ describe('FileScanner', () => {
       expect(library.Show.seasons.s01.episodes.e01.title).toBe('First');
     });
 
-    // NOTE: suspected limitation - files with no recognisable episode number all land on "e00",
-    // so only the first of them is kept and the rest silently disappear from the library.
-    it('collapses files with no detectable episode number onto e00 (first wins)', () => {
-      const library = scanner.buildLibrary([
+    it('keeps every file whose episode number cannot be determined, under distinct stable keys', () => {
+      const files = () => [
         scanned(['Show', 'Season 1'], 'Pilot.mkv'),
         scanned(['Show', 'Season 1'], 'Second.mkv'),
+        scanned(['Show', 'Season 1'], 'Third.mkv'),
+      ];
+      const library = scanner.buildLibrary(files());
+      const episodes = library.Show.seasons.s01.episodes;
+      expect(Object.keys(episodes)).toHaveLength(3);
+      // The first keeps "e00"; the rest get filename-derived keys.
+      expect(episodes.e00.title).toBe('Pilot');
+      expect(Object.keys(episodes).filter((k) => k !== 'e00').every((k) => /^e00-[0-9a-z]+$/.test(k))).toBe(true);
+      expect(Object.values(episodes).map((e) => e.title).sort()).toEqual(['Pilot', 'Second', 'Third']);
+      expect(Object.values(episodes).every((e) => e.episodeNumber === 0)).toBe(true);
+
+      // Rescanning the same files gives the same keys.
+      expect(Object.keys(scanner.buildLibrary(files()).Show.seasons.s01.episodes)).toEqual(Object.keys(episodes));
+    });
+
+    it('keeps the plain "e00" key for a lone episode-0 file, e.g. a genuine S01E00', () => {
+      const library = scanner.buildLibrary([
+        scanned(['Show'], 'Show.S01E00.Pilot.mkv'),
+        scanned(['Show'], 'Show.S01E01.First.mkv'),
       ]);
-      expect(Object.keys(library.Show.seasons.s01.episodes)).toEqual(['e00']);
+      expect(Object.keys(library.Show.seasons.s01.episodes).sort()).toEqual(['e00', 'e01']);
       expect(library.Show.seasons.s01.episodes.e00.title).toBe('Pilot');
+    });
+
+    it('keeps same-named unnumbered files from different subfolders, but not the same file twice', () => {
+      const a = scanned(['Show', 'Season 1', 'A'], 'Pilot.mkv');
+      const b = scanned(['Show', 'Season 1', 'B'], 'Pilot.mkv');
+      a.parsedPath = 'root/Show/Season 1/A/Pilot.mkv';
+      b.parsedPath = 'root/Show/Season 1/B/Pilot.mkv';
+      const library = scanner.buildLibrary([a, b, { ...a }]);
+      const episodes = Object.values(library.Show.seasons.s01.episodes);
+      expect(episodes.map((e) => e.parsedPath).sort()).toEqual([a.parsedPath, b.parsedPath]);
+    });
+
+    it('does not change keys for numbered episodes or let unnumbered files collide with them', () => {
+      const library = scanner.buildLibrary([
+        scanned(['Show', 'Season 1'], 'E01.mkv'),
+        scanned(['Show', 'Season 1'], 'Bonus.mkv'),
+        scanned(['Show', 'Season 1'], '02 - Two.mkv'),
+      ]);
+      const keys = Object.keys(library.Show.seasons.s01.episodes);
+      expect(keys).toContain('e01');
+      expect(keys).toContain('e02');
+      expect(keys).toHaveLength(3);
+    });
+
+    it('extracts numbers from filenames without a show name using the folder structure', () => {
+      const library = scanner.buildLibrary([
+        scanned(['Show'], 'S02E05.mkv'),
+        scanned(['Show', 'Specials'], 'Episode 1.mkv'),
+        scanned(['Show', 'Season 3'], '01 - Title.mkv'),
+        scanned(['Show', 'Season 3'], '02 - Title Two.mkv'),
+      ]);
+      expect(Object.keys(library.Show.seasons).sort()).toEqual(['s00', 's02', 's03']);
+      expect(Object.keys(library.Show.seasons.s02.episodes)).toEqual(['e05']);
+      expect(Object.keys(library.Show.seasons.s00.episodes)).toEqual(['e01']);
+      expect(Object.keys(library.Show.seasons.s03.episodes).sort()).toEqual(['e01', 'e02']);
     });
 
     it('pads season and episode keys to two digits and leaves wider numbers alone', () => {

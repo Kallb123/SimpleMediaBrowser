@@ -3,6 +3,8 @@ import {
   NON_DIRECTORY_EXTENSIONS,
   VIDEO_EXTENSIONS,
   buildTmdbSearchQuery,
+  episodeKeyFor,
+  unnumberedEpisodeKey,
   fuzzyKey,
   isMediaFile,
   normalizeShowName,
@@ -35,29 +37,42 @@ describe('normalizeShowName', () => {
     expect(normalizeShowName(raw)).toEqual({ name, year });
   });
 
-  // NOTE: when the whole name is a year the "empty name" guard keeps the raw text
-  // as the name, but the year is still reported as that year too.
+  // A name that is only a year is the title, not a release year: kept whole, year 0.
   it.each([
-    ['1923', '1923', 1923],
-    ['2012', '2012', 2012],
-    ['(2018)', '(2018)', 2018],
-    ['[1999]', '[1999]', 1999],
-    ['  1923  ', '1923', 1923],
-  ])('a name that is only a year (%j) is kept as the name and also reported as the year', (raw, name, year) => {
-    expect(normalizeShowName(raw)).toEqual({ name, year });
+    ['1923', '1923'],
+    ['2012', '2012'],
+    ['(2018)', '(2018)'],
+    ['[1999]', '[1999]'],
+    ['  1923  ', '1923'],
+  ])('a name that is only a year (%j) is kept as the name with year 0', (raw, name) => {
+    expect(normalizeShowName(raw)).toEqual({ name, year: 0 });
   });
 
-  // NOTE: suspected bug (no word boundary / no "is this a title" check) - a title that
-  // legitimately ends in a 4-digit number is split into name + "year", and a longer digit
-  // run loses its leading digits. Pinned to current behaviour.
+  // Bare trailing years are only stripped as a whole word, in a plausible range, and not after
+  // a colon/dash; otherwise the number is part of the title.
   it.each([
-    ['Blade Runner 2049', 'Blade Runner', 2049],
-    ['Space: 1999', 'Space:', 1999],
-    ['Show12345', 'Show1', 2345],
-    ['Show1999', 'Show', 1999],
-    // "(" is not consumed by the mismatched-bracket case: bare year wins and "(" stays behind.
-    ['Show (2018', 'Show (', 2018],
-  ])('pins current year-stripping quirk for %j', (raw, name, year) => {
+    ['Blade Runner 2049', 'Blade Runner 2049', 0],
+    ['Cyberpunk 2077', 'Cyberpunk 2077', 0],
+    ['Space: 1999', 'Space: 1999', 0],
+    ['Show - 2018', 'Show - 2018', 0],
+    ['Show12345', 'Show12345', 0],
+    ['Show1999', 'Show1999', 0],
+    ['Show 12345', 'Show 12345', 0],
+    ['Show 1899', 'Show 1899', 0],
+    // Unbalanced brackets are never a year.
+    ['Show (2018', 'Show (2018', 0],
+    ['Show 2018)', 'Show 2018)', 0],
+    // Implausible bracketed years are kept too.
+    ['Show (2049)', 'Show (2049)', 0],
+    ['Show [1234]', 'Show [1234]', 0],
+    // Separators other than a space still count.
+    ['Bluey.2018', 'Bluey', 2018],
+    ['Bluey_2018', 'Bluey', 2018],
+    // Boundaries of the plausible range.
+    ['Show 1900', 'Show', 1900],
+    [`Show ${new Date().getFullYear() + 1}`, 'Show', new Date().getFullYear() + 1],
+    [`Show (${new Date().getFullYear() + 2})`, `Show (${new Date().getFullYear() + 2})`, 0],
+  ])('year rules for %j -> name %j, year %d', (raw, name, year) => {
     expect(normalizeShowName(raw)).toEqual({ name, year });
   });
 });
@@ -81,7 +96,7 @@ describe('fuzzyKey', () => {
     ['Mr. Robot', 'mr robot'],
     ['Lost, Season', 'lost season'],
     ['Airplane!', 'airplane'],
-    ['Spider-Man', 'spiderman'],
+    ['Spider-Man', 'spider man'],
     // Whitespace collapsing and trimming
     ['  Mr    Robot  ', 'mr robot'],
     ['Mr\t\nRobot', 'mr robot'],
@@ -91,25 +106,33 @@ describe('fuzzyKey', () => {
     // Removing punctuation can leave two spaces which are then collapsed
     ['Show - Name', 'show name'],
     ["Rock 'n' Roll", 'rock n roll'],
+    // Typographic apostrophes and backtick fold like the ASCII one
+    ['Grey’s Anatomy', 'greys anatomy'],
+    ['Grey‘s Anatomy', 'greys anatomy'],
+    ['Greyʼs Anatomy', 'greys anatomy'],
+    ['Grey`s Anatomy', 'greys anatomy'],
+    // Hyphen / dashes become a space (so "Spider-Man" != "Spiderman")
+    ['Spider Man', 'spider man'],
+    ['Spiderman', 'spiderman'],
+    ['Spider–Man', 'spider man'],
+    ['9-1-1', '9 1 1'],
+    // More punctuation stripped
+    ['Who?', 'who'],
+    ['Hello; World', 'hello world'],
+    ['The "Show"', 'the show'],
+    ['The “Show”', 'the show'],
+    ['To be continued…', 'to be continued'],
+    // Years: plausible bare years are still dropped, title numbers kept
+    ['Blade Runner 2049', 'blade runner 2049'],
+    ['Space: 1999', 'space 1999'],
   ])('fuzzyKey(%j) -> %j', (input, expected) => {
     expect(fuzzyKey(input)).toBe(expected);
   });
 
   it('maps differently-written names of the same show onto one key', () => {
-    const names = ["Grey's Anatomy", 'Greys Anatomy', "GREY'S ANATOMY (2005)", 'greys  anatomy [2005]'];
+    const names = ["Grey's Anatomy", 'Greys Anatomy', "GREY'S ANATOMY (2005)", 'greys  anatomy [2005]', 'Grey’s Anatomy'];
     expect(new Set(names.map(fuzzyKey)).size).toBe(1);
-  });
-
-  // NOTE: suspected gaps - these are not folded together by the current implementation.
-  it.each([
-    // Typographic apostrophe is not stripped, so it does not match the ASCII form.
-    ['Grey’s Anatomy', 'grey’s anatomy'],
-    // Hyphen is deleted (not replaced by a space), so "Spider-Man" != "Spider Man".
-    ['Spider Man', 'spider man'],
-    // "?" is not in the stripped set.
-    ['Who?', 'who?'],
-  ])('pins current non-folding behaviour for %j', (input, expected) => {
-    expect(fuzzyKey(input)).toBe(expected);
+    expect(fuzzyKey('Spider-Man')).toBe(fuzzyKey('Spider Man'));
   });
 });
 
@@ -130,6 +153,10 @@ describe('buildTmdbSearchQuery', () => {
     // Strips only at the end.
     ['2012 Movie Night', '2012 Movie Night'],
     ['', ''],
+    // Typographic apostrophes / curly quotes are stripped like the ASCII ones
+    ['Grey’s Anatomy', 'Greys Anatomy'],
+    ['Grey‘s Anatomy', 'Greys Anatomy'],
+    ['The “Show”', 'The Show'],
   ])('buildTmdbSearchQuery(%j) -> %j', (input, expected) => {
     expect(buildTmdbSearchQuery(input)).toBe(expected);
   });
@@ -140,18 +167,53 @@ describe('buildTmdbSearchQuery', () => {
     expect(title).toBe("Grey's Anatomy (2005)");
   });
 
-  // NOTE: suspected bug - unlike normalizeShowName, there is no "empty result" guard, so a
-  // title that is only a year (e.g. the TV show "1923" or the movie "2012") produces an
-  // empty TMDB query. Also the year bracket handling is unbalanced ("(2008" is stripped).
+  // A title that is (or ends in) something year-like must still give a usable query, and the
+  // year stripping agrees with normalizeShowName.
   it.each([
-    ['1923', ''],
-    ['2012', ''],
-    ['(2018)', ''],
-    ['Blade Runner 2049', 'Blade Runner'],
-    ['Show (2018', 'Show'],
-    ['Show 2018)', 'Show'],
-  ])('pins current behaviour for year-like titles %j -> %j', (input, expected) => {
+    ['1923', '1923'],
+    ['2012', '2012'],
+    ['(2018)', '(2018)'],
+    ['[1999]', '[1999]'],
+    ['Blade Runner 2049', 'Blade Runner 2049'],
+    ['Space: 1999', 'Space 1999'],
+    ['Show12345', 'Show12345'],
+    ['Show (2018', 'Show (2018'],
+    ['Show 2018)', 'Show 2018)'],
+    ['Bluey.2018', 'Bluey'],
+  ])('year-like title %j -> %j', (input, expected) => {
     expect(buildTmdbSearchQuery(input)).toBe(expected);
+  });
+
+  it('never returns an empty query for a title with letters or digits', () => {
+    for (const title of ['1923', '2012', '(2018)', '[2018]', '1984', 'X 2018', ' 2018 ']) {
+      expect(buildTmdbSearchQuery(title)).not.toBe('');
+    }
+  });
+});
+
+describe('episodeKeyFor', () => {
+  it.each([
+    [0, 'e00'],
+    [1, 'e01'],
+    [5, 'e05'],
+    [10, 'e10'],
+    [105, 'e105'],
+  ])('episode %d has the key %j', (episode, key) => {
+    expect(episodeKeyFor(episode)).toBe(key);
+  });
+});
+
+describe('unnumberedEpisodeKey', () => {
+  it('gives a deterministic key derived from the filename', () => {
+    const a = unnumberedEpisodeKey('Pilot.mkv');
+    expect(a).toMatch(/^e00-[0-9a-z]+$/);
+    expect(unnumberedEpisodeKey('Pilot.mkv')).toBe(a);
+    expect(unnumberedEpisodeKey('Second.mkv')).not.toBe(a);
+    expect(unnumberedEpisodeKey('pilot.mkv')).not.toBe(a);
+  });
+
+  it('distinguishes non-ASCII filenames', () => {
+    expect(unnumberedEpisodeKey('第一話.mkv')).not.toBe(unnumberedEpisodeKey('第二話.mkv'));
   });
 });
 
@@ -240,6 +302,14 @@ describe('parseFilename', () => {
     ['Show.S01E02.3x04.mkv', ep('Show', 1, 2, '3x04')],
     // Different extension / no extension handling
     ['Show.S01E05.m4v', ep('Show', 1, 5)],
+    // Underscores as separators (a regex \b never matches next to "_")
+    ['Show_Name_S01E05_Episode_Title.mkv', ep('Show Name', 1, 5, 'Episode Title')],
+    ['Show_Name_S01E05.mkv', ep('Show Name', 1, 5)],
+    ['Show.Name.S01E05_Title.mkv', ep('Show Name', 1, 5, 'Title')],
+    ['Show_Name_1x05.mkv', ep('Show Name', 1, 5)],
+    ['Show_Name_10x100_Title.avi', ep('Show Name', 10, 100, 'Title')],
+    ['Show_S01E05__Title.mkv', ep('Show', 1, 5, 'Title')],
+    ['Bluey_2018_S01E05.mkv', { showName: 'Bluey', rawShowName: 'Bluey 2018', showYear: 2018, season: 1, episode: 5, title: '' }],
   ])('parses %j', (filename, expected) => {
     expect(parseFilename(filename)).toEqual(expected);
   });
@@ -256,9 +326,11 @@ describe('parseFilename', () => {
     ['3rd Rock From the Sun - 2x05 - Title.mkv', { showName: '3rd Rock From the Sun', rawShowName: '3rd Rock From the Sun', showYear: 0, season: 2, episode: 5, title: 'Title' }],
     ['2 Broke Girls S01E01.mkv', { showName: '2 Broke Girls', rawShowName: '2 Broke Girls', showYear: 0, season: 1, episode: 1, title: '' }],
     ['Show 1x1 2x2.mkv', { showName: 'Show', rawShowName: 'Show', showYear: 0, season: 1, episode: 1, title: '2x2' }],
-    // NOTE: a name that is only a year is returned as the show name AND as the year.
-    ['1923.S01E01.mkv', { showName: '1923', rawShowName: '1923', showYear: 1923, season: 1, episode: 1, title: '' }],
-    ['2012.1x02.mkv', { showName: '2012', rawShowName: '2012', showYear: 2012, season: 1, episode: 2, title: '' }],
+    // A name that is only a year is the title: kept as the show name, year 0.
+    ['1923.S01E01.mkv', { showName: '1923', rawShowName: '1923', showYear: 0, season: 1, episode: 1, title: '' }],
+    ['2012.1x02.mkv', { showName: '2012', rawShowName: '2012', showYear: 0, season: 1, episode: 2, title: '' }],
+    // A title ending in a non-year number keeps it
+    ['Blade.Runner.2049.S01E01.mkv', { showName: 'Blade Runner 2049', rawShowName: 'Blade Runner 2049', showYear: 0, season: 1, episode: 1, title: '' }],
   ])('handles year-suffixed and numeric show names: %j', (filename, expected) => {
     expect(parseFilename(filename)).toEqual(expected);
   });
@@ -286,16 +358,12 @@ describe('parseFilename', () => {
     expect(parseFilename(filename)).toBeNull();
   });
 
-  // NOTE: suspected bug - underscore is a regex word character, so the `\b` next to the
-  // SxxExx / NxNN token never matches when "_" sits directly before or after it. Names that
-  // use underscores as the separator (despite the doc comment) are not recognised at all.
+  // The token must not run into more letters/digits even when "_" is the separator.
   it.each([
-    ['Show_Name_S01E05_Episode_Title.mkv'],
-    ['Show_Name_S01E05.mkv'],
-    ['Show.Name.S01E05_Title.mkv'],
-    ['Show_Name_10x100_Title.avi'],
-    ['Show_Name_1x05.mkv'],
-  ])('does not recognise underscore-separated name %j', (filename) => {
+    ['Show_Name_S01E05x_Title.mkv'],
+    ['Show_Name_S01E1000.mkv'],
+    ['Show_Name_100x01.mkv'],
+  ])('still returns null for underscore name with a malformed token %j', (filename) => {
     expect(parseFilename(filename)).toBeNull();
   });
 
@@ -304,8 +372,8 @@ describe('parseFilename', () => {
     expect(parseFilename('Show.S01E05-E06.mkv')).toEqual(ep('Show', 1, 5, 'E06'));
   });
 
-  // NOTE: suspected bugs/limitations, pinned to current behaviour. In every case the scanner
-  // then falls back to parseFromPath (see FileScanner.parseMediaFile).
+  // Limitations of parseFilename itself. In every case the scanner then falls back to
+  // parseFromPath (see FileScanner.parseMediaFile), which does extract S01E05 / 1x05 forms.
   it.each([
     // No show name: the pattern requires a separator before the SxxExx token.
     ['S01E05.mkv'],
@@ -380,33 +448,50 @@ describe('parseFromPath', () => {
       ['Season 10', 10],
       ['Season 12 (2019)', 12],
       ['2019 Season 3', 3],
-      // Falls back to the first run of digits
       ['S01', 1],
       ['S2', 2],
       ['s05', 5],
+      ['Show S02', 2],
       ['Series 3', 3],
+      ['series2', 2],
+      ['Season 0', 0],
+      // Fallback: the first standalone run of 1-3 digits
       ['Staffel 2', 2],
       ['Book 7', 7],
       ['3', 3],
       ['01', 1],
-      // No digits at all defaults to season 1
-      ['Specials', 1],
+      ['Disc 2', 2],
+      ['Disc 2 Season 1', 1], // "Season N" still wins
+      ['Season 1 Part 2', 1],
+      // Specials follow the Plex/Kodi convention: season 0
+      ['Specials', 0],
+      ['Special', 0],
+      ['specials', 0],
+      ['Specials (2019)', 0],
+      // No usable number defaults to season 1
       ['Extras', 1],
       ['', 1],
+      // A 4-digit number is a year, never a season
+      ['Show 2018 Extras', 1],
+      ['2019', 1],
+      ['Season 2019', 1],
+      ['Show (2018)', 1],
     ])('season folder %j -> season %d', (folder, season) => {
       expect(parseFromPath('ep.mkv', ['Show', folder])?.season).toBe(season);
     });
 
-    // NOTE: suspected limitation - the "first digit run" fallback picks up years and
-    // disc numbers, and a "Specials" folder is folded into season 1 rather than season 0.
-    it.each([
-      ['Show 2018 Extras', 2018],
-      ['2019', 2019],
-      ['Disc 2 Season 1', 1], // "Season N" still wins
-      ['Disc 2', 2],
-      ['Season 1 Part 2', 1],
-    ])('pins current behaviour for season folder %j -> %d', (folder, season) => {
-      expect(parseFromPath('ep.mkv', ['Show', folder])?.season).toBe(season);
+    it('uses the season from the filename (SxxExx / NxNN) over the folder', () => {
+      expect(parseFromPath('S02E05.mkv', ['Show'])).toMatchObject({ season: 2, episode: 5 });
+      expect(parseFromPath('S02E05.mkv', ['Show', 'Extras'])).toMatchObject({ season: 2, episode: 5 });
+      expect(parseFromPath('S02E05.mkv', ['Show', 'Season 2'])).toMatchObject({ season: 2, episode: 5 });
+      expect(parseFromPath('S03E05.mkv', ['Show', 'Season 1'])).toMatchObject({ season: 3, episode: 5 });
+      expect(parseFromPath('3x05.mkv', ['Show'])).toMatchObject({ season: 3, episode: 5 });
+    });
+
+    it('falls back to the folder season, then season 1, when the filename has no season', () => {
+      expect(parseFromPath('E05.mkv', ['Show', 'Season 4'])?.season).toBe(4);
+      expect(parseFromPath('E05.mkv', ['Show', 'Specials'])?.season).toBe(0);
+      expect(parseFromPath('E05.mkv', ['Show'])?.season).toBe(1);
     });
   });
 
@@ -417,29 +502,61 @@ describe('parseFromPath', () => {
       ['Show E5 Title.mkv', 5],
       ['Show.EP12.mkv', 12],
       ['Show.ep7.mkv', 7],
-      ['Show - Ep 12.mkv', 0], // "Ep 12" has a space, so no digits directly after it
       ['E123.mkv', 123],
-      ['Show_E05_Title.mkv', 0], // "_" is a word character so there is no \b before E
       ['Show-E05-Title.mkv', 5],
       ['Show (E05).mkv', 5],
+      ['Show_E05_Title.mkv', 5],
+      // "Episode N" / "Ep N" with an optional separator
+      ['Show - Ep 12.mkv', 12],
+      ['Ep 5.mkv', 5],
+      ['Ep.05.mkv', 5],
+      ['Ep05.mkv', 5],
+      ['Episode 5.mkv', 5],
+      ['Episode05.mkv', 5],
+      ['episode_12 - Title.mkv', 12],
+      // SxxExx / NxNN with no show name in the filename (parseFilename returns null)
+      ['S01E05.mkv', 5],
+      ['S01E05.Episode.Title.mkv', 5],
+      ['s01.e05.mkv', 5],
+      ['Show.Name.S01E05.mkv', 5],
+      ['1x05.mkv', 5],
+      // A leading 1-3 digit number
+      ['01.mkv', 1],
+      ['1.mkv', 1],
+      ['01 - Title.mkv', 1],
+      ['01.Title.mkv', 1],
+      ['05_Title.mkv', 5],
+      ['5. Title.mkv', 5],
+      ['123.mkv', 123],
+      ['00.mkv', 0],
     ])('%j -> episode %d', (filename, episode) => {
       expect(parseFromPath(filename, ['Show', 'Season 1'])?.episode).toBe(episode);
     });
 
-    // NOTE: suspected limitations pinned to current behaviour - only a standalone eNN/epNN
-    // token is understood, so these all fall through to episode 0 (which collides on the
-    // "e00" key in buildLibrary: only the first such file per season is stored).
     it.each([
-      ['01.mkv'],
-      ['Episode 5.mkv'],
-      ['Episode05.mkv'],
       ['Show Name Title.mkv'],
       ['Show.E1000.mkv'],
-      // SxxExx glued together: no word boundary before the "E"
-      ['S01E05.mkv'],
-      ['Show.Name.S01E05.mkv'],
+      ['Show.Episode1000.mkv'],
+      // 4-digit numbers are years, not episodes
+      ['2019.mkv'],
+      ['2019 - Title.mkv'],
+      ['1080.mkv'],
+      // Numbers buried in a title or glued to a word are not episodes
+      ['Room 101.mkv'],
+      ['Title 05.mkv'],
+      ['Se7en.mkv'],
+      ['3rd Rock.mkv'],
+      ['720p.mkv'],
+      ['Pilot Part 2.mkv'],
+      ['Movie.1920x1080.mkv'],
     ])('does not extract an episode number from %j (falls back to 0)', (filename) => {
       expect(parseFromPath(filename, ['Show', 'Season 1'])?.episode).toBe(0);
+    });
+
+    it('does not read a leading number as the episode when it starts the show name', () => {
+      expect(parseFromPath('2 Broke Girls - Pilot.mkv', ['2 Broke Girls', 'Season 1'])?.episode).toBe(0);
+      expect(parseFromPath('2 Broke Girls - E05.mkv', ['2 Broke Girls', 'Season 1'])?.episode).toBe(5);
+      expect(parseFromPath('02 - Pilot.mkv', ['2 Broke Girls', 'Season 1'])?.episode).toBe(2);
     });
   });
 

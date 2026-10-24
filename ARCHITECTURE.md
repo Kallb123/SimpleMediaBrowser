@@ -332,12 +332,18 @@ injected `librarySink` (§5). High-level flow:
    FileScanner, MetadataService, the providers and the UI, which is what keeps
    them free of require cycles; it also holds `isMediaFile`, `parseFilename`,
    `parseFromPath`, the extension sets and `buildTmdbSearchQuery`).
-   `normalizeShowName` strips a
-   trailing year suffix (`"Bluey (2018)"` → `"Bluey"`, year `2018`);
-   `fuzzyKey` further lower-cases, expands `&` → `and`, and strips
-   punctuation so that e.g. `"Grey's Anatomy"` and `"Greys Anatomy"` collapse
+   `normalizeShowName` strips a plausible trailing year suffix
+   (`"Bluey (2018)"` / `"Bluey 2018"` → `"Bluey"`, year `2018`) but keeps
+   numbers that are part of the title (`"Blade Runner 2049"`, `"Space: 1999"`,
+   a show named `"1923"`); see its doc comment for the exact rules.
+   `fuzzyKey` further lower-cases, expands `&` → `and`, turns hyphens into
+   spaces, and strips punctuation (including typographic apostrophes) so that
+   e.g. `"Grey's Anatomy"`, `"Grey’s Anatomy"` and `"Greys Anatomy"` collapse
    to the same library entry. `MetadataService.deduplicateByFuzzyName`
    performs the actual merge pass before enrichment.
+   Episodes are keyed `eNN` within a season. When several files in one season
+   have no recognisable episode number, the first keeps `e00` and the rest get
+   `e00-<filename hash>` (`unnumberedEpisodeKey`), so none are dropped.
 5. **State carry-over across rescans** — after building the fresh
    library/movie/audiobook lists, the scanner reads the *previous* Redux
    state and copies forward provider ids, posters (only if the file still

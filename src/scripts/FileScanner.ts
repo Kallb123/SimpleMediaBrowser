@@ -10,7 +10,7 @@ import type { IMediaSource } from "@/store/settingsReducer";
 import { scanProgressDispatcher } from "@/scripts/scanProgressDispatcher";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
-import { NON_DIRECTORY_EXTENSIONS, isMediaFile, normalizeShowName, parseFilename, parseFromPath } from "@/scripts/libraryUtils";
+import { NON_DIRECTORY_EXTENSIONS, episodeKeyFor, isMediaFile, normalizeShowName, parseFilename, parseFromPath, unnumberedEpisodeKey } from "@/scripts/libraryUtils";
 import type { IMediaObject, ParsedMetadata, dataSources } from "@/scripts/libraryUtils";
 import type { SmbJsonData } from "@/scripts/SmbTypes";
 import { SMB_THUMB_REGEX } from "@/scripts/SmbTypes";
@@ -1078,7 +1078,7 @@ export class FileScanner {
             const { showName, rawShowName, showYear, season, episode, title } = metadata;
             const folderPoster = folderKey ? (posterMap.get(folderKey) ?? '') : '';
             const seasonKey = `s${String(season).padStart(2, '0')}`;
-            const episodeKey = `e${String(episode).padStart(2, '0')}`;
+            const episodeKey = episodeKeyFor(episode);
             const { relativePathParts: _, ...mediaObj } = file;
             streamState.episodeBatch.push({
                 showName,
@@ -1354,9 +1354,21 @@ export class FileScanner {
                 };
             }
 
-            const episodeKey = `e${String(episode).padStart(2, '0')}`;
+            const episodes = library[showName].seasons[seasonKey].episodes;
+            let episodeKey = episodeKeyFor(episode);
+            if (episode === 0 && episodes[episodeKey] && episodes[episodeKey].parsedPath !== file.parsedPath) {
+                // Several files with no episode number in one season: the first keeps "e00" (so a
+                // genuine E00 still matches smb.json / smb_thumb_ entries), the rest get a
+                // filename-derived key, plus "-2", "-3"... if two share a name in different
+                // subfolders.  The same file seen twice (overlapping sources) is still skipped.
+                const baseKey = unnumberedEpisodeKey(file.filename);
+                episodeKey = baseKey;
+                for (let n = 2; episodes[episodeKey] && episodes[episodeKey].parsedPath !== file.parsedPath; n++) {
+                    episodeKey = `${baseKey}-${n}`;
+                }
+            }
             // Avoid overwriting an existing entry with the same key
-            if (!library[showName].seasons[seasonKey].episodes[episodeKey]) {
+            if (!episodes[episodeKey]) {
                 // Strip the internal relativePathParts field before storing
                 const { relativePathParts, ...mediaObj } = file;
                 const resolvedTitle = title || file.filename;
@@ -1382,7 +1394,7 @@ export class FileScanner {
                     const thumbUri = thumbMap?.get(`${seasonKey}:${episodeKey}`);
                     if (thumbUri && !ep.resolvedThumbnail) ep.resolvedThumbnail = thumbUri;
                 }
-                library[showName].seasons[seasonKey].episodes[episodeKey] = ep;
+                episodes[episodeKey] = ep;
             }
         }
 
