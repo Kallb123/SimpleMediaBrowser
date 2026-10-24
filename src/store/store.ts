@@ -36,6 +36,15 @@ export const allowPersistWrites = writeGate.allow;
 /** True when the settings rehydrate failed, so writes are blocked for this session. */
 export const didPersistRehydrateFail = writeGate.isBlocked;
 
+/** The error that failed the settings rehydrate (if any). */
+export const getPersistRehydrateError = writeGate.getBlockReason;
+
+/**
+ * "Start fresh" recovery only: re-arms the write gate after the unreadable
+ * `persist:root` was removed. Writes stay held until `allowPersistWrites()`.
+ */
+export const unblockPersistWrites = writeGate.unblock;
+
 // https://dev.to/shreyvijayvargiya/react-native-redux-tool-kit-asyncstorage-210e
 // https://stackoverflow.com/a/62610422
 const persistConfig = {

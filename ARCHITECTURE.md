@@ -101,6 +101,7 @@ SimpleMediaBrowser/
     │   ├── wireServices.ts          # Side-effect module: setLibrarySink(store); imported once by the root layout
     │   ├── persistGuards.ts         # Pure, unit-testable guards used by store.ts: legacy-library capture, write gate, rehydrate-error guard
     │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave (deps injectable)
+    │   ├── rehydrateRecovery.ts     # Failure counter, "offer recovery" decision and Start fresh for an unreadable persist:root (#228)
     │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides, scan progress
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
@@ -234,6 +235,38 @@ they are unit-tested directly) and wired up in `store.ts`, make this safe:
   next write would overwrite the stored settings. An existing library store
   still loads and autosaves then, but the migration is skipped, since the
   unreadable `persist:root` may hold the only copy of the legacy library.
+
+**Unreadable `persist:root` recovery** (`store/rehydrateRecovery.ts`, driven from
+`runLibraryPersistence`; issue #228). The guards above are the right default for
+a one-off read failure but a dead end when the entry can never be read (e.g. a
+pre-#227 library blob past the ~2 MB CursorWindow limit: "Row too big to fit
+into CursorWindow"). So each failed settings rehydrate is counted in its own
+small AsyncStorage entry (`StorageKeys.REHYDRATE_FAILURE_KEY`, kept apart from
+`persist:root` so it stays readable) together with the error message, and a
+successful rehydrate clears it. `shouldOfferRecovery()` (pure) returns true at
+>= 2 consecutive failed launches or when the message matches
+`/CursorWindow|Row too big/i`. Then, instead of the plain "Could not load your
+settings" notice, startup shows a **Start fresh** / **Keep trying** prompt (the
+splash stays up until answered; dismissing counts as Keep trying):
+
+- **Keep trying** — today's behaviour: writes stay blocked, nothing is removed,
+  the migration is skipped, and the prompt returns next launch.
+- **Start fresh** (`performStartFresh`), in this order: remove `persist:root`
+  (if that fails, stop: writes stay blocked and an alert is shown); remove the
+  first-time-setup flag so first-time setup shows as on a fresh install;
+  re-arm the write gate (`gate.unblock()` — blocked state cleared, but writes
+  are *held again* until `allow()`); clear the failure record. Then the normal
+  fresh-install branch runs: an empty library store is written (or an existing
+  one is loaded and kept), the library is hydrated, autosave starts, and
+  `allowWrites()` releases the held settings writes. Nothing can write defaults
+  over the old entry before the choice, and no settings write precedes the
+  library store being initialised. No app reload is needed (and `expo-updates`
+  is not a dependency).
+
+A single transient failure (count 1, no size error) only shows the plain notice
+and never removes or overwrites anything. Every decision is logged through
+`logger` (tag `LibraryPersistence` / `RehydrateRecovery`). Salvaging the old
+data by reading the raw RKStorage SQLite row in chunks is not implemented.
 
 `libraryPersistence.ts` keeps its startup logic in `runLibraryPersistence(deps)`,
 which takes the store, `LibraryStore`, gate functions and `Alert` as plain

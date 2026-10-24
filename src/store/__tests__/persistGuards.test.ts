@@ -105,6 +105,36 @@ describe('createWriteGate', () => {
     expect(gate.isBlocked()).toBe(true);
   });
 
+  it('unblock() re-arms the gate: writes are held until allow(), then pass', async () => {
+    const base = makeBase();
+    const gate = createWriteGate(base);
+    const reason = new Error('Row too big to fit into CursorWindow');
+    gate.block(reason);
+    expect(gate.getBlockReason()).toBe(reason);
+
+    gate.unblock();
+    expect(gate.isBlocked()).toBe(false);
+    expect(gate.getBlockReason()).toBeUndefined();
+
+    const pending = gate.storage.setItem('persist:root', 'fresh');
+    await flushMicrotasks();
+    expect(base.setItem).not.toHaveBeenCalled();
+
+    gate.allow();
+    await pending;
+    expect(base.setItem).toHaveBeenCalledWith('persist:root', 'fresh');
+  });
+
+  it('unblock() is a no-op when not blocked', async () => {
+    const base = makeBase();
+    const gate = createWriteGate(base);
+    gate.allow();
+    gate.unblock();
+
+    await gate.storage.setItem('persist:root', 'x');
+    expect(base.setItem).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps reads working after block()', async () => {
     const base = makeBase();
     const gate = createWriteGate(base);
@@ -130,6 +160,7 @@ describe('createRehydrateErrorGuard', () => {
     const { next, result } = run(guard, action);
 
     expect(gate.isBlocked()).toBe(true);
+    expect(gate.getBlockReason()).toBe(action.err);
     expect(next).toHaveBeenCalledWith(action);
     expect(result).toBe(action);
   });
