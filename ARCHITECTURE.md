@@ -52,7 +52,7 @@ SimpleMediaBrowser/
 ├── scripts/reset-project.js     # Stock Expo "reset to blank template" helper — not app logic
 └── src/
     ├── app/                     # Expo Router file-based routes (screens)
-    │   ├── _layout.tsx          # Root layout: Redux Provider, theme, first-time-setup redirect, Stack screens
+    │   ├── _layout.tsx          # Root layout: Redux Provider, theme, first-time-setup redirect, Stack screens; imports store/wireServices
     │   ├── firsttime.tsx        # First-run onboarding (add a media source, pick defaults)
     │   ├── edititem.tsx         # Modal: edit/override title, poster, provider match for a show/movie/episode
     │   ├── mergeshows.tsx       # Modal: merge two show entries that scanning didn't auto-merge
@@ -82,6 +82,9 @@ SimpleMediaBrowser/
     ├── scripts/                     # Non-UI application logic (the "backend" of the app)
     │   ├── FileScanner.ts           # SAF directory scanning, streaming Redux dispatch, thumbnail generation
     │   ├── MetadataService.ts       # Orchestrates TMDB/TVDB/iTunes enrichment, fuzzy show dedup
+    │   ├── libraryUtils.ts          # Pure, dependency-free helpers + shared types (IMediaObject, normalizeShowName, fuzzyKey, buildTmdbSearchQuery, filename/path parsers, extension checks)
+    │   ├── librarySink.ts           # LibrarySink interface ({ dispatch, getState }) + setLibrarySink(); how scanner/enrichment reach Redux without importing the store
+    │   ├── scanProgressDispatcher.ts # Shared throttled scan-progress dispatcher (built on throttledDispatch.ts, dispatches through the sink)
     │   ├── SmbTypes.ts              # Shared types for the smb.json sidecar file format
     │   ├── ImportExportService.ts   # JSON state backup/restore + filesystem (smb.json) metadata export
     │   ├── LibraryStore.ts          # SQLite-backed library persistence (one row per show), incremental autosave
@@ -95,6 +98,7 @@ SimpleMediaBrowser/
     │
     ├── store/                       # Redux Toolkit slices
     │   ├── store.ts                 # configureStore + redux-persist wiring (settings only); import-time side effects live here
+    │   ├── wireServices.ts          # Side-effect module: setLibrarySink(store); imported once by the root layout
     │   ├── persistGuards.ts         # Pure, unit-testable guards used by store.ts: legacy-library capture, write gate, rehydrate-error guard
     │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave (deps injectable)
     │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides, scan progress
@@ -238,14 +242,22 @@ importing the module never creates the store) and is what `_layout.tsx` calls.
 
 Components read state via `react-redux`'s `useSelector`/`useDispatch` (typed
 wrappers in `hooks/useRedux.ts`) and the named selectors exported from each
-slice (e.g. `selectMediaLibrary`, `selectMediaSources`). `FileScanner` and
-`MetadataService` dispatch directly against the singleton `store` import
-rather than going through React, since they run outside the component tree.
+slice (e.g. `selectMediaLibrary`, `selectMediaSources`). `FileScanner`,
+`MetadataService` and `scanProgressDispatcher` run outside the component tree
+and do **not** import the `store` singleton. They dispatch and read state
+through `librarySink` (`scripts/librarySink.ts`), a thin forwarder over a
+narrow `LibrarySink` interface (`dispatch(action)` / `getState()` limited to
+the `libraryReducer` and `settingsReducer` slices). `store/wireServices.ts`
+calls `setLibrarySink(store)` once, and is imported for its side effect by the
+root `_layout.tsx`. Every `librarySink.getState()` forwards to the real
+`getState()` at the call site (nothing is cached), and using it before it is
+wired throws a clear error. Tests call `setLibrarySink(fake)` (or `null` to
+reset) instead of mocking the store module.
 
 ## 6. Core Data Model
 
 Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
-`scripts/FileScanner.ts` (`IMediaObject`):
+`scripts/libraryUtils.ts` (`IMediaObject`):
 
 - **`IMediaShow`** — a TV show: provider `ids` (`tvdb`/`imdb`/`tmdb`),
   `title`, `year`, `poster` (local file URI), `seasons` (keyed `s01`, `s02`,
@@ -253,7 +265,7 @@ Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
   fuzzy matching in §7), and an optional per-show `metadataSource`.
 - **`IMediaSeason`** — provider ids, `seasonNumber`, `episodes` (keyed `e01`,
   `e02`, …, values are `IMediaObject`).
-- **`IMediaObject`** (`FileScanner.ts`) — the unit for both episodes and
+- **`IMediaObject`** (`libraryUtils.ts`) — the unit for both episodes and
   movies: provider `ids`, `title`/`scannedTitle`/`resolvedTitle` (locally
   parsed vs. provider-resolved display name — UI prefers `resolvedTitle`
   when set), `resolvedThumbnail`, SAF `path` + human-readable `parsedPath`,
@@ -286,7 +298,8 @@ per-source-folder `metadataSource` → global `settings.dataSource`.**
 ## 7. Media Scanning Pipeline (`FileScanner.ts`)
 
 `FileScanner` is a singleton (`FileScanner.getInstance()`) driven by
-`scanAllSources(sources: IMediaSource[])`. High-level flow:
+`scanAllSources(sources: IMediaSource[])`. It reaches Redux only through the
+injected `librarySink` (§5). High-level flow:
 
 1. **Collection** — for each configured source folder, `collectAllMediaFiles`
    recurses the SAF tree (`recursiveCollect`) up to `MAX_SCAN_DEPTH` (8). It
@@ -314,12 +327,25 @@ per-source-folder `metadataSource` → global `settings.dataSource`.**
    - **`smb_thumb_s01e01.jpg`**-style files (matched via `SMB_THUMB_REGEX`
      from `SmbTypes.ts`) — previously-exported episode thumbnails, copied
      into `smb_thumbnails_fs/`.
-4. **Name normalization & fuzzy merge keys** — `normalizeShowName` strips a
-   trailing year suffix (`"Bluey (2018)"` → `"Bluey"`, year `2018`);
-   `fuzzyKey` further lower-cases, expands `&` → `and`, and strips
-   punctuation so that e.g. `"Grey's Anatomy"` and `"Greys Anatomy"` collapse
+4. **Name normalization & fuzzy merge keys** — these pure helpers live in
+   `scripts/libraryUtils.ts` (a module with no runtime imports, shared by
+   FileScanner, MetadataService, the providers and the UI, which is what keeps
+   them free of require cycles; it also holds `isMediaFile`, `parseFilename`,
+   `parseFromPath`, the extension sets and `buildTmdbSearchQuery`).
+   `normalizeShowName` strips a bracketed trailing year (`"Bluey (2018)"` →
+   `"Bluey"`, year `2018`, the Plex/Jellyfin/Kodi convention); a bare number
+   is kept as part of the title (`"Wonder Woman 1984"`, a show named
+   `"1923"`). The one exception is release-style filenames, where
+   `parseFilename` also treats a bare year right before the episode tag as the
+   release year (`"Bluey.2018.S01E05.mkv"` → `"Bluey"`, 2018).
+   `fuzzyKey` further lower-cases, expands `&` → `and`, turns hyphens into
+   spaces, and strips punctuation (including typographic apostrophes) so that
+   e.g. `"Grey's Anatomy"`, `"Grey’s Anatomy"` and `"Greys Anatomy"` collapse
    to the same library entry. `MetadataService.deduplicateByFuzzyName`
    performs the actual merge pass before enrichment.
+   Episodes are keyed `eNN` within a season. When several files in one season
+   have no recognisable episode number, the first keeps `e00` and the rest get
+   `e00-<filename hash>` (`unnumberedEpisodeKey`), so none are dropped.
 5. **State carry-over across rescans** — after building the fresh
    library/movie/audiobook lists, the scanner reads the *previous* Redux
    state and copies forward provider ids, posters (only if the file still
@@ -484,8 +510,8 @@ etc.) can read it; iOS falls back to `Linking.openURL`.
 - **CI** (`.github/workflows/`):
   - `pre-build-test.yaml` — on PRs into `main`: `npx tsc --noEmit`,
     `npm run lint` (`expo lint` / `eslint-config-expo` flat config), and
-    `npx jest --ci --watchAll=false --passWithNoTests` (no test suite exists
-    yet — this passes vacuously; see AGENTS.md).
+    `npx jest --ci --watchAll=false --passWithNoTests` (suites live in
+    `__tests__/` folders next to the code; see AGENTS.md).
   - `build-apk.yml`, `eas-build.yaml` — produce release/EAS builds.
 - **TypeScript**: `strict: true`, path alias `@/*` → `src/*`,
   `@/assets/*` → `assets/*` (`tsconfig.json`).
@@ -513,8 +539,9 @@ Worth knowing before you go hunting for "why is there a duplicate of X":
   imports.
 - `App.tsx` at the repo root is an unused legacy RN entry point; the real
   entry is `expo-router/entry` per `package.json`'s `"main"` field.
-- There is currently no test suite (`jest --passWithNoTests` passes
-  vacuously in CI). If you add meaningful logic (especially in
-  `scripts/FileScanner.ts`'s parsing/normalization helpers or
-  `scripts/providers/`), consider adding Jest coverage — `jest-expo` is
-  already configured as the preset.
+- Jest coverage lives in `__tests__/` folders next to the code
+  (`jest-expo` preset). Scan/enrichment logic is testable without the real
+  store: pure helpers are in `scripts/libraryUtils.ts`, and
+  `FileScanner`/`MetadataService` can run against a fake via
+  `setLibrarySink` (see `scripts/__tests__/MetadataService.test.ts`). Add
+  coverage alongside new parsing/normalization logic or provider parsing.

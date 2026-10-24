@@ -1,7 +1,7 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import { openDatabaseAsync } from 'expo-sqlite';
 import type { IMediaLibrary, IMediaShow, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
-import type { IMediaObject } from '@/scripts/FileScanner';
+import type { IMediaObject } from '@/scripts/libraryUtils';
 import { logger } from '@/scripts/Logger';
 
 const TAG = 'LibraryStore';

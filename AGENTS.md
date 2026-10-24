@@ -20,6 +20,7 @@ src/
 ├── app/            Expo Router screens (file-based routing). Real navigation is under (drawer)/.
 ├── components/     UI components. MediaBrowserScreen.tsx is the core browsing screen.
 ├── scripts/        Non-UI logic: FileScanner (scanning), MetadataService + providers/ (TMDB/TVDB/iTunes),
+│                   libraryUtils (pure helpers + IMediaObject, no imports), librarySink (injected store access),
 │                   ImportExportService, Logger, openMedia
 ├── store/          Redux Toolkit slices: settingsReducer, libraryReducer (+ store.ts persistence config)
 ├── contexts/       EditModeContext (edit mode / parent-lock UI state)
@@ -47,13 +48,12 @@ npx expo start             # start the Metro dev server
 npm run android             # expo run:android
 npx tsc --noEmit            # type-check (must pass — CI runs this)
 npm run lint                 # expo lint (eslint-config-expo flat config)
-npx jest --ci --watchAll=false --passWithNoTests   # test suite (currently empty)
+npx jest --ci --watchAll=false --passWithNoTests   # test suite
 ```
 
 CI (`.github/workflows/pre-build-test.yaml`) runs typecheck, lint, and jest
 on every PR into `main`. Run all three locally before considering a change
-done — there is no test suite yet, so typecheck + lint are the main
-automated safety net.
+done.
 
 ## Coding conventions
 
@@ -64,7 +64,10 @@ automated safety net.
   field, matching the existing `select*` naming pattern.
 - **Non-UI logic lives in `src/scripts/`**, not inside components. Follow
   the existing singleton pattern (`getInstance()`) for stateful services
-  like `FileScanner` and `MetadataService`.
+  like `FileScanner` and `MetadataService`. Those two (and
+  `scanProgressDispatcher`) must not import `@/store/store`; use
+  `librarySink` from `scripts/librarySink.ts`. Keep `libraryUtils.ts` free of
+  runtime imports so it never reintroduces a require cycle.
 - **New metadata providers** must implement `IMetadataProvider`
   (`scripts/providers/IMetadataProvider.ts`) and be wired into both
   `MetadataService`'s `resolve*Provider` closures and the `dataSources`
@@ -82,12 +85,20 @@ automated safety net.
 
 ## Testing / verifying changes
 
-- There is no existing Jest test suite — `jest-expo` is configured as the
-  preset (`package.json`), so it's ready to use if you add coverage. Favor
-  adding tests for pure logic (`FileScanner.ts`'s `normalizeShowName`,
-  `fuzzyKey`, `buildTmdbSearchQuery`; provider response parsing) over
-  UI/component tests, since the app is Android-only and hard to drive
-  headlessly.
+- Jest tests (preset `jest-expo`) live in `__tests__/` directories next to the
+  code they cover (`src/scripts/__tests__/`, `src/store/__tests__/`); shared
+  fixtures and helpers are in `src/scripts/__testutils__/`. Favor tests for
+  pure logic and Redux over UI/component tests, since the app is Android-only
+  and hard to drive headlessly.
+- Scanning and enrichment logic is testable without the real store:
+  `libraryUtils.ts` has no runtime imports, and `FileScanner` /
+  `MetadataService` / `scanProgressDispatcher` only talk to `librarySink`. In a
+  test, call `setLibrarySink(fakeSink)` (e.g. a `configureStore` built from the
+  real slice reducers, never `@/store/store`) and reset it with
+  `setLibrarySink(null)` in `afterEach`. See `MetadataService.test.ts` and
+  `FileScanner.test.ts` for the pattern, including the mocks needed to load
+  them (`expo-video`, `expo-image-manipulator`, `Logger`, the providers) and a
+  `global.fetch` that fails if anything reaches for the network.
 - UI/feature changes involving scanning, metadata enrichment, or playback
   can't be meaningfully verified by typecheck/lint alone — they touch SAF,
   native video APIs, and network providers that don't run in this
@@ -110,6 +121,8 @@ automated safety net.
 | Looking for... | Start here |
 |---|---|
 | How scanning works | `src/scripts/FileScanner.ts`, ARCHITECTURE.md §7 |
+| Pure helpers (name normalising, filename parsing) / `IMediaObject` | `src/scripts/libraryUtils.ts` |
+| How scanner/enrichment reach Redux (sink wiring) | `src/scripts/librarySink.ts`, `src/store/wireServices.ts`, ARCHITECTURE.md §5 |
 | How TMDB/TVDB matching works | `src/scripts/MetadataService.ts`, `src/scripts/providers/`, ARCHITECTURE.md §8 |
 | The `smb.json` sidecar format | `src/scripts/SmbTypes.ts`, ARCHITECTURE.md §9 |
 | Redux state shape | `src/store/libraryReducer.ts`, `src/store/settingsReducer.ts`, ARCHITECTURE.md §5-6 |

@@ -3,92 +3,17 @@ import { StorageAccessFramework } from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import { store } from "@/store/store";
+import { librarySink } from "@/scripts/librarySink";
 import { setMediaLibrary, setMovies, setAudiobooks, setIsScanning, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
-import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, IAudiobookFile, MergeEpisodePayload, dataSources } from "@/store/libraryReducer";
+import type { IMediaLibrary, IMediaAudiobook, IAudiobookFile, MergeEpisodePayload } from "@/store/libraryReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
 import { scanProgressDispatcher } from "@/scripts/scanProgressDispatcher";
 import { logger } from "@/scripts/Logger";
 import { MetadataService } from "@/scripts/MetadataService";
+import { NON_DIRECTORY_EXTENSIONS, episodeKeyFor, isMediaFile, normalizeShowName, parseFilename, parseFromPath, unnumberedEpisodeKey } from "@/scripts/libraryUtils";
+import type { IMediaObject, ParsedMetadata, dataSources } from "@/scripts/libraryUtils";
 import type { SmbJsonData } from "@/scripts/SmbTypes";
 import { SMB_THUMB_REGEX } from "@/scripts/SmbTypes";
-
-export interface IMediaObject {
-    ids: {
-        tvdb: string | null;
-        imdb: string | null;
-        tmdb: string | null;
-    }
-    episodeNumber: number;
-    /**
-     * Display title for the episode or movie.  For TV episodes this is the
-     * scanned title derived from the local filename (see also `scannedTitle`).
-     * Prefer `resolvedTitle` for display when it is available.
-     */
-    title: string;
-    /**
-     * The title as parsed from the local filename or folder structure during
-     * scanning.  Stored separately so the provider-sourced title (`resolvedTitle`) can
-     * be displayed without losing the original locally-derived value.
-     */
-    scannedTitle?: string;
-    /**
-     * Episode name fetched from a metadata provider.
-     * When present, the UI prefers this over the locally-scanned title.
-     */
-    resolvedTitle?: string;
-    /**
-     * Local file URI for the episode still image downloaded from a metadata provider.
-     * Used as the episode "poster" in the grid/list UI.
-     */
-    resolvedThumbnail?: string;
-    filename: string
-    path: string
-    parsedPath: string
-    isDirectory: boolean
-    poster: string;
-    /**
-     * Metadata provider configured on the source folder this item was scanned
-     * from.  Set during collection so MetadataService can select the right
-     * provider without needing a per-item override.  Absent means use the
-     * global setting.
-     */
-    metadataSource?: dataSources;
-    /**
-     * Timestamp (`Date.now()`) of the last time this episode/movie was opened
-     * in an external player.  Absent means never opened.  Not populated during
-     * scanning; set via the `setEpisodeLastOpened`/`setMovieLastOpened`
-     * reducers when the user opens the file.
-     */
-    lastOpened?: number;
-    /**
-     * Timestamp (`Date.now()`) of the first time this episode/movie was
-     * discovered by a scan.  Set once when the item is first built and then
-     * carried forward on every subsequent rescan (see the carry-over block
-     * in `scanAllSources`), so it never changes once assigned.
-     */
-    firstDetected?: number;
-    /**
-     * The `IMediaSource.uri` of the source folder this item was scanned from.
-     * Stamped during collection so a later scan can tell, if the item is
-     * absent from a fresh build, whether it came from a source that failed
-     * to enumerate this time (device disconnected) versus one that was read
-     * successfully (item genuinely removed) — see `unavailable`.
-     */
-    sourceUri?: string;
-    /**
-     * Set when this item's originating source could not be read during the
-     * most recent scan (e.g. the storage device is disconnected) and the
-     * item was carried forward from the previous scan instead of being
-     * dropped. The UI should hide items with this flag set rather than
-     * deleting their metadata, so they reappear automatically once the
-     * source is reachable again.
-     */
-    unavailable?: boolean;
-}
-
-// Re-export library types so other modules can import them from here
-export type { IMediaLibrary, IMediaShow, IMediaSeason };
 
 /**
  * Cross-session cache of thumbnail sources keyed by media file path.
@@ -174,32 +99,6 @@ function saveThumbnailIndex(index: ThumbnailIndex): void {
     }
 }
 
-const VIDEO_EXTENSIONS = new Set([
-    '.mkv', '.mp4', '.avi', '.mov', '.m4v', '.wmv', '.flv',
-    '.ts', '.m2ts', '.webm', '.mpg', '.mpeg', '.3gp',
-]);
-
-/**
- * Audio file extensions recognised as audiobook content.  Used only when
- * scanning sources whose contentType is 'audiobook'; for TV/movie sources these
- * remain in {@link NON_DIRECTORY_EXTENSIONS} so they are skipped.
- */
-const AUDIO_EXTENSIONS = new Set([
-    '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.ogg', '.oga', '.opus', '.wav', '.wma',
-]);
-
-/**
- * Extensions that are definitively non-directory file types.  Entries with
- * these extensions are skipped without attempting to recurse into them,
- * avoiding unnecessary readDirectoryAsync calls for subtitle/image/metadata
- * side-car files that live alongside video files.
- */
-const NON_DIRECTORY_EXTENSIONS = new Set([
-    '.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx', // subtitles
-    '.nfo', '.xml', '.json', '.txt', '.md',          // metadata / text
-    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tbn', // images
-    '.mp3', '.aac', '.flac', '.ogg', '.wav', '.m4a', // audio-only
-]);
 
 /** Maximum folder depth to recurse into during a scan. Protects against infinite symlink loops. */
 const MAX_SCAN_DEPTH = 8;
@@ -301,20 +200,6 @@ async function copyLocalPoster(sourceUri: string, key: string): Promise<string> 
     return localFile.uri;
 }
 
-interface ParsedMetadata {
-    /** Canonical (normalized) show name, used as the Redux library key. */
-    showName: string;
-    /**
-     * Raw name before year-suffix stripping (equals showName when no suffix was
-     * removed).  Stored on the library entry for debugging and provenance.
-     */
-    rawShowName: string;
-    /** Year extracted from the raw show name/folder suffix (0 if not present). */
-    showYear: number;
-    season: number;
-    episode: number;
-    title: string;
-}
 
 /** A file collected during recursive scanning, carrying its relative path parts. */
 interface IScannedFile extends IMediaObject {
@@ -367,78 +252,6 @@ interface StreamState {
     rootAccessible: boolean;
 }
 
-/**
- * Strips a trailing year suffix from a raw show/folder name and returns the
- * canonical name together with the extracted year.
- *
- * Patterns recognised (at end of string):
- *   "Bluey (2018)"  →  name: "Bluey",  year: 2018
- *   "Bluey [2018]"  →  name: "Bluey",  year: 2018
- *   "Bluey 2018"    →  name: "Bluey",  year: 2018
- *   "Bluey"         →  name: "Bluey",  year: 0
- *
- * This allows folders named "Bluey" and "Bluey (2018)" to be merged under the
- * single canonical key "Bluey" in the Redux library, while the year is stored
- * separately so the TMDB enrichment pass can select the correct result.
- */
-function normalizeShowName(raw: string): { name: string; year: number } {
-    // Require balanced brackets: (YYYY), [YYYY], or bare YYYY at end of string.
-    const yearMatch = raw.match(/\s*(?:\((\d{4})\)|\[(\d{4})\]|(\d{4}))\s*$/);
-    const year = yearMatch ? parseInt(yearMatch[1] ?? yearMatch[2] ?? yearMatch[3], 10) : 0;
-    // Strip the matched suffix; fall back to the original if stripping leaves an empty string.
-    const name = yearMatch ? (raw.slice(0, yearMatch.index).trim() || raw.trim()) : raw.trim();
-    return { name, year };
-}
-
-/**
- * Produces a normalised key used to detect that two differently-named show
- * folders actually refer to the same series.
- *
- * The key is derived by:
- *   1. Stripping any trailing year suffix (delegates to normalizeShowName).
- *   2. Lower-casing the result.
- *   3. Replacing ampersands with "and" so "Tom & Jerry" ≡ "Tom and Jerry".
- *   4. Removing apostrophes, hyphens, colons, periods, commas and exclamation
- *      marks so "Grey's Anatomy" ≡ "Greys Anatomy".
- *   5. Collapsing runs of whitespace to a single space and trimming.
- *
- * Examples:
- *   "Grey's Anatomy"   → "greys anatomy"
- *   "Greys Anatomy"    → "greys anatomy"
- *   "Tom & Jerry"      → "tom and jerry"
- *   "Tom and Jerry"    → "tom and jerry"
- *   "Bluey (2018)"     → "bluey"
- */
-export function fuzzyKey(name: string): string {
-    const { name: stripped } = normalizeShowName(name);
-    return stripped
-        .toLowerCase()
-        .replace(/&/g, 'and')
-        .replace(/[':.,!-]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-/**
- * Builds a sanitised query string suitable for the TMDB search API from a raw
- * show or movie title.
- *
- * Steps applied (order matters):
- *   1. Strip a trailing year suffix – "Breaking Bad (2008)" → "Breaking Bad".
- *   2. Replace "&" with "and" – TMDB handles "and" better than bare "&".
- *   3. Strip apostrophes, colons and commas that can confuse TMDB's tokeniser.
- *   4. Collapse whitespace and trim.
- *
- * The original title is never mutated; only the TMDB query is affected.
- */
-export function buildTmdbSearchQuery(title: string): string {
-    return title
-        .replace(/\s*[\[(]?\d{4}[\])]?\s*$/, '')
-        .replace(/&/g, 'and')
-        .replace(/[':.,\-]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
 
 export class FileScanner {
 
@@ -476,7 +289,7 @@ export class FileScanner {
         logger.log('FileScanner', `scanAllSources called with ${sources.length} source(s)`);
         sources.forEach((s, i) => logger.log('FileScanner', `  Source[${i}]: type=${s.contentType} uri=${s.uri}`));
         this._cancelRequested = false;
-        store.dispatch(setIsScanning(true));
+        librarySink.dispatch(setIsScanning(true));
         scanProgressDispatcher.immediate({ phase: 'collecting', filesFound: 0, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 });
         try {
         const tvSources = sources.filter((s) => s.contentType === 'tv');
@@ -609,7 +422,7 @@ export class FileScanner {
         // library so that posters remain visible during the upcoming enrichment phase.
         // Without this, dispatching setMediaLibrary with a new library (which has no provider
         // data) causes all posters to vanish from the UI until enrichment re-downloads them.
-        const prevLibrary = store.getState().libraryReducer.mediaLibrary;
+        const prevLibrary = librarySink.getState().libraryReducer.mediaLibrary;
         for (const [showName, show] of Object.entries(mergedLibrary)) {
             const prev = prevLibrary[showName];
             if (!prev) continue;
@@ -664,7 +477,7 @@ export class FileScanner {
                 // Ignore errors; metadata will be re-fetched during enrichment.
             }
         }
-        const prevMovies = store.getState().libraryReducer.movies;
+        const prevMovies = librarySink.getState().libraryReducer.movies;
         const prevMovieByPath = new Map(prevMovies.map((m) => [m.path, m]));
         for (const movie of movies) {
             const prev = prevMovieByPath.get(movie.path);
@@ -690,7 +503,7 @@ export class FileScanner {
 
         // Carry over previously-fetched cover art and provider IDs for audiobooks so the
         // cover stays visible during the upcoming enrichment phase and matched IDs persist.
-        const prevAudiobooks = store.getState().libraryReducer.audiobooks ?? [];
+        const prevAudiobooks = librarySink.getState().libraryReducer.audiobooks ?? [];
         const prevAudiobookByKey = new Map(prevAudiobooks.map((a) => [a.folderKey, a]));
         for (const audiobook of audiobooks) {
             const prev = prevAudiobookByKey.get(audiobook.folderKey);
@@ -753,15 +566,15 @@ export class FileScanner {
         // Dispatch a final "collecting done" progress update with the exact total before
         // dispatching the library data, so the UI can show the correct file count.
         scanProgressDispatcher.immediate({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 });
-        store.dispatch(setMediaLibrary(mergedLibrary));
-        store.dispatch(setMovies(movies));
-        store.dispatch(setAudiobooks(audiobooks));
+        librarySink.dispatch(setMediaLibrary(mergedLibrary));
+        librarySink.dispatch(setMovies(movies));
+        librarySink.dispatch(setAudiobooks(audiobooks));
         logger.log('FileScanner', `Scan complete. Total media files dispatched: ${allScanUris.length}`);
 
         // Enrich library with metadata posters if any provider key is configured.
         // Awaited so that isScanning stays true (and progress is visible) for the
         // full duration of enrichment; setIsScanning(false) fires in the finally block.
-        const settings = store.getState().settingsReducer;
+        const settings = librarySink.getState().settingsReducer;
         const enablePosterFetching = settings.enablePosterFetching ?? true;
         const hasAnyProviderKey = !!(settings.tmdbApiKey || settings.tvdbApiKey);
         // Audiobook cover art comes from the keyless iTunes Search API, so enrichment
@@ -770,9 +583,9 @@ export class FileScanner {
         const hasAudiobooks = audiobooks.length > 0;
         if (!this._cancelRequested && enablePosterFetching && (hasAnyProviderKey || hasAudiobooks)) {
             logger.log('FileScanner', 'Starting metadata enrichment');
-            const currentLibrary = store.getState().libraryReducer.mediaLibrary;
-            const currentMovies = store.getState().libraryReducer.movies;
-            const currentAudiobooks = store.getState().libraryReducer.audiobooks;
+            const currentLibrary = librarySink.getState().libraryReducer.mediaLibrary;
+            const currentMovies = librarySink.getState().libraryReducer.movies;
+            const currentAudiobooks = librarySink.getState().libraryReducer.audiobooks;
             try {
                 await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, currentAudiobooks, () => this._cancelRequested);
             } catch (e) {
@@ -792,7 +605,7 @@ export class FileScanner {
             ...allTvFiles.map(({ relativePathParts, ...obj }) => obj),
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
         ];
-        const enableThumbnailGeneration = store.getState().settingsReducer.enableThumbnailGeneration ?? false;
+        const enableThumbnailGeneration = librarySink.getState().settingsReducer.enableThumbnailGeneration ?? false;
         if (!this._cancelRequested && enableThumbnailGeneration) {
             // Load the on-disk thumbnail index and pre-populate the cache with persistent URIs.
             // This must run before filtering uncached files so already-persisted thumbnails
@@ -816,7 +629,7 @@ export class FileScanner {
         } finally {
             // Drop any pending trailing tick so it can't land after the reset below.
             scanProgressDispatcher.cancel();
-            store.dispatch(setIsScanning(false));
+            librarySink.dispatch(setIsScanning(false));
         }
     }
 
@@ -903,7 +716,7 @@ export class FileScanner {
         logger.log('FileScanner', `regenerateThumbnailsFor: ${files.length} file(s) requested`);
         if (files.length === 0) return;
         this._cancelRequested = false;
-        store.dispatch(setIsScanning(true));
+        librarySink.dispatch(setIsScanning(true));
         try {
             const diskIndex = loadThumbnailIndex();
             // Drop the cached entry and delete the persisted JPEG for each file, otherwise
@@ -932,7 +745,7 @@ export class FileScanner {
         } finally {
             // Drop any pending trailing tick so it can't land after the reset below.
             scanProgressDispatcher.cancel();
-            store.dispatch(setIsScanning(false));
+            librarySink.dispatch(setIsScanning(false));
         }
     }
 
@@ -947,7 +760,7 @@ export class FileScanner {
         logger.log('FileScanner', `refetchMetadataFor: ${showNames.length} show(s), ${moviePaths.length} movie(s)`);
         if (showNames.length === 0 && moviePaths.length === 0) return;
         this._cancelRequested = false;
-        store.dispatch(setIsScanning(true));
+        librarySink.dispatch(setIsScanning(true));
         try {
             await MetadataService.getInstance().enrichSelection(showNames, moviePaths, () => this._cancelRequested);
         } catch (e) {
@@ -956,7 +769,7 @@ export class FileScanner {
         } finally {
             // Drop any pending trailing tick so it can't land after the reset below.
             scanProgressDispatcher.cancel();
-            store.dispatch(setIsScanning(false));
+            librarySink.dispatch(setIsScanning(false));
         }
     }
 
@@ -971,7 +784,7 @@ export class FileScanner {
                         const ext = dotIdx !== -1 ? filename.substring(dotIdx).toLowerCase() : '';
 
                         // SAF entry metadata is unreliable; infer obvious file types by extension.
-                        const isDirectory = !this.isMediaFile(filename) && !NON_DIRECTORY_EXTENSIONS.has(ext);
+                        const isDirectory = !isMediaFile(filename) && !NON_DIRECTORY_EXTENSIONS.has(ext);
 
                         return {
                                 ids: { tvdb: null, imdb: null, tmdb: null },
@@ -1001,7 +814,7 @@ export class FileScanner {
             undefined,
         );
         const library = this.buildLibrary(allMediaFiles, posterMap, smbData, smbThumbnails);
-        store.dispatch(setMediaLibrary(library));
+        librarySink.dispatch(setMediaLibrary(library));
 
         return filtered;
     }
@@ -1088,7 +901,7 @@ export class FileScanner {
 
             if (filename.charAt(0) === '.') continue; // Skip hidden entries
 
-            if (this.isMediaFile(filename, streamState.sourceType)) {
+            if (isMediaFile(filename, streamState.sourceType)) {
                 const file: IScannedFile = {
                     ids: { tvdb: null, imdb: null, tmdb: null },
                     title: '',
@@ -1145,7 +958,7 @@ export class FileScanner {
                             if (streamState.sourceType === 'tv') {
                                 // The library key uses the normalized show name, not the raw folder name.
                                 const normalizedKey = normalizeShowName(folderKey).name;
-                                store.dispatch(updateShowPoster({ showName: normalizedKey, poster: localUri }));
+                                librarySink.dispatch(updateShowPoster({ showName: normalizedKey, poster: localUri }));
                             } else if (streamState.sourceType === 'audiobook') {
                                 // Audiobooks are built and dispatched after collection, so the
                                 // poster is applied via buildAudiobookList from posterMap; no
@@ -1153,7 +966,7 @@ export class FileScanner {
                             } else {
                                 // Update any movies already flushed to Redux for this folder.
                                 for (const path of streamState.moviePathsByFolder.get(folderKey) ?? []) {
-                                    store.dispatch(setMoviePoster({ path, poster: localUri }));
+                                    librarySink.dispatch(setMoviePoster({ path, poster: localUri }));
                                 }
                                 // Back-fill the poster for buffered movies not yet dispatched.
                                 for (let i = 0; i < streamState.movieBatch.length; i++) {
@@ -1245,13 +1058,6 @@ export class FileScanner {
         );
     }
 
-    private isMediaFile(filename: string, sourceType: 'tv' | 'movie' | 'audiobook' = 'tv'): boolean {
-        const dotIndex = filename.lastIndexOf('.');
-        if (dotIndex === -1) return false;
-        const ext = filename.substring(dotIndex).toLowerCase();
-        return sourceType === 'audiobook' ? AUDIO_EXTENSIONS.has(ext) : VIDEO_EXTENSIONS.has(ext);
-    }
-
     /**
      * Parses a scanned file and adds it to the appropriate streaming batch
      * (episode or movie) based on the current source type.
@@ -1272,7 +1078,7 @@ export class FileScanner {
             const { showName, rawShowName, showYear, season, episode, title } = metadata;
             const folderPoster = folderKey ? (posterMap.get(folderKey) ?? '') : '';
             const seasonKey = `s${String(season).padStart(2, '0')}`;
-            const episodeKey = `e${String(episode).padStart(2, '0')}`;
+            const episodeKey = episodeKeyFor(episode);
             const { relativePathParts: _, ...mediaObj } = file;
             streamState.episodeBatch.push({
                 showName,
@@ -1311,7 +1117,7 @@ export class FileScanner {
      */
     private flushStreamBatch(streamState: StreamState, posterMap: Map<string, string>): void {
         if (streamState.episodeBatch.length > 0) {
-            store.dispatch(mergeEpisodeBatch([...streamState.episodeBatch]));
+            librarySink.dispatch(mergeEpisodeBatch([...streamState.episodeBatch]));
             streamState.episodeBatch.length = 0;
         }
         if (streamState.movieBatch.length > 0) {
@@ -1321,7 +1127,7 @@ export class FileScanner {
                 const latestPoster = posterMap.get(folderKey);
                 return latestPoster ? { ...movie, poster: latestPoster } : movie;
             });
-            store.dispatch(appendMovieBatch(movies));
+            librarySink.dispatch(appendMovieBatch(movies));
             // Register these paths so future poster-copy events can update them.
             for (const { movie, folderKey } of streamState.movieBatch) {
                 const paths = streamState.moviePathsByFolder.get(folderKey);
@@ -1548,9 +1354,21 @@ export class FileScanner {
                 };
             }
 
-            const episodeKey = `e${String(episode).padStart(2, '0')}`;
+            const episodes = library[showName].seasons[seasonKey].episodes;
+            let episodeKey = episodeKeyFor(episode);
+            if (episode === 0 && episodes[episodeKey] && episodes[episodeKey].parsedPath !== file.parsedPath) {
+                // Several files with no episode number in one season: the first keeps "e00" (so a
+                // genuine E00 still matches smb.json / smb_thumb_ entries), the rest get a
+                // filename-derived key, plus "-2", "-3"... if two share a name in different
+                // subfolders.  The same file seen twice (overlapping sources) is still skipped.
+                const baseKey = unnumberedEpisodeKey(file.filename);
+                episodeKey = baseKey;
+                for (let n = 2; episodes[episodeKey] && episodes[episodeKey].parsedPath !== file.parsedPath; n++) {
+                    episodeKey = `${baseKey}-${n}`;
+                }
+            }
             // Avoid overwriting an existing entry with the same key
-            if (!library[showName].seasons[seasonKey].episodes[episodeKey]) {
+            if (!episodes[episodeKey]) {
                 // Strip the internal relativePathParts field before storing
                 const { relativePathParts, ...mediaObj } = file;
                 const resolvedTitle = title || file.filename;
@@ -1576,7 +1394,7 @@ export class FileScanner {
                     const thumbUri = thumbMap?.get(`${seasonKey}:${episodeKey}`);
                     if (thumbUri && !ep.resolvedThumbnail) ep.resolvedThumbnail = thumbUri;
                 }
-                library[showName].seasons[seasonKey].episodes[episodeKey] = ep;
+                episodes[episodeKey] = ep;
             }
         }
 
@@ -1585,119 +1403,14 @@ export class FileScanner {
 
     private parseMediaFile(file: IScannedFile): ParsedMetadata | null {
         // Filename-based parsing takes priority (e.g. ShowName.S01E05.mkv)
-        const fromFilename = this.parseFilename(file.filename);
+        const fromFilename = parseFilename(file.filename);
         if (fromFilename) return fromFilename;
 
         // Fall back to inferring from the directory structure
-        return this.parseFromPath(file);
-    }
-
-    // ─── Filename parser ─────────────────────────────────────────────────────
-
-    /**
-     * Parse common TV filename patterns:
-     *   Show.Name.S01E05.Episode.Title.mkv   (SxxExx)
-     *   Show.Name.1x05.Episode.Title.mkv     (NxNN)
-     */
-    parseFilename(filename: string): ParsedMetadata | null {
-        // Remove extension for easier matching
-        const withoutExt = filename.replace(/\.[^.]+$/, '');
-
-        // SxxExx pattern — requires a separator before [Ss] so numeric show names don't false-match.
-        // Season: up to 2 digits (realistic max ~99); episode: up to 3 digits (e.g. anime ep 100+).
-        const sxxMatch = withoutExt.match(
-            /^(.*?)[\.\s_-]+\b[Ss](\d{1,2})[Ee](\d{1,3})\b(?:[\.\s_-]+(.*))?$/,
-        );
-        if (sxxMatch) {
-            const rawShowName = this.cleanName(sxxMatch[1]);
-            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
-            return {
-                showName,
-                rawShowName,
-                showYear,
-                season: parseInt(sxxMatch[2], 10),
-                episode: parseInt(sxxMatch[3], 10),
-                title: sxxMatch[4] ? this.cleanName(sxxMatch[4]) : '',
-            };
-        }
-
-        // NxNN pattern — requires a separator before the season digit so numbers inside show names
-        // don't false-match. Season: up to 2 digits; episode: up to 3 digits.
-        const nxnnMatch = withoutExt.match(
-            /^(.*?)[\.\s_-]+\b(\d{1,2})x(\d{1,3})\b(?:[\.\s_-]+(.*))?$/,
-        );
-        if (nxnnMatch) {
-            const rawShowName = this.cleanName(nxnnMatch[1]);
-            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
-            return {
-                showName,
-                rawShowName,
-                showYear,
-                season: parseInt(nxnnMatch[2], 10),
-                episode: parseInt(nxnnMatch[3], 10),
-                title: nxnnMatch[4] ? this.cleanName(nxnnMatch[4]) : '',
-            };
-        }
-
-        return null;
-    }
-
-    // ─── Path-based parser ───────────────────────────────────────────────────
-
-    /**
-     * Infer show/season/episode from the directory hierarchy without relying on
-     * any user-configured view/organisation mode.  The scanner always recurses
-     * all directories; the display layer (viewType) decides how the resulting
-     * library data is presented to the user.
-     *
-     * Heuristics applied in order of directory depth:
-     *   2+ parts – parts[0] = show name, parts[1] = season folder
-     *   1 part   – parts[0] = show name, season defaults to 1
-     *   0 parts  – file sits directly in the root; no folder context, skip
-     */
-    private parseFromPath(file: IScannedFile): ParsedMetadata | null {
-        const parts = file.relativePathParts;
-        const baseTitle = file.filename.replace(/\.[^.]+$/, '').replace(/[\._-]+/g, ' ').trim();
-
-        // Try to extract an episode number from the filename.
-        // Word boundary (\b) prevents matching digits inside unrelated words.
-        // [Ee][Pp]? optionally matches 'p/P', covering 'e5', 'E5', 'ep5', 'EP5', etc.
-        const epMatch = file.filename.match(/\b[Ee][Pp]?(\d{1,3})\b/);
-        const episode = epMatch ? parseInt(epMatch[1], 10) : 0;
-
-        if (parts.length >= 2) {
-            // rootDir/ShowName/SeasonFolder/episode.mkv  (or deeper)
-            const rawShowName = parts[0];
-            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
-            const seasonFolder = parts[1];
-            // Prefer an explicit 'Season N' word; otherwise take the first digit run.
-            const namedSeasonMatch = seasonFolder.match(/[Ss]eason\s*(\d+)/i);
-            const rawNumberMatch = seasonFolder.match(/(\d+)/);
-            const seasonStr = namedSeasonMatch
-                ? namedSeasonMatch[1]
-                : rawNumberMatch?.[1] ?? '1';
-            const season = parseInt(seasonStr, 10);
-            return { showName, rawShowName, showYear, season, episode, title: baseTitle };
-        }
-
-        if (parts.length === 1) {
-            // rootDir/ShowName/episode.mkv
-            const rawShowName = parts[0];
-            const { name: showName, year: showYear } = normalizeShowName(rawShowName);
-            return { showName, rawShowName, showYear, season: 1, episode, title: baseTitle };
-        }
-
-        // File is directly in the root scan directory with no enclosing folder;
-        // there is no structural context from which to derive a show name.
-        return null;
+        return parseFromPath(file.filename, file.relativePathParts);
     }
 
     // ─── Utilities ───────────────────────────────────────────────────────────
-
-    /** Replace dots/underscores with spaces and trim the string. */
-    private cleanName(raw: string): string {
-        return raw.replace(/[\._]+/g, ' ').trim();
-    }
 
     getUserID() {
         return this._userID;

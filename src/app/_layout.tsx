@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { Provider, useSelector } from 'react-redux';
 import { store, waitForPersistBootstrap } from '@/store/store';
+import '@/store/wireServices';
 import { startLibraryPersistence } from '@/store/libraryPersistence';
 import { logger } from '@/scripts/Logger';
 import { EditModeProvider } from '@/contexts/EditModeContext';

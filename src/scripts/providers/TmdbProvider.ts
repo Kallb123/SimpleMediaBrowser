@@ -1,6 +1,6 @@
 import { File, Directory, Paths } from 'expo-file-system';
 import { logger } from '@/scripts/Logger';
-import { buildTmdbSearchQuery } from '@/scripts/FileScanner';
+import { buildTmdbSearchQuery } from '@/scripts/libraryUtils';
 import type { IMetadataProvider, ProviderShowResult, ProviderMovieResult, ProviderEpisode } from './IMetadataProvider';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';

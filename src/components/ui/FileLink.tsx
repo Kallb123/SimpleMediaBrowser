@@ -1,4 +1,4 @@
-import { IMediaObject } from '@/scripts/FileScanner';
+import type { IMediaObject } from '@/scripts/libraryUtils';
 import { ThemedText } from '../ThemedText';
 import { TouchableOpacity } from 'react-native';
 import { openMediaInExternalApp } from '@/scripts/openMedia';

@@ -1,4 +1,4 @@
-import { store } from '@/store/store';
+import { librarySink } from '@/scripts/librarySink';
 import { setScanProgress } from '@/store/libraryReducer';
 import type { ScanProgress } from '@/store/libraryReducer';
 import { createThrottledDispatcher } from '@/scripts/throttledDispatch';
@@ -13,6 +13,6 @@ const SCAN_PROGRESS_INTERVAL_MS = 250;
  * just before `setIsScanning(false)` (which resets progress itself).
  */
 export const scanProgressDispatcher = createThrottledDispatcher<ScanProgress>(
-    (progress) => { store.dispatch(setScanProgress(progress)); },
+    (progress) => { librarySink.dispatch(setScanProgress(progress)); },
     SCAN_PROGRESS_INTERVAL_MS,
 );

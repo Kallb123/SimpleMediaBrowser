@@ -1,6 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from './store';
-import { IMediaObject } from '@/scripts/FileScanner';
+import type { IMediaObject, dataSources } from '@/scripts/libraryUtils';
 // Type-only: LibraryStore imports types from this module, so a value import would be a cycle.
 import type { PersistedLibrary } from '@/scripts/LibraryStore';
 
@@ -193,7 +193,7 @@ export interface ScanProgress {
 }
 
 export type contentTypes = 'tv' | 'movie' | 'audiobook';
-export type dataSources = 'tmdb' | 'tvdb';
+export type { dataSources };
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
 

@@ -79,6 +79,7 @@ export function smbThumbFilename(seasonKey: string, epKey: string): string {
 
 /**
  * Regex that matches a smb_thumb filename produced by smbThumbFilename().
- * Captures season key (group 1) and episode key (group 2).
+ * Captures season key (group 1) and episode key (group 2).  The episode key is "eNN"/"eNNN",
+ * or "e00-<hash>" / "e00-<hash>-N" for extra unnumbered files (see unnumberedEpisodeKey).
  */
-export const SMB_THUMB_REGEX = /^smb_thumb_(s\d{2})(e\d{2,3})\.jpg$/i;
+export const SMB_THUMB_REGEX = /^smb_thumb_(s\d{2})(e\d{2,3}(?:-[0-9a-z]+(?:-\d+)?)?)\.jpg$/i;
