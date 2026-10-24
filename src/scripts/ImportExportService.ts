@@ -34,8 +34,13 @@ import {
     setFetchEpisodeNames,
     setFetchEpisodeThumbnails,
     setAppColorScheme,
+    setBedtimeEnabled,
+    setBedtimeStart,
+    setBedtimeEnd,
+    setBedtimeAllowedTypes,
 } from '@/store/settingsReducer';
-import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes } from '@/store/settingsReducer';
+import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, contentTypes } from '@/store/settingsReducer';
+import { formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
 import { logger } from '@/scripts/Logger';
 import type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData } from '@/scripts/SmbTypes';
 import { smbThumbFilename } from '@/scripts/SmbTypes';
@@ -200,7 +205,8 @@ interface SmbExportJson {
  * `smb_export_YYYY-MM-DDTHH-MM-SS.json`.
  *
  * Note: media source URIs and the settings password are intentionally excluded
- * from the export because they are device-specific or sensitive.
+ * from the export because they are device-specific or sensitive. Bedtime-mode
+ * settings are included (importing requires an unlocked Settings screen anyway).
  */
 export async function exportJson(options: JsonExportOptions): Promise<void> {
     const state = store.getState();
@@ -226,6 +232,10 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             fetchEpisodeNames: s.fetchEpisodeNames,
             fetchEpisodeThumbnails: s.fetchEpisodeThumbnails,
             appColorScheme: s.appColorScheme,
+            bedtimeEnabled: s.bedtimeEnabled,
+            bedtimeStart: s.bedtimeStart,
+            bedtimeEnd: s.bedtimeEnd,
+            bedtimeAllowedTypes: s.bedtimeAllowedTypes,
         };
     }
 
@@ -328,6 +338,18 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (typeof s.fetchEpisodeNames === 'boolean') store.dispatch(setFetchEpisodeNames(s.fetchEpisodeNames));
         if (typeof s.fetchEpisodeThumbnails === 'boolean') store.dispatch(setFetchEpisodeThumbnails(s.fetchEpisodeThumbnails));
         if (typeof s.appColorScheme === 'string') store.dispatch(setAppColorScheme(s.appColorScheme as appColorSchemes));
+        if (typeof s.bedtimeEnabled === 'boolean') store.dispatch(setBedtimeEnabled(s.bedtimeEnabled));
+        // Times and allowed types are validated: a malformed window or an empty list would
+        // otherwise lock every library (or none) without the user noticing.
+        const bedtimeStart = typeof s.bedtimeStart === 'string' ? parseTimeOfDay(s.bedtimeStart) : null;
+        if (bedtimeStart !== null) store.dispatch(setBedtimeStart(formatTimeOfDay(bedtimeStart)));
+        const bedtimeEnd = typeof s.bedtimeEnd === 'string' ? parseTimeOfDay(s.bedtimeEnd) : null;
+        if (bedtimeEnd !== null) store.dispatch(setBedtimeEnd(formatTimeOfDay(bedtimeEnd)));
+        if (Array.isArray(s.bedtimeAllowedTypes)) {
+            const validTypes: contentTypes[] = ['tv', 'movie', 'audiobook'];
+            const allowed = validTypes.filter((t) => (s.bedtimeAllowedTypes as unknown[]).includes(t));
+            if (allowed.length > 0) store.dispatch(setBedtimeAllowedTypes(allowed));
+        }
         applied.push('settings');
     }
 
