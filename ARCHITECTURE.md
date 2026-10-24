@@ -94,8 +94,9 @@ SimpleMediaBrowser/
     │       └── AudiobookProvider.ts # iTunes Search API client (no key required)
     │
     ├── store/                       # Redux Toolkit slices
-    │   ├── store.ts                 # configureStore, redux-persist (settings only), legacy-library reconciler, write gate
-    │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave
+    │   ├── store.ts                 # configureStore + redux-persist wiring (settings only); import-time side effects live here
+    │   ├── persistGuards.ts         # Pure, unit-testable guards used by store.ts: legacy-library capture, write gate, rehydrate-error guard
+    │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave (deps injectable)
     │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides, scan progress
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
@@ -211,22 +212,29 @@ redux-persist has bootstrapped:
    hydrate and no autosave, so nothing is overwritten; settings writes are
    allowed (the migration already happened earlier).
 
-Two guards in `store.ts` make this safe:
+Two guards, built in `store/persistGuards.ts` (pure and side-effect free, so
+they are unit-tested directly) and wired up in `store.ts`, make this safe:
 
 - **Legacy capture.** redux-persist's `autoMergeLevel1` merges every inbound
   key whatever the `whitelist`, so a custom `stateReconciler` strips
   `libraryReducer` from the inbound blob, stashes it for the migration
-  (`takeLegacyPersistedLibrary()`) and delegates the rest to `autoMergeLevel1`.
+  (`createLegacyLibraryCapture()` → `takeLegacyPersistedLibrary()`) and delegates the rest to `autoMergeLevel1`.
 - **Write gate.** After the first `REHYDRATE`, redux-persist writes the
   whitelisted keys as the *whole* new `persist:root` value, which is what
   drops the legacy library from it. `persistConfig.storage` is therefore a
-  wrapper whose `setItem` waits for `allowPersistWrites()` (called only once
-  the library is safely in the SQLite store). If `REHYDRATE` carries an `err`
-  (read failure, or redux-persist's 5 s timeout) a middleware blocks settings
+  wrapper (`createWriteGate`) whose `setItem` waits for `allowPersistWrites()`
+  (called only once the library is safely in the SQLite store). If `REHYDRATE`
+  carries an `err` (read failure, or redux-persist's 5 s timeout) a middleware
+  (`createRehydrateErrorGuard`) blocks settings
   writes for the rest of the session, since state is then defaults and the
   next write would overwrite the stored settings. An existing library store
   still loads and autosaves then, but the migration is skipped, since the
   unreadable `persist:root` may hold the only copy of the legacy library.
+
+`libraryPersistence.ts` keeps its startup logic in `runLibraryPersistence(deps)`,
+which takes the store, `LibraryStore`, gate functions and `Alert` as plain
+dependencies; `startLibraryPersistence()` builds the real ones lazily (so
+importing the module never creates the store) and is what `_layout.tsx` calls.
 
 Components read state via `react-redux`'s `useSelector`/`useDispatch` (typed
 wrappers in `hooks/useRedux.ts`) and the named selectors exported from each

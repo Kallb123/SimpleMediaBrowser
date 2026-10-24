@@ -1,5 +1,5 @@
-import { AppState } from 'react-native';
-import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
+import { AppState, type AppStateStatus } from 'react-native';
+import { openDatabaseAsync } from 'expo-sqlite';
 import type { IMediaLibrary, IMediaShow, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { logger } from '@/scripts/Logger';
@@ -94,21 +94,43 @@ const UPSERT_SHOW = 'INSERT INTO shows (name, json) VALUES (?, ?) ON CONFLICT(na
 const UPSERT_KV = 'INSERT INTO kv (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json';
 const UPSERT_META = 'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value';
 
+/** The statement-running part of expo-sqlite's `SQLiteDatabase` that {@link createExpoLibraryDb} relies on. */
+export interface SqliteTransaction {
+    runAsync(sql: string): Promise<unknown>;
+    runAsync(sql: string, params: (string | number | null)[]): Promise<unknown>;
+}
+
+/**
+ * The subset of expo-sqlite's `SQLiteDatabase` that {@link createExpoLibraryDb}
+ * uses, so the production SQL can also run on another driver (Jest runs it on
+ * `node:sqlite`; see `__testutils__/nodeSqlite.ts`).
+ */
+export interface SqliteDatabase {
+    execAsync(sql: string): Promise<void>;
+    getFirstAsync<T>(sql: string): Promise<T | null>;
+    getAllAsync<T>(sql: string): Promise<T[]>;
+    withExclusiveTransactionAsync(task: (txn: SqliteTransaction) => Promise<void>): Promise<void>;
+}
+
 /**
  * {@link LibraryDb} backed by expo-sqlite (`library.db` in its default
  * directory).  The database opens lazily on first use, and a failed open is
- * retried on the next call.
+ * retried on the next call.  `openDatabase` exists for tests; production uses
+ * expo-sqlite's `openDatabaseAsync`.
  *
  * Batches run in `withExclusiveTransactionAsync`, which uses a dedicated
  * connection: all statements must go through the `txn` it passes in, and an
  * error rolls everything back.  Rows are read through expo-sqlite's bundled
  * sqlite3 (JNI), not Android's CursorWindow, so there is no ~2 MB row limit.
  */
-export function createExpoLibraryDb(name: string = 'library.db'): LibraryDb {
-    let opening: Promise<SQLiteDatabase> | null = null;
+export function createExpoLibraryDb(
+    name: string = 'library.db',
+    openDatabase: (name: string) => Promise<SqliteDatabase> = openDatabaseAsync,
+): LibraryDb {
+    let opening: Promise<SqliteDatabase> | null = null;
     const open = () => {
         opening ??= (async () => {
-            const db = await openDatabaseAsync(name);
+            const db = await openDatabase(name);
             await db.execAsync(SCHEMA);
             return db;
         })().catch(e => {
@@ -162,6 +184,11 @@ interface Baseline {
 }
 
 type AutoSaveSource = { getState(): PersistedLibrary; subscribe(listener: () => void): () => void };
+
+/** The part of react-native's `AppState` the store uses; injectable for tests. */
+export type AppStateSource = {
+    addEventListener(type: 'change', listener: (state: AppStateStatus) => void): { remove(): void };
+};
 
 function parseJson<T>(what: string, text: string): T {
     try {
@@ -302,9 +329,10 @@ export class LibraryStore {
     /**
      * Begins incremental autosave.  Only valid after load() returned data or
      * writeAll() completed (it needs the baseline).  Throttled; also flushes
-     * when the app goes to the background.  Returns a stop function.
+     * when the app goes to the background (`appState` is injectable for tests).
+     * Returns a stop function.
      */
-    startAutoSave(source: AutoSaveSource): () => void {
+    startAutoSave(source: AutoSaveSource, appState: AppStateSource = AppState): () => void {
         if (!this._baseline) {
             throw new Error('LibraryStore.startAutoSave requires load() to return data or writeAll() to complete first');
         }
@@ -318,7 +346,7 @@ export class LibraryStore {
             }, AUTOSAVE_THROTTLE_MS);
         };
         const unsubscribe = source.subscribe(onChange);
-        const appStateSub = AppState.addEventListener('change', state => {
+        const appStateSub = appState.addEventListener('change', state => {
             if (state === 'background' || state === 'inactive') void this.flush();
         });
 

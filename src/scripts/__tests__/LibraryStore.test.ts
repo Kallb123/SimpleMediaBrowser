@@ -1,15 +1,17 @@
-import { AppState } from 'react-native';
+import type { AppStateStatus } from 'react-native';
 import {
   AUTOSAVE_THROTTLE_MS,
   EMPTY_PERSISTED_LIBRARY,
   LIBRARY_STORE_VERSION,
   LibraryStore,
   pickPersistedLibrary,
+  type AppStateSource,
   type LibraryBatch,
   type LibraryDb,
   type LibraryDbContents,
   type PersistedLibrary,
 } from '../LibraryStore';
+import { makeLibrary, makeSource, show } from '@/scripts/__testutils__/libraryFixtures';
 
 // Logger and expo-sqlite pull in native modules; the store under test only
 // needs the logger's surface and talks to an in-memory LibraryDb.
@@ -69,48 +71,6 @@ class FakeDb implements LibraryDb {
   }
 }
 
-const show = (title: string, extra: object = {}): any => ({
-  ids: { tvdb: null, imdb: null, tmdb: null },
-  title,
-  year: 2020,
-  poster: '',
-  seasons: { '1': { episodes: { '1': { path: `content://x/${title}/1.mkv` } } } },
-  ...extra,
-});
-
-const makeLibrary = (): PersistedLibrary => ({
-  mediaLibrary: {
-    'Bluey': show('Bluey'),
-    'AC/DC: Live': show('AC/DC: Live'),
-    'Amélie 日本語': show('Amélie 日本語'),
-    'Party 🎉🍿': show('Party 🎉🍿'),
-  },
-  movies: [{ name: 'Movie A', path: 'content://m/a.mkv' } as any],
-  audiobooks: [{ title: 'Book', folderKey: 'book', path: 'p', files: [], poster: '' } as any],
-  mediaOverrides: { 'show:Bluey': { title: 'Bluey!' } },
-  thumbnails: { 'content://m/a.mkv': 'file:///t/a.jpg' },
-});
-
-/** Minimal stand-in for a Redux store holding a PersistedLibrary. */
-function makeSource(initial: PersistedLibrary) {
-  let state = initial;
-  const listeners = new Set<() => void>();
-  return {
-    getState: () => state,
-    subscribe: (l: () => void) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    set(next: PersistedLibrary) {
-      state = next;
-      listeners.forEach(l => l());
-    },
-    get state() {
-      return state;
-    },
-  };
-}
-
 describe('pickPersistedLibrary', () => {
   it('strips transient and legacy fields', () => {
     const picked = pickPersistedLibrary({
@@ -144,23 +104,25 @@ describe('pickPersistedLibrary', () => {
 
 describe('LibraryStore', () => {
   let db: FakeDb;
-  let appStateHandler: ((state: string) => void) | undefined;
+  let appStateHandler: ((state: AppStateStatus) => void) | undefined;
   let appStateRemove: jest.Mock;
+  let appState: AppStateSource;
 
   beforeEach(() => {
     jest.useFakeTimers();
     db = new FakeDb();
     appStateRemove = jest.fn();
     appStateHandler = undefined;
-    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: (s: string) => void) => {
-      appStateHandler = handler;
-      return { remove: appStateRemove };
-    }) as any);
+    appState = {
+      addEventListener: (_type, handler) => {
+        appStateHandler = handler;
+        return { remove: appStateRemove };
+      },
+    };
   });
 
   afterEach(() => {
     jest.useRealTimers();
-    jest.restoreAllMocks();
   });
 
   /** A store with `makeLibrary()` already written, plus a source bound to it. */
@@ -169,7 +131,7 @@ describe('LibraryStore', () => {
     const lib = makeLibrary();
     await store.writeAll(lib);
     const source = makeSource(lib);
-    const stop = store.startAutoSave(source);
+    const stop = store.startAutoSave(source, appState);
     db.clearBatches();
     return { store, source, stop, lib };
   }
@@ -236,7 +198,7 @@ describe('LibraryStore', () => {
       expect(db.kv.size).toBe(0);
       expect(await new LibraryStore(db).load()).toBeNull();
       // No baseline was recorded, so autosave can't start on the failed write.
-      expect(() => store.startAutoSave(makeSource(makeLibrary()))).toThrow();
+      expect(() => store.startAutoSave(makeSource(makeLibrary()), appState)).toThrow();
     });
 
     it('treats a missing kv row as empty and recreates it on the next save', async () => {
@@ -246,7 +208,7 @@ describe('LibraryStore', () => {
       const store = new LibraryStore(db);
       const loaded = (await store.load())!;
       expect(loaded.movies).toEqual([]);
-      const stop = store.startAutoSave(makeSource(loaded));
+      const stop = store.startAutoSave(makeSource(loaded), appState);
       db.clearBatches();
       await store.flush();
       expect(db.batches).toHaveLength(1);
@@ -306,7 +268,7 @@ describe('LibraryStore', () => {
     });
 
     it('startAutoSave requires a baseline', () => {
-      expect(() => new LibraryStore(db).startAutoSave(makeSource(makeLibrary()))).toThrow();
+      expect(() => new LibraryStore(db).startAutoSave(makeSource(makeLibrary()), appState)).toThrow();
     });
   });
 
@@ -394,7 +356,7 @@ describe('LibraryStore', () => {
       const store = new LibraryStore(db);
       const loaded = (await store.load())!;
       const source = makeSource(loaded);
-      const stop = store.startAutoSave(source);
+      const stop = store.startAutoSave(source, appState);
       db.clearBatches();
       await store.flush();
       expect(db.batches).toEqual([]);
