@@ -502,8 +502,8 @@ etc.) can read it; iOS falls back to `Linking.openURL`.
 - **CI** (`.github/workflows/`):
   - `pre-build-test.yaml` — on PRs into `main`: `npx tsc --noEmit`,
     `npm run lint` (`expo lint` / `eslint-config-expo` flat config), and
-    `npx jest --ci --watchAll=false --passWithNoTests` (no test suite exists
-    yet — this passes vacuously; see AGENTS.md).
+    `npx jest --ci --watchAll=false --passWithNoTests` (suites live in
+    `__tests__/` folders next to the code; see AGENTS.md).
   - `build-apk.yml`, `eas-build.yaml` — produce release/EAS builds.
 - **TypeScript**: `strict: true`, path alias `@/*` → `src/*`,
   `@/assets/*` → `assets/*` (`tsconfig.json`).
@@ -531,8 +531,9 @@ Worth knowing before you go hunting for "why is there a duplicate of X":
   imports.
 - `App.tsx` at the repo root is an unused legacy RN entry point; the real
   entry is `expo-router/entry` per `package.json`'s `"main"` field.
-- There is currently no test suite (`jest --passWithNoTests` passes
-  vacuously in CI). If you add meaningful logic (especially in
-  `scripts/libraryUtils.ts`'s parsing/normalization helpers or
-  `scripts/providers/`), consider adding Jest coverage — `jest-expo` is
-  already configured as the preset.
+- Jest coverage lives in `__tests__/` folders next to the code
+  (`jest-expo` preset). Scan/enrichment logic is testable without the real
+  store: pure helpers are in `scripts/libraryUtils.ts`, and
+  `FileScanner`/`MetadataService` can run against a fake via
+  `setLibrarySink` (see `scripts/__tests__/MetadataService.test.ts`). Add
+  coverage alongside new parsing/normalization logic or provider parsing.

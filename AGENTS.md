@@ -48,13 +48,12 @@ npx expo start             # start the Metro dev server
 npm run android             # expo run:android
 npx tsc --noEmit            # type-check (must pass — CI runs this)
 npm run lint                 # expo lint (eslint-config-expo flat config)
-npx jest --ci --watchAll=false --passWithNoTests   # test suite (currently empty)
+npx jest --ci --watchAll=false --passWithNoTests   # test suite
 ```
 
 CI (`.github/workflows/pre-build-test.yaml`) runs typecheck, lint, and jest
 on every PR into `main`. Run all three locally before considering a change
-done — there is no test suite yet, so typecheck + lint are the main
-automated safety net.
+done.
 
 ## Coding conventions
 
@@ -86,12 +85,20 @@ automated safety net.
 
 ## Testing / verifying changes
 
-- There is no existing Jest test suite — `jest-expo` is configured as the
-  preset (`package.json`), so it's ready to use if you add coverage. Favor
-  adding tests for pure logic (`libraryUtils.ts`'s `normalizeShowName`,
-  `fuzzyKey`, `buildTmdbSearchQuery`; provider response parsing) over
-  UI/component tests, since the app is Android-only and hard to drive
-  headlessly.
+- Jest tests (preset `jest-expo`) live in `__tests__/` directories next to the
+  code they cover (`src/scripts/__tests__/`, `src/store/__tests__/`); shared
+  fixtures and helpers are in `src/scripts/__testutils__/`. Favor tests for
+  pure logic and Redux over UI/component tests, since the app is Android-only
+  and hard to drive headlessly.
+- Scanning and enrichment logic is testable without the real store:
+  `libraryUtils.ts` has no runtime imports, and `FileScanner` /
+  `MetadataService` / `scanProgressDispatcher` only talk to `librarySink`. In a
+  test, call `setLibrarySink(fakeSink)` (e.g. a `configureStore` built from the
+  real slice reducers, never `@/store/store`) and reset it with
+  `setLibrarySink(null)` in `afterEach`. See `MetadataService.test.ts` and
+  `FileScanner.test.ts` for the pattern, including the mocks needed to load
+  them (`expo-video`, `expo-image-manipulator`, `Logger`, the providers) and a
+  `global.fetch` that fails if anything reaches for the network.
 - UI/feature changes involving scanning, metadata enrichment, or playback
   can't be meaningfully verified by typecheck/lint alone — they touch SAF,
   native video APIs, and network providers that don't run in this
