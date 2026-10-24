@@ -16,7 +16,15 @@ import '@/store/wireServices';
 import { startLibraryPersistence } from '@/store/libraryPersistence';
 import { logger } from '@/scripts/Logger';
 import { EditModeProvider } from '@/contexts/EditModeContext';
-import { selectAppColorScheme } from '@/store/settingsReducer';
+import { BedtimeProvider } from '@/contexts/BedtimeContext';
+import {
+  selectAppColorScheme,
+  selectBedtimeAllowedTypes,
+  selectBedtimeEnabled,
+  selectBedtimeEnd,
+  selectBedtimeStart,
+} from '@/store/settingsReducer';
+import { bedtimeRestrictedSections, firstAllowedSection, isWithinBedtime, type BedtimeSection } from '@/utils/bedtime';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -95,13 +103,24 @@ function AppRoot() {
     } else {
       const storeState = store.getState() as { settingsReducer?: { defaultPage?: string } };
       const defaultPage = storeState.settingsReducer?.defaultPage ?? 'home';
-      const route = defaultPage === 'tv'
-        ? '/(drawer)/tv'
+      let section: BedtimeSection = defaultPage === 'tv'
+        ? 'tv'
         : defaultPage === 'movies'
-          ? '/(drawer)/movies'
+          ? 'movies'
           : defaultPage === 'audiobooks'
-            ? '/(drawer)/audiobooks'
-            : '/(drawer)/(home)';
+            ? 'audiobooks'
+            : '(home)';
+      // Bedtime mode: avoid a flash of a restricted default page. The drawer's guard is the safety net.
+      const state = store.getState();
+      if (selectBedtimeEnabled(state) && isWithinBedtime(new Date(), selectBedtimeStart(state), selectBedtimeEnd(state))) {
+        const restricted = bedtimeRestrictedSections(selectBedtimeAllowedTypes(state));
+        const fallback = firstAllowedSection(restricted);
+        if (restricted.has(section) && fallback) {
+          logger.log('Bedtime', `Default page ${section} is restricted at startup – routing to ${fallback} instead`);
+          section = fallback;
+        }
+      }
+      const route = `/(drawer)/${section}` as const;
       logger.log('RootLayout', `First-time setup already complete – redirecting to ${route}`);
       router.replace(route);
     }
@@ -113,31 +132,33 @@ function AppRoot() {
       <ThemeProvider value={effectiveScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <StatusBar style={effectiveScheme === 'dark' ? 'light' : 'dark'} />
         <EditModeProvider>
-          <Stack>
-            <Stack.Screen name="firsttime" options={{ headerShown: false }} />
-            <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
-            <Stack.Screen name="+not-found" />
-            <Stack.Screen
-              name="modal"
-              options={{
-                presentation: 'modal',
-              }}
-            />
-            <Stack.Screen
-              name="edititem"
-              options={{
-                presentation: 'modal',
-                title: 'Edit Item',
-              }}
-            />
-            <Stack.Screen
-              name="mergeshows"
-              options={{
-                presentation: 'modal',
-                title: 'Merge Shows',
-              }}
-            />
-          </Stack>
+          <BedtimeProvider>
+            <Stack>
+              <Stack.Screen name="firsttime" options={{ headerShown: false }} />
+              <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
+              <Stack.Screen name="+not-found" />
+              <Stack.Screen
+                name="modal"
+                options={{
+                  presentation: 'modal',
+                }}
+              />
+              <Stack.Screen
+                name="edititem"
+                options={{
+                  presentation: 'modal',
+                  title: 'Edit Item',
+                }}
+              />
+              <Stack.Screen
+                name="mergeshows"
+                options={{
+                  presentation: 'modal',
+                  title: 'Merge Shows',
+                }}
+              />
+            </Stack>
+          </BedtimeProvider>
         </EditModeProvider>
       </ThemeProvider>
     </KeyboardProvider>

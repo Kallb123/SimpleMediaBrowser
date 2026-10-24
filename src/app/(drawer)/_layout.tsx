@@ -1,32 +1,40 @@
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { Drawer } from 'expo-router/drawer';
+import { router, useSegments } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { DrawerContentScrollView, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
 import { CommonActions, DrawerActions, StackActions } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEditMode } from '@/contexts/EditModeContext';
-import { useDispatch, useSelector } from 'react-redux';
-import { selectPassword, selectMediaSources, selectRescanOnStartup, setPassword } from '@/store/settingsReducer';
+import { useBedtime } from '@/contexts/BedtimeContext';
+import { useSelector } from 'react-redux';
+import { selectPassword, selectMediaSources, selectRescanOnStartup } from '@/store/settingsReducer';
 import { useState, useEffect } from 'react';
-import { Alert, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedTextInput } from '@/components/ThemedTextInput';
+import { Alert, StyleSheet, View } from 'react-native';
+import { PasswordPromptModal } from '@/components/PasswordPromptModal';
 import { logger } from '@/scripts/Logger';
-import { computeRecoveryCode, recoveryChallengeText } from '@/scripts/PasswordRecovery';
+import { BEDTIME_SECTIONS, firstAllowedSection, type BedtimeSection } from '@/utils/bedtime';
 
-const MAIN_ROUTES = ['(home)', 'tv', 'movies', 'audiobooks'];
+const MAIN_ROUTES: string[] = [...BEDTIME_SECTIONS];
+
+type DrawerRoute = DrawerContentComponentProps['state']['routes'][number];
+
+/** What the shared password modal is asking for. */
+type PasswordPrompt =
+  | { kind: 'unlock' }
+  | { kind: 'bedtime'; route: DrawerRoute; title: string };
+
+function isBedtimeSection(name: string | undefined): name is BedtimeSection {
+  return BEDTIME_SECTIONS.some((s) => s === name);
+}
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { editMode, setEditMode, drawerUnlocked, setDrawerUnlocked } = useEditMode();
-  const dispatch = useDispatch();
+  const { restrictedSections, bedtimeEnd, liftBedtime, recheckBedtime } = useBedtime();
   const settingsPassword = useSelector(selectPassword);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [recoveryMode, setRecoveryMode] = useState(false);
-  const [recoveryInput, setRecoveryInput] = useState('');
-  const [recoveryError, setRecoveryError] = useState('');
+  // The prompt content outlives its visibility so the text doesn't change during the modal's fade-out.
+  const [prompt, setPrompt] = useState<PasswordPrompt>({ kind: 'unlock' });
+  const [promptVisible, setPromptVisible] = useState(false);
   const colorScheme = useColorScheme() ?? 'light';
 
   const currentRouteName = props.state.routes[props.state.index]?.name;
@@ -34,31 +42,23 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
   // Only the media sections go in the main list; the rest are behind the parent-mode unlock.
   const mainRoutes = props.state.routes.filter(r => MAIN_ROUTES.includes(r.name));
 
-  const resetPasswordModal = () => {
-    setShowPasswordModal(false);
-    setPasswordInput('');
-    setPasswordError('');
-    setRecoveryMode(false);
-    setRecoveryInput('');
-    setRecoveryError('');
-  };
-
   const handleUnlockPress = () => {
     if (!settingsPassword) {
       logger.log('Drawer', 'Drawer unlocked (no password set)');
       setDrawerUnlocked(true);
       return;
     }
-    setPasswordInput('');
-    setPasswordError('');
-    setShowPasswordModal(true);
+    setPrompt({ kind: 'unlock' });
+    setPromptVisible(true);
   };
 
   const handleLockPress = () => {
     logger.log('Drawer', 'Drawer locked by user');
     setDrawerUnlocked(false);
     setEditMode(false);
-    resetPasswordModal();
+    setPromptVisible(false);
+    // Locking re-arms bedtime if it was lifted; DrawerLayout's guard then moves us off a restricted section.
+    recheckBedtime();
     if (currentRouteName === 'logs') {
       props.navigation.navigate('(home)');
     }
@@ -83,44 +83,46 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     props.navigation.navigate('logs');
   };
 
-  const submitPassword = () => {
-    if (passwordInput === settingsPassword) {
-      logger.log('Drawer', 'Drawer password accepted – unlocked protected actions');
-      setDrawerUnlocked(true);
-      resetPasswordModal();
-    } else {
-      logger.warn('Drawer', 'Drawer password rejected');
-      setPasswordError('Incorrect password.');
+  const navigateToRoute = (route: DrawerRoute) => {
+    props.navigation.dispatch({
+      ...CommonActions.navigate(route),
+      target: props.state.key,
+    });
+  };
+
+  const unlockBedtimeSection = (route: DrawerRoute) => {
+    liftBedtime();
+    navigateToRoute(route);
+  };
+
+  const handleRestrictedPress = (route: DrawerRoute, title: string) => {
+    if (!settingsPassword) {
+      Alert.alert(
+        `${title} is locked`,
+        `Locked for bedtime until ${bedtimeEnd}. No settings password is set, so anyone can unlock it.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Unlock',
+            onPress: () => {
+              logger.log('Bedtime', `${title} unlocked for bedtime (no password set)`);
+              unlockBedtimeSection(route);
+            },
+          },
+        ],
+      );
+      return;
     }
+    setPrompt({ kind: 'bedtime', route, title });
+    setPromptVisible(true);
   };
 
-  const cancelPassword = () => {
-    resetPasswordModal();
-  };
-
-  const startRecovery = () => {
-    setPasswordError('');
-    setRecoveryInput('');
-    setRecoveryError('');
-    setRecoveryMode(true);
-  };
-
-  const cancelRecovery = () => {
-    setRecoveryMode(false);
-    setRecoveryInput('');
-    setRecoveryError('');
-  };
-
-  const submitRecovery = () => {
-    if (recoveryInput.trim() === computeRecoveryCode()) {
-      logger.log('Drawer', 'Settings password recovered via math challenge – password cleared');
-      dispatch(setPassword(null));
+  const handlePromptSuccess = () => {
+    setPromptVisible(false);
+    if (prompt.kind === 'unlock') {
       setDrawerUnlocked(true);
-      resetPasswordModal();
-      Alert.alert('Password cleared', 'The settings password has been removed. Set a new one from Settings if you want to lock it again.');
     } else {
-      logger.warn('Drawer', 'Settings password recovery code rejected');
-      setRecoveryError('Incorrect code.');
+      unlockBedtimeSection(prompt.route);
     }
   };
 
@@ -130,12 +132,17 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         const focused = route.name === currentRouteName;
         const { drawerLabel, title } = props.descriptors[route.key].options;
         const label = typeof drawerLabel === 'string' ? drawerLabel : (title ?? route.name);
+        const restricted = isBedtimeSection(route.name) && restrictedSections.has(route.name);
         // Each section is a stack of folder levels. Sections other than the current one are
         // always at their root (popToTopOnBlur), so only the current one can be deeper; its
         // entry then shows a back arrow, since tapping it returns to the section root.
         const nestedState = route.state;
         const isDeep = (nestedState?.index ?? 0) > 0;
         const onPress = () => {
+          if (restricted) {
+            handleRestrictedPress(route, title ?? route.name);
+            return;
+          }
           if (isDeep && nestedState?.key) {
             props.navigation.dispatch({ ...StackActions.popToTop(), target: nestedState.key });
           }
@@ -150,8 +157,13 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
             label={label}
             focused={focused}
             onPress={onPress}
-            icon={isDeep ? ({ color, size }) => <Ionicons name="arrow-back" color={color} size={size} /> : undefined}
-            accessibilityLabel={isDeep ? `Back to ${title ?? label}` : undefined}
+            icon={restricted
+              ? ({ color, size }) => <Ionicons name="bed" color={color} size={size} />
+              : isDeep ? ({ color, size }) => <Ionicons name="arrow-back" color={color} size={size} /> : undefined}
+            labelStyle={restricted ? styles.restrictedLabel : undefined}
+            accessibilityLabel={restricted
+              ? `${title ?? label}, locked for bedtime`
+              : isDeep ? `Back to ${title ?? label}` : undefined}
           />
         );
       })}
@@ -190,83 +202,15 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         />
       )}
 
-      {/* Password prompt modal */}
-      <Modal
-        visible={showPasswordModal}
-        transparent
-        animationType="fade"
-        onRequestClose={cancelPassword}
-      >
-        {/* RN's Modal renders in its own native window on Android, separate from the
-            app-root KeyboardProvider's window, so keyboard insets there need their own
-            nested KeyboardProvider rather than relying on the root one. */}
-        <KeyboardProvider>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior="padding" automaticOffset>
-          <View style={[styles.modalBox, { backgroundColor: colorScheme === 'dark' ? '#1E2022' : '#fff' }]}>
-            {recoveryMode ? (
-              <>
-                <ThemedText type="subtitle" style={styles.modalTitle}>Forgotten Password Recovery</ThemedText>
-                <ThemedText style={styles.modalSubtitle}>{recoveryChallengeText()}</ThemedText>
-                <ThemedTextInput
-                  value={recoveryInput}
-                  onChangeText={(v) => {
-                    setRecoveryInput(v);
-                    setRecoveryError('');
-                  }}
-                  placeholder="6-digit code"
-                  keyboardType="number-pad"
-                  style={styles.modalInput}
-                  autoFocus
-                  onSubmitEditing={submitRecovery}
-                />
-                {recoveryError !== '' && (
-                  <ThemedText style={styles.errorText}>{recoveryError}</ThemedText>
-                )}
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity onPress={cancelRecovery} style={[styles.modalButton, { borderColor: colorScheme === 'dark' ? '#555' : '#CCC' }]}>
-                    <ThemedText>Back</ThemedText>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={submitRecovery} style={[styles.modalButton, styles.modalButtonPrimary]}>
-                    <ThemedText style={styles.modalButtonPrimaryText}>Submit</ThemedText>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <>
-                <ThemedText type="subtitle" style={styles.modalTitle}>Enter Settings Password</ThemedText>
-                <ThemedText style={styles.modalSubtitle}>Unlock protected app actions</ThemedText>
-                <ThemedTextInput
-                  value={passwordInput}
-                  onChangeText={(v) => {
-                    setPasswordInput(v);
-                    setPasswordError('');
-                  }}
-                  placeholder="Password"
-                  secureTextEntry
-                  style={styles.modalInput}
-                  autoFocus
-                  onSubmitEditing={submitPassword}
-                />
-                {passwordError !== '' && (
-                  <ThemedText style={styles.errorText}>{passwordError}</ThemedText>
-                )}
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity onPress={cancelPassword} style={[styles.modalButton, { borderColor: colorScheme === 'dark' ? '#555' : '#CCC' }]}>
-                    <ThemedText>Cancel</ThemedText>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={submitPassword} style={[styles.modalButton, styles.modalButtonPrimary]}>
-                    <ThemedText style={styles.modalButtonPrimaryText}>Unlock</ThemedText>
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity onPress={startRecovery}>
-                  <ThemedText style={styles.forgotPasswordText}>Forgot password?</ThemedText>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </KeyboardAvoidingView>
-        </KeyboardProvider>
-      </Modal>
+      <PasswordPromptModal
+        visible={promptVisible}
+        title={prompt.kind === 'bedtime' ? 'Bedtime' : 'Enter Settings Password'}
+        subtitle={prompt.kind === 'bedtime'
+          ? `${prompt.title} is locked until ${bedtimeEnd}. Enter the settings password to unlock.`
+          : 'Unlock protected app actions'}
+        onSuccess={handlePromptSuccess}
+        onCancel={() => setPromptVisible(false)}
+      />
     </DrawerContentScrollView>
   );
 }
@@ -276,6 +220,24 @@ export default function DrawerLayout() {
     const theme = (colorScheme ?? 'light') as 'light' | 'dark';
     const mediaSources = useSelector(selectMediaSources);
     const rescanOnStartup = useSelector(selectRescanOnStartup);
+    const { restrictedSections } = useBedtime();
+    // Cast: the typed-routes segment union doesn't include arbitrary section names.
+    const segments = useSegments() as string[];
+    const currentSection = segments[0] === '(drawer)' ? segments[1] : undefined;
+
+    // Bedtime guard: whenever the visible media section becomes restricted (foreground entry
+    // check, the Lock button, or the clock passing the bedtime start), move to an allowed one.
+    // The target is never restricted, so this cannot loop.
+    useEffect(() => {
+      if (!isBedtimeSection(currentSection) || !restrictedSections.has(currentSection)) return;
+      const target = firstAllowedSection(restrictedSections);
+      if (!target) {
+        logger.warn('Bedtime', `${currentSection} is restricted but no section is allowed – not redirecting`);
+        return;
+      }
+      logger.log('Bedtime', `${currentSection} is locked for bedtime – redirecting to ${target}`);
+      router.replace(target === '(home)' ? '/(drawer)/(home)' : `/(drawer)/${target}`);
+    }, [currentSection, restrictedSections]);
 
     useEffect(() => {
       if (!rescanOnStartup) {
@@ -384,6 +346,9 @@ const styles = StyleSheet.create({
     color: '#E55',
     fontWeight: '700',
   },
+  restrictedLabel: {
+    opacity: 0.6,
+  },
   unlockLabel: {
     color: '#0a7ea4',
     fontWeight: '700',
@@ -391,59 +356,5 @@ const styles = StyleSheet.create({
   lockLabel: {
     color: '#E55',
     fontWeight: '700',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalBox: {
-    borderRadius: 12,
-    padding: 24,
-    width: '80%',
-    gap: 12,
-  },
-  modalTitle: {
-    textAlign: 'center',
-  },
-  modalSubtitle: {
-    textAlign: 'center',
-    opacity: 0.7,
-  },
-  modalInput: {
-    flex: 0,
-    paddingVertical: 12,
-    minHeight: 44,
-  },
-  errorText: {
-    color: '#E55',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  forgotPasswordText: {
-    color: '#0a7ea4',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  modalButton: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  modalButtonPrimary: {
-    backgroundColor: '#0a7ea4',
-    borderColor: '#0a7ea4',
-  },
-  modalButtonPrimaryText: {
-    color: '#fff',
-    fontWeight: '600',
   },
 });

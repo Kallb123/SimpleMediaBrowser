@@ -110,6 +110,7 @@ SimpleMediaBrowser/
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
     ├── contexts/EditModeContext.tsx # React context: edit-mode on/off, drawer lock state, multi-select for edit mode
+    ├── contexts/BedtimeContext.tsx  # React context: bedtime-mode state (active / lifted) and the drawer sections it locks
     ├── constants/                   # Colors.ts, theme.ts (spacing/typography tokens), StorageKeys.ts (AsyncStorage keys)
     ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks), useThumbnailVersion
     ├── utils/viewScale.ts           # Maps the user's view-scale setting to a grid column count
@@ -553,6 +554,23 @@ lets the user override title/poster/provider match for a single item or
 rematch it against a provider; `mergeshows.tsx` handles the case where two
 distinct show folders should be one library entry but weren't auto-merged
 by the fuzzy-key pass.
+
+**Bedtime mode.** An optional second restriction on top of the parent lock:
+during a configured time window (`bedtimeEnabled`/`bedtimeStart`/`bedtimeEnd`/
+`bedtimeAllowedTypes` in settings; pure helpers in `utils/bedtime.ts`) only the
+allowed libraries (default: audiobooks) are reachable. `BedtimeContext`
+(mounted inside `EditModeProvider`) exposes `restrictedSections`, which is empty
+unless bedtime is active and neither lifted nor `drawerUnlocked`. Bedtime is
+(re)evaluated at an *entry check* — app mount, return to the foreground, a
+bedtime setting change, and the drawer's Lock button (`recheckBedtime`) — and
+entry checks also clear a previous lift. A 60 s interval re-evaluates the clock
+only (it does not clear a lift), so an app left open across the start time still
+locks. In the drawer, restricted sections show a bed icon; tapping one opens
+`PasswordPromptModal` (the shared password + recovery modal, also used by
+Unlock) and on success calls `liftBedtime()` and navigates there. `DrawerLayout`
+watches `useSegments()` and `router.replace`s off any restricted section to the
+first allowed one, and `firstTimeSetupCheck` in `app/_layout.tsx` does the same
+for the default page at startup to avoid a flash of a restricted screen.
 
 ## 11. Logging & Diagnostics (`Logger.ts`)
 
