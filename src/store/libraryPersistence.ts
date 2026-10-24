@@ -16,7 +16,7 @@ const TAG = 'LibraryPersistence';
 let started: Promise<void> | undefined;
 
 /**
- * Loads the library from the file store into Redux and starts autosaving it,
+ * Loads the library from the SQLite library store into Redux and starts autosaving it,
  * migrating it out of the legacy `persist:root` blob on the first launch after
  * upgrading. Runs once per JS runtime (the promise is memoised) and never
  * rejects, so callers can await it before routing.
@@ -37,7 +37,7 @@ async function run(): Promise<void> {
   await waitForPersistBootstrap();
 
   // When settings could not be read, store.ts has already blocked writes to
-  // `persist:root` for this session. The file store doesn't depend on it, so an
+  // `persist:root` for this session. The SQLite store doesn't depend on it, so an
   // existing library still loads and autosaves; only the migration is skipped
   // (see below), since persist:root may still hold the only copy of the legacy library.
   const settingsFailed = didPersistRehydrateFail();
@@ -56,7 +56,7 @@ async function run(): Promise<void> {
   } catch (e) {
     // The store exists but can't be read (corruption / newer version). Don't
     // hydrate or autosave, otherwise the next save would overwrite what's there.
-    // Settings writes are safe: a manifest existing means migration already ran.
+    // Settings writes are safe: the store being initialised means migration already ran.
     takeLegacyPersistedLibrary();
     logger.error(TAG, `Library store could not be loaded after ${Date.now() - t0}ms; library will not be saved this session`, e);
     Alert.alert(
@@ -73,12 +73,12 @@ async function run(): Promise<void> {
     store.dispatch(hydrateLibrary(stored));
     startAutoSave(libraryStore);
     allowPersistWrites();
-    logger.log(TAG, `Loaded library from file store in ${Date.now() - t0}ms (${summary(stored)})`);
+    logger.log(TAG, `Loaded library from SQLite store in ${Date.now() - t0}ms (${summary(stored)})`);
     return;
   }
 
   if (settingsFailed) {
-    // Initialising the file store now would mark the migration as done with an
+    // Initialising the SQLite store now would mark the migration as done with an
     // empty library while the real one may still be in the unreadable persist:root.
     logger.warn(TAG, 'No library store yet; skipping migration until settings can be read');
     return;

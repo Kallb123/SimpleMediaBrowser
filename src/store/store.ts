@@ -28,7 +28,7 @@ const PERSIST_THROTTLE_MS = 1000;
 // ---------------------------------------------------------------------------
 // Legacy library capture
 // ---------------------------------------------------------------------------
-// Installs from before the file store have `libraryReducer` inside
+// Installs from before the SQLite library store have `libraryReducer` inside
 // `persist:root`. redux-persist's autoMergeLevel1 merges *every* key of the
 // inbound blob into state regardless of `whitelist`, so without intervention a
 // stale library would be merged on every rehydrate until the blob is rewritten.
@@ -66,7 +66,7 @@ export const legacyLibraryReconciler = (
 // has an empty `lastState`, so it queues every whitelisted key plus `_persist`
 // and writes them as the *entire* new `persist:root` value. That first write
 // is what drops the legacy `libraryReducer` from the blob, so it must not
-// happen until the library is safely in the file store. For the same reason a
+// happen until the library is safely in the SQLite library store. For the same reason a
 // failed read must never be followed by a write: redux-persist rehydrates with
 // `undefined` on a read error or its 5 s timeout, and the next write would
 // replace the stored settings (sources, API keys, password, ...) with defaults.

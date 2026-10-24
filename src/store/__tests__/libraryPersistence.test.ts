@@ -55,7 +55,7 @@ const LEGACY: any = {
   audiobooks: [{ folderKey: 'a1' }],
   mediaOverrides: { 'show:Bluey': { title: 'Bluey!' } },
   thumbnails: { m1: 'file://t.jpg' },
-  // Legacy transient fields that must not be carried into the file store.
+  // Legacy transient fields that must not be carried into the library store.
   isScanning: true,
   scanProgress: { phase: 'collecting' },
   scanList: ['x'],

@@ -4,54 +4,68 @@ import {
   EMPTY_PERSISTED_LIBRARY,
   LIBRARY_STORE_VERSION,
   LibraryStore,
-  fnv1a32Hex,
   pickPersistedLibrary,
-  type LibraryFs,
+  type LibraryBatch,
+  type LibraryDb,
+  type LibraryDbContents,
   type PersistedLibrary,
 } from '../LibraryStore';
 
-// Logger and expo-file-system pull in native modules; the store under test only
-// needs the logger's surface and talks to an in-memory LibraryFs.
+// Logger and expo-sqlite pull in native modules; the store under test only
+// needs the logger's surface and talks to an in-memory LibraryDb.
 jest.mock('@/scripts/Logger', () => ({
   logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
-jest.mock('expo-file-system', () => ({
-  Directory: class {},
-  File: class {},
-  Paths: { document: 'file:///doc/' },
-}));
+jest.mock('expo-sqlite', () => ({ openDatabaseAsync: jest.fn() }));
 
-type Op = { op: 'write' | 'remove'; path: string };
+/**
+ * In-memory LibraryDb.  Each batch is applied to a copy and swapped in only if
+ * it succeeds, mimicking a transaction; it records committed batches and can
+ * inject failures.
+ */
+class FakeDb implements LibraryDb {
+  version: string | null = null;
+  shows = new Map<string, string>();
+  kv = new Map<string, string>();
+  /** Batches that were committed, in order. */
+  batches: LibraryBatch[] = [];
+  /** Throw (before committing anything) for batches this returns true for. */
+  failWhen: (batch: LibraryBatch) => boolean = () => false;
+  /** Awaited at the start of every write; lets a test park a save. */
+  beforeWrite: () => Promise<void> = async () => {};
 
-/** In-memory LibraryFs that records mutating operations and can inject write failures. */
-class FakeFs implements LibraryFs {
-  files = new Map<string, string>();
-  ops: Op[] = [];
-  failWrite: (path: string) => boolean = () => false;
+  async readAll(): Promise<LibraryDbContents | null> {
+    if (this.version === null) return null;
+    return {
+      version: this.version,
+      shows: [...this.shows].map(([name, json]) => ({ name, json })),
+      kv: [...this.kv].map(([key, json]) => ({ key, json })),
+    };
+  }
 
-  async read(path: string) {
-    return this.files.get(path) ?? null;
+  async write(batch: LibraryBatch): Promise<void> {
+    await this.beforeWrite();
+    const shows = new Map(this.shows);
+    const kv = new Map(this.kv);
+    let version = this.version;
+    if (batch.clearShows) shows.clear();
+    batch.deleteShows.forEach(name => shows.delete(name));
+    batch.putShows.forEach(({ name, json }) => shows.set(name, json));
+    batch.putKv.forEach(({ key, json }) => kv.set(key, json));
+    if (batch.version !== undefined) version = batch.version;
+    // Everything is staged; fail here to prove nothing leaks out of a failed transaction.
+    if (this.failWhen(batch)) throw new Error('injected write failure');
+    this.shows = shows;
+    this.kv = kv;
+    this.version = version;
+    this.batches.push(batch);
   }
-  async write(path: string, contents: string) {
-    if (this.failWrite(path)) throw new Error(`injected write failure: ${path}`);
-    this.ops.push({ op: 'write', path });
-    this.files.set(path, contents);
+
+  clearBatches() {
+    this.batches = [];
   }
-  async remove(path: string) {
-    this.ops.push({ op: 'remove', path });
-    this.files.delete(path);
-  }
-  async list(dir: string) {
-    const prefix = dir ? `${dir}/` : '';
-    return [...this.files.keys()]
-      .filter(p => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'))
-      .map(p => p.slice(prefix.length));
-  }
-  clearOps() {
-    this.ops = [];
-  }
-  paths(kind?: Op['op']) {
-    return this.ops.filter(o => !kind || o.op === kind).map(o => o.path);
+  showJson(name: string) {
+    return JSON.parse(this.shows.get(name)!);
   }
 }
 
@@ -97,8 +111,6 @@ function makeSource(initial: PersistedLibrary) {
   };
 }
 
-const manifestOf = (fs: FakeFs) => JSON.parse(fs.files.get('manifest.json')!);
-
 describe('pickPersistedLibrary', () => {
   it('strips transient and legacy fields', () => {
     const picked = pickPersistedLibrary({
@@ -131,13 +143,13 @@ describe('pickPersistedLibrary', () => {
 });
 
 describe('LibraryStore', () => {
-  let fs: FakeFs;
+  let db: FakeDb;
   let appStateHandler: ((state: string) => void) | undefined;
   let appStateRemove: jest.Mock;
 
   beforeEach(() => {
     jest.useFakeTimers();
-    fs = new FakeFs();
+    db = new FakeDb();
     appStateRemove = jest.fn();
     appStateHandler = undefined;
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: (s: string) => void) => {
@@ -153,125 +165,148 @@ describe('LibraryStore', () => {
 
   /** A store with `makeLibrary()` already written, plus a source bound to it. */
   async function started() {
-    const store = new LibraryStore(fs);
+    const store = new LibraryStore(db);
     const lib = makeLibrary();
     await store.writeAll(lib);
     const source = makeSource(lib);
     const stop = store.startAutoSave(source);
-    fs.clearOps();
+    db.clearBatches();
     return { store, source, stop, lib };
   }
 
+  const names = (batch: LibraryBatch) => batch.putShows.map(s => s.name);
+
   describe('load / writeAll', () => {
-    it('load() on an empty fs returns null', async () => {
-      expect(await new LibraryStore(fs).load()).toBeNull();
+    it('load() on an uninitialised db returns null', async () => {
+      expect(await new LibraryStore(db).load()).toBeNull();
     });
 
-    it('round-trips through a fresh store on the same fs', async () => {
+    it('round-trips through a fresh store on the same db', async () => {
       const lib = makeLibrary();
-      await new LibraryStore(fs).writeAll(lib);
-      const loaded = await new LibraryStore(fs).load();
+      await new LibraryStore(db).writeAll(lib);
+      const loaded = await new LibraryStore(db).load();
       expect(loaded).toEqual(lib);
       expect(Object.keys(loaded!.mediaLibrary)).toEqual(Object.keys(lib.mediaLibrary));
     });
 
+    it('stores show names verbatim (slashes, quotes, unicode, emoji)', async () => {
+      const odd = ['a/b\\c', `it's "quoted"`, 'Amélie 日本語', 'Party 🎉🍿', '../../etc', "x'; DROP TABLE shows;--", 'constructor'];
+      const lib: PersistedLibrary = {
+        ...EMPTY_PERSISTED_LIBRARY,
+        mediaLibrary: Object.fromEntries(odd.map(n => [n, show(n)])),
+      };
+      await new LibraryStore(db).writeAll(lib);
+      expect([...db.shows.keys()]).toEqual(odd);
+      expect(await new LibraryStore(db).load()).toEqual(lib);
+    });
+
     it('round-trips an empty library', async () => {
-      await new LibraryStore(fs).writeAll(EMPTY_PERSISTED_LIBRARY);
-      expect(await new LibraryStore(fs).load()).toEqual(EMPTY_PERSISTED_LIBRARY);
+      await new LibraryStore(db).writeAll(EMPTY_PERSISTED_LIBRARY);
+      expect(await new LibraryStore(db).load()).toEqual(EMPTY_PERSISTED_LIBRARY);
     });
 
-    it('never uses raw show names in shard paths', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      for (const file of Object.values<string>(manifestOf(fs).shows)) {
-        expect(file).toMatch(/^shows\/[0-9a-f]{8}\.json$/);
-      }
-    });
-
-    it('writes the manifest last', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      const writes = fs.paths('write');
-      expect(writes[writes.length - 1]).toBe('manifest.json');
-      expect(writes.filter(p => p === 'manifest.json')).toHaveLength(1);
-      expect(writes).toHaveLength(4 + 4 + 1);
-    });
-
-    it('removes orphaned shard files after writeAll and after load', async () => {
-      fs.files.set('shows/deadbeef.json', '{}');
-      const store = new LibraryStore(fs);
-      await store.writeAll(makeLibrary());
-      expect(fs.files.has('shows/deadbeef.json')).toBe(false);
-
-      fs.files.set('shows/cafebabe.json.tmp', 'partial');
-      await new LibraryStore(fs).load();
-      expect(fs.files.has('shows/cafebabe.json.tmp')).toBe(false);
-      expect(fs.files.size).toBe(1 + 4 + 4);
-    });
-
-    it('treats a missing top-level file as empty and recreates it on the next save', async () => {
+    it('writeAll is a single batch that includes everything and the version marker', async () => {
       const lib = makeLibrary();
-      await new LibraryStore(fs).writeAll(lib);
-      fs.files.delete('movies.json');
+      await new LibraryStore(db).writeAll(lib);
+      expect(db.batches).toHaveLength(1);
+      const [batch] = db.batches;
+      expect(batch.version).toBe(String(LIBRARY_STORE_VERSION));
+      expect(batch.clearShows).toBe(true);
+      expect(names(batch)).toEqual(Object.keys(lib.mediaLibrary));
+      expect(batch.putKv.map(k => k.key).sort()).toEqual(['audiobooks', 'mediaOverrides', 'movies', 'thumbnails']);
+    });
 
-      const store = new LibraryStore(fs);
+    it('writeAll replaces previous contents', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      const next: PersistedLibrary = {
+        ...EMPTY_PERSISTED_LIBRARY,
+        mediaLibrary: { Bluey: show('Bluey', { year: 1 }), 'New Show': show('New Show') },
+      };
+      await new LibraryStore(db).writeAll(next);
+      expect([...db.shows.keys()].sort()).toEqual(['Bluey', 'New Show']);
+      expect(await new LibraryStore(db).load()).toEqual(next);
+    });
+
+    it('writeAll failure rejects, commits nothing and leaves the store uninitialised', async () => {
+      db.failWhen = () => true;
+      const store = new LibraryStore(db);
+      await expect(store.writeAll(makeLibrary())).rejects.toThrow(/injected/);
+      expect(db.version).toBeNull();
+      expect(db.shows.size).toBe(0);
+      expect(db.kv.size).toBe(0);
+      expect(await new LibraryStore(db).load()).toBeNull();
+      // No baseline was recorded, so autosave can't start on the failed write.
+      expect(() => store.startAutoSave(makeSource(makeLibrary()))).toThrow();
+    });
+
+    it('treats a missing kv row as empty and recreates it on the next save', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.delete('movies');
+
+      const store = new LibraryStore(db);
       const loaded = (await store.load())!;
       expect(loaded.movies).toEqual([]);
       const stop = store.startAutoSave(makeSource(loaded));
-      fs.clearOps();
+      db.clearBatches();
       await store.flush();
-      expect(fs.paths('write')).toEqual(['movies.json']);
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['movies']);
+      expect(db.batches[0].putShows).toEqual([]);
       stop();
     });
 
-    it('throws when a manifest-listed shard is missing', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      fs.files.delete(manifestOf(fs).shows['Bluey']);
-      await expect(new LibraryStore(fs).load()).rejects.toThrow(/missing/);
+    it('throws when a show row is corrupt', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.shows.set('Bluey', '{"title": "Blu');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/not valid JSON/);
     });
 
-    it('throws when a shard is corrupt', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      fs.files.set(manifestOf(fs).shows['Bluey'], '{"name": "Blu');
-      await expect(new LibraryStore(fs).load()).rejects.toThrow(/not valid JSON/);
+    it('throws when a show row is not an object', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.shows.set('Bluey', '[1]');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
     });
 
-    it('throws when a shard holds a different show than the manifest says', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      const { shows } = manifestOf(fs);
-      fs.files.set(shows['Bluey'], fs.files.get(shows['Party 🎉🍿'])!);
-      await expect(new LibraryStore(fs).load()).rejects.toThrow(/does not contain/);
+    it('throws when a kv row is corrupt', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.set('mediaOverrides', 'nope');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/not valid JSON/);
     });
 
-    it('throws when a top-level file is corrupt', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      fs.files.set('overrides.json', 'nope');
-      await expect(new LibraryStore(fs).load()).rejects.toThrow();
+    it('throws when a kv row has the wrong shape', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.set('movies', '{}');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
+      db.kv.set('movies', '[]');
+      db.kv.set('thumbnails', '[]');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
+      db.kv.set('thumbnails', 'null');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
     });
 
-    it('throws on a corrupt manifest', async () => {
-      fs.files.set('manifest.json', '{');
-      await expect(new LibraryStore(fs).load()).rejects.toThrow();
+    it('throws on an invalid version', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.version = 'abc';
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/invalid version/);
     });
 
-    it('throws when the manifest version is newer than supported, without deleting anything', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      const manifest = manifestOf(fs);
-      fs.files.set('manifest.json', JSON.stringify({ ...manifest, version: LIBRARY_STORE_VERSION + 1 }));
-      fs.clearOps();
-      await expect(new LibraryStore(fs).load()).rejects.toThrow(/newer than supported/);
-      expect(fs.ops).toEqual([]);
+    it('throws when the version is newer than supported, without writing anything', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.version = String(LIBRARY_STORE_VERSION + 1);
+      db.clearBatches();
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/newer than supported/);
+      expect(db.batches).toEqual([]);
     });
 
-    it('does not delete orphans when load fails', async () => {
-      await new LibraryStore(fs).writeAll(makeLibrary());
-      fs.files.set('shows/deadbeef.json', '{}');
-      fs.files.delete(manifestOf(fs).shows['Bluey']);
-      fs.clearOps();
-      await expect(new LibraryStore(fs).load()).rejects.toThrow();
-      expect(fs.paths('remove')).toEqual([]);
+    it('propagates database read errors', async () => {
+      db.readAll = async () => {
+        throw new Error('disk I/O error');
+      };
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/disk I\/O/);
     });
 
     it('startAutoSave requires a baseline', () => {
-      expect(() => new LibraryStore(fs).startAutoSave(makeSource(makeLibrary()))).toThrow();
+      expect(() => new LibraryStore(db).startAutoSave(makeSource(makeLibrary()))).toThrow();
     });
   });
 
@@ -281,55 +316,62 @@ describe('LibraryStore', () => {
       source.set({ ...source.state }); // new wrapper object, same field references
       await jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS * 3);
       await store.flush();
-      expect(fs.ops).toEqual([]);
+      expect(db.batches).toEqual([]);
       stop();
     });
 
-    it('writes only the changed show shard', async () => {
+    it('writes only the changed show', async () => {
       const { store, source, lib, stop } = await started();
-      const file = manifestOf(fs).shows['Bluey'];
       source.set({
         ...lib,
         mediaLibrary: { ...lib.mediaLibrary, Bluey: show('Bluey', { year: 1999 }) },
       });
       await store.flush();
-      expect(fs.ops).toEqual([{ op: 'write', path: file }]);
-      expect(JSON.parse(fs.files.get(file)!).show.year).toBe(1999);
+      expect(db.batches).toEqual([{ putShows: [{ name: 'Bluey', json: JSON.stringify(show('Bluey', { year: 1999 })) }], deleteShows: [], putKv: [] }]);
+      expect(db.showJson('Bluey').year).toBe(1999);
       stop();
     });
 
-    it('writes only a top-level file whose reference changed', async () => {
-      const { store, source, lib, stop } = await started();
-      source.set({ ...lib, thumbnails: { ...lib.thumbnails, 'content://m/b.mkv': 'file:///t/b.jpg' } });
-      await store.flush();
-      expect(fs.ops).toEqual([{ op: 'write', path: 'thumbnails.json' }]);
-      stop();
-    });
-
-    it('writes a new show shard before the manifest', async () => {
+    it('writes an added show', async () => {
       const { store, source, lib, stop } = await started();
       source.set({ ...lib, mediaLibrary: { ...lib.mediaLibrary, 'New Show': show('New Show') } });
       await store.flush();
-      const writes = fs.paths('write');
-      expect(writes).toHaveLength(2);
-      expect(writes[0]).toMatch(/^shows\//);
-      expect(writes[1]).toBe('manifest.json');
-      expect(manifestOf(fs).shows['New Show']).toBe(writes[0]);
-      expect(fs.paths('remove')).toEqual([]);
+      expect(db.batches).toHaveLength(1);
+      expect(names(db.batches[0])).toEqual(['New Show']);
+      expect(db.batches[0].deleteShows).toEqual([]);
+      expect(db.shows.has('New Show')).toBe(true);
       stop();
     });
 
-    it('writes the manifest before removing a deleted show shard', async () => {
+    it('deletes a removed show', async () => {
       const { store, source, lib, stop } = await started();
-      const file = manifestOf(fs).shows['Bluey'];
       const { Bluey, ...rest } = lib.mediaLibrary;
       source.set({ ...lib, mediaLibrary: rest });
       await store.flush();
-      expect(fs.ops).toEqual([
-        { op: 'write', path: 'manifest.json' },
-        { op: 'remove', path: file },
-      ]);
-      expect(manifestOf(fs).shows).not.toHaveProperty('Bluey');
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putShows).toEqual([]);
+      expect(db.batches[0].deleteShows).toEqual(['Bluey']);
+      expect(db.shows.has('Bluey')).toBe(false);
+      stop();
+    });
+
+    it('only writes the kv key whose reference changed', async () => {
+      const { store, source, lib, stop } = await started();
+      source.set({ ...lib, thumbnails: { ...lib.thumbnails, 'content://m/b.mkv': 'file:///t/b.jpg' } });
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putShows).toEqual([]);
+      expect(db.batches[0].deleteShows).toEqual([]);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['thumbnails']);
+      stop();
+    });
+
+    it('does not mark the store initialised again or clear shows', async () => {
+      const { store, source, lib, stop } = await started();
+      source.set({ ...lib, movies: [] });
+      await store.flush();
+      expect(db.batches[0].version).toBeUndefined();
+      expect(db.batches[0].clearShows).toBeUndefined();
       stop();
     });
 
@@ -343,7 +385,24 @@ describe('LibraryStore', () => {
       };
       source.set(next);
       await store.flush();
-      expect(await new LibraryStore(fs).load()).toEqual(next);
+      expect(await new LibraryStore(db).load()).toEqual(next);
+      stop();
+    });
+
+    it('saves after a load use the loaded shows as the baseline', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      const store = new LibraryStore(db);
+      const loaded = (await store.load())!;
+      const source = makeSource(loaded);
+      const stop = store.startAutoSave(source);
+      db.clearBatches();
+      await store.flush();
+      expect(db.batches).toEqual([]);
+
+      source.set({ ...loaded, mediaLibrary: { ...loaded.mediaLibrary, Bluey: show('Bluey', { year: 3 }) } });
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(names(db.batches[0])).toEqual(['Bluey']);
       stop();
     });
   });
@@ -358,25 +417,25 @@ describe('LibraryStore', () => {
       await jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS - 100);
       change(2);
       change(3);
-      expect(fs.ops).toEqual([]);
+      expect(db.batches).toEqual([]);
 
       await jest.advanceTimersByTimeAsync(100);
-      expect(fs.paths('write')).toHaveLength(1);
-      expect(JSON.parse(fs.files.get(manifestOf(fs).shows['Bluey'])!).show.year).toBe(3);
+      expect(db.batches).toHaveLength(1);
+      expect(db.showJson('Bluey').year).toBe(3);
 
       await jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS * 3);
-      expect(fs.paths('write')).toHaveLength(1);
+      expect(db.batches).toHaveLength(1);
       stop();
     });
 
     it('flush() writes immediately and cancels the pending timer', async () => {
       const { store, source, lib, stop } = await started();
       source.set({ ...lib, movies: [] });
-      expect(fs.ops).toEqual([]);
+      expect(db.batches).toEqual([]);
       await store.flush();
-      expect(fs.paths('write')).toEqual(['movies.json']);
+      expect(db.batches).toHaveLength(1);
       await jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS * 3);
-      expect(fs.paths('write')).toEqual(['movies.json']);
+      expect(db.batches).toHaveLength(1);
       stop();
     });
 
@@ -385,7 +444,19 @@ describe('LibraryStore', () => {
       source.set({ ...lib, movies: [] });
       appStateHandler!('background');
       await jest.advanceTimersByTimeAsync(0);
-      expect(fs.paths('write')).toEqual(['movies.json']);
+      expect(db.batches).toHaveLength(1);
+      stop();
+    });
+
+    it('flushes when the app becomes inactive, but not when it becomes active', async () => {
+      const { source, lib, stop } = await started();
+      source.set({ ...lib, movies: [] });
+      appStateHandler!('active');
+      await jest.advanceTimersByTimeAsync(0);
+      expect(db.batches).toEqual([]);
+      appStateHandler!('inactive');
+      await jest.advanceTimersByTimeAsync(0);
+      expect(db.batches).toHaveLength(1);
       stop();
     });
 
@@ -394,7 +465,7 @@ describe('LibraryStore', () => {
       source.set({ ...lib, movies: [] });
       stop();
       await jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS * 3);
-      expect(fs.ops).toEqual([]);
+      expect(db.batches).toEqual([]);
       expect(appStateRemove).toHaveBeenCalled();
     });
 
@@ -404,12 +475,10 @@ describe('LibraryStore', () => {
       const gate = new Promise<void>(r => (release = r));
       let active = 0;
       let maxActive = 0;
-      const realWrite = fs.write.bind(fs);
-      fs.write = async (path, contents) => {
+      db.beforeWrite = async () => {
         active++;
         maxActive = Math.max(maxActive, active);
         await gate;
-        await realWrite(path, contents);
         active--;
       };
 
@@ -424,17 +493,36 @@ describe('LibraryStore', () => {
       await Promise.all([first, second]);
 
       expect(maxActive).toBe(1);
-      expect(fs.files.get('thumbnails.json')).toBe('{}');
-      expect(fs.files.get('movies.json')).toBe('[]');
+      expect(db.batches).toHaveLength(2);
+      expect(db.kv.get('thumbnails')).toBe('{}');
+      expect(db.kv.get('movies')).toBe('[]');
+      stop();
+    });
+
+    it('a change arriving mid-save is saved by the autosave timer afterwards', async () => {
+      const { source, lib, stop } = await started();
+      let release!: () => void;
+      db.beforeWrite = () => new Promise<void>(r => (release = r));
+
+      const movies: any[] = [];
+      source.set({ ...lib, movies });
+      await jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS); // timer fires, save parks in write()
+      source.set({ ...lib, movies, thumbnails: {} });
+      db.beforeWrite = async () => {};
+      release();
+      await jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS * 2);
+
+      expect(db.batches).toHaveLength(2);
+      expect(db.batches[1].putKv.map(k => k.key)).toEqual(['thumbnails']);
       stop();
     });
   });
 
   describe('failure handling', () => {
-    it('retries a failed shard write on the next save without repeating successful writes', async () => {
+    it('a failed batch commits nothing and the whole diff is retried on the next save', async () => {
       const { store, source, lib, stop } = await started();
-      const blueyFile = manifestOf(fs).shows['Bluey'];
-      fs.failWrite = p => p === blueyFile;
+      const before = { shows: new Map(db.shows), kv: new Map(db.kv) };
+      db.failWhen = () => true;
 
       source.set({
         ...lib,
@@ -442,104 +530,55 @@ describe('LibraryStore', () => {
         movies: [],
       });
       await expect(store.flush()).resolves.toBeUndefined();
-      expect(fs.paths('write').sort()).toEqual([manifestOf(fs).shows['Party 🎉🍿'], 'movies.json'].sort());
+      expect(db.batches).toEqual([]);
+      expect(db.shows).toEqual(before.shows);
+      expect(db.kv).toEqual(before.kv);
 
-      fs.failWrite = () => false;
-      fs.clearOps();
+      db.failWhen = () => false;
       await store.flush();
-      expect(fs.ops).toEqual([{ op: 'write', path: blueyFile }]);
-      expect(JSON.parse(fs.files.get(blueyFile)!).show.year).toBe(1);
+      expect(db.batches).toHaveLength(1);
+      expect(names(db.batches[0]).sort()).toEqual(['Bluey', 'Party 🎉🍿']);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['movies']);
+      expect(await new LibraryStore(db).load()).toEqual(source.state);
       stop();
     });
 
-    it('does not publish a manifest that references a shard which failed to write', async () => {
+    it('a failed removal is retried on the next save', async () => {
       const { store, source, lib, stop } = await started();
-      fs.failWrite = p => p.startsWith('shows/');
-      source.set({ ...lib, mediaLibrary: { ...lib.mediaLibrary, 'New Show': show('New Show') } });
-      await store.flush();
-      expect(manifestOf(fs).shows).not.toHaveProperty('New Show');
-      expect(fs.paths('write')).toEqual([]);
-
-      fs.failWrite = () => false;
-      await store.flush();
-      const writes = fs.paths('write');
-      expect(writes[writes.length - 1]).toBe('manifest.json');
-      expect(manifestOf(fs).shows).toHaveProperty('New Show');
-      stop();
-    });
-
-    it('retries a failed manifest write and only removes shards afterwards', async () => {
-      const { store, source, lib, stop } = await started();
-      const file = manifestOf(fs).shows['Bluey'];
       const { Bluey, ...rest } = lib.mediaLibrary;
-      fs.failWrite = p => p === 'manifest.json';
+      db.failWhen = () => true;
       source.set({ ...lib, mediaLibrary: rest });
       await store.flush();
-      expect(fs.paths('remove')).toEqual([]);
-      expect(fs.files.has(file)).toBe(true);
+      expect(db.shows.has('Bluey')).toBe(true);
 
-      fs.failWrite = () => false;
+      db.failWhen = () => false;
       await store.flush();
-      expect(fs.ops).toEqual([
-        { op: 'write', path: 'manifest.json' },
-        { op: 'remove', path: file },
-      ]);
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].deleteShows).toEqual(['Bluey']);
+      expect(db.shows.has('Bluey')).toBe(false);
+      stop();
+    });
+
+    it('a later change after a failure is saved together with the failed one', async () => {
+      const { store, source, lib, stop } = await started();
+      db.failWhen = () => true;
+      source.set({ ...lib, mediaLibrary: { ...lib.mediaLibrary, Bluey: show('Bluey', { year: 1 }) } });
+      await store.flush();
+
+      db.failWhen = () => false;
+      source.set({ ...source.state, mediaLibrary: { ...source.state.mediaLibrary, 'New Show': show('New Show') } });
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(names(db.batches[0]).sort()).toEqual(['Bluey', 'New Show']);
+      expect(await new LibraryStore(db).load()).toEqual(source.state);
       stop();
     });
 
     it('does not throw out of the autosave timer when a write fails', async () => {
       const { source, lib, stop } = await started();
-      fs.failWrite = () => true;
+      db.failWhen = () => true;
       source.set({ ...lib, movies: [] });
       await expect(jest.advanceTimersByTimeAsync(AUTOSAVE_THROTTLE_MS)).resolves.toBeUndefined();
-      stop();
-    });
-  });
-
-  describe('shard file naming', () => {
-    it('fnv1a32Hex is deterministic and 8 hex chars', () => {
-      expect(fnv1a32Hex('Bluey')).toBe(fnv1a32Hex('Bluey'));
-      expect(fnv1a32Hex('Bluey')).toMatch(/^[0-9a-f]{8}$/);
-      expect(fnv1a32Hex('')).toBe('811c9dc5');
-      expect(fnv1a32Hex('a')).toBe('e40c292c');
-    });
-
-    it('gives colliding names distinct, stable files', async () => {
-      const store = new LibraryStore(fs, () => 'aaaaaaaa');
-      const lib = makeLibrary();
-      await store.writeAll(lib);
-      const shows: Record<string, string> = manifestOf(fs).shows;
-      expect(new Set(Object.values(shows)).size).toBe(Object.keys(lib.mediaLibrary).length);
-      expect(Object.values(shows)).toContain('shows/aaaaaaaa.json');
-      expect(await new LibraryStore(fs).load()).toEqual(lib);
-
-      // Adding and removing shows keeps surviving names on their existing files.
-      const source = makeSource(lib);
-      const stop = store.startAutoSave(source);
-      const { Bluey, ...rest } = lib.mediaLibrary;
-      source.set({ ...lib, mediaLibrary: { Aardvark: show('Aardvark'), ...rest } });
-      await store.flush();
-      const after: Record<string, string> = manifestOf(fs).shows;
-      for (const name of Object.keys(rest)) expect(after[name]).toBe(shows[name]);
-      expect(new Set(Object.values(after)).size).toBe(Object.keys(after).length);
-      expect(await new LibraryStore(fs).load()).toEqual(source.state);
-      stop();
-    });
-
-    it('does not hand a still-referenced file to a different show', async () => {
-      const store = new LibraryStore(fs, () => 'bbbbbbbb');
-      const lib: PersistedLibrary = { ...EMPTY_PERSISTED_LIBRARY, mediaLibrary: { One: show('One') } };
-      await store.writeAll(lib);
-      const oneFile = manifestOf(fs).shows['One'];
-
-      const source = makeSource(lib);
-      const stop = store.startAutoSave(source);
-      // Replace One with Two: Two must not take One's file while the manifest still lists it.
-      source.set({ ...lib, mediaLibrary: { Two: show('Two') } });
-      await store.flush();
-      expect(manifestOf(fs).shows['Two']).not.toBe(oneFile);
-      expect(fs.files.has(oneFile)).toBe(false);
-      expect(await new LibraryStore(fs).load()).toEqual(source.state);
       stop();
     });
   });

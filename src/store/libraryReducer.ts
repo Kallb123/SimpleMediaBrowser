@@ -243,7 +243,7 @@ export const settingsSlice = createSlice({
     // Use the PayloadAction type to declare the contents of `action.payload`
     /**
      * Replaces the persisted parts of the library with what was loaded from the
-     * file store at startup (see `libraryPersistence.ts`). Transient scan state
+     * SQLite library store at startup (see `libraryPersistence.ts`). Transient scan state
      * (`isScanning` / `scanProgress`) is deliberately left alone.
      */
     hydrateLibrary: (state, action: PayloadAction<PersistedLibrary>) => {

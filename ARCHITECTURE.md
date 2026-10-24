@@ -22,7 +22,7 @@ TV shows (with seasons/episodes), movies, and audiobooks.
 |---|---|
 | Framework | Expo SDK 55 / React Native 0.83, React 19 |
 | Navigation | Expo Router (file-based routing) — drawer + stack |
-| State | Redux Toolkit; settings via redux-persist (AsyncStorage), library via file store (`LibraryStore`) |
+| State | Redux Toolkit; settings via redux-persist (AsyncStorage), library via SQLite (`LibraryStore`) |
 | File access | `expo-file-system` (new `File`/`Directory` API) + SAF (`expo-file-system/legacy`'s `StorageAccessFramework`) |
 | Metadata | TMDB and TheTVDB REST APIs (TV/movies), iTunes Search API (audiobook cover art, keyless) |
 | Video | `expo-video` (thumbnail generation via `expo-image-manipulator`) |
@@ -84,7 +84,7 @@ SimpleMediaBrowser/
     │   ├── MetadataService.ts       # Orchestrates TMDB/TVDB/iTunes enrichment, fuzzy show dedup
     │   ├── SmbTypes.ts              # Shared types for the smb.json sidecar file format
     │   ├── ImportExportService.ts   # JSON state backup/restore + filesystem (smb.json) metadata export
-    │   ├── LibraryStore.ts          # File-backed library persistence (manifest + per-show shards), incremental autosave
+    │   ├── LibraryStore.ts          # SQLite-backed library persistence (one row per show), incremental autosave
     │   ├── Logger.ts                # In-memory + on-disk logger, singleton, used everywhere via `logger`
     │   ├── openMedia.ts             # Hands a media file off to an external player via Android intent
     │   └── providers/
@@ -95,7 +95,7 @@ SimpleMediaBrowser/
     │
     ├── store/                       # Redux Toolkit slices
     │   ├── store.ts                 # configureStore, redux-persist (settings only), legacy-library reconciler, write gate
-    │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the file store, hydrate Redux, start autosave
+    │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave
     │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides, scan progress
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
@@ -182,13 +182,19 @@ roughly 2,000 episodes):
   `background`/`inactive`, so a pending change (e.g. a `lastOpened` stamp
   before handing off to an external player) is not lost.
 - **Library** (`scripts/LibraryStore.ts`, driven by `store/libraryPersistence.ts`):
-  files under `library/` in the document directory — a manifest, one shard
-  per show, and separate files for movies, audiobooks, overrides and
-  thumbnails. Redux still holds the whole library in memory (same slice,
-  reducers and selectors); `LibraryStore` autosaves incrementally (only
-  changed shards, throttled, atomic write-then-rename, manifest written last,
-  flushed when the app backgrounds). Transient `isScanning`/`scanProgress`
-  are never persisted. The `hydrateLibrary` reducer loads it into the slice.
+  a SQLite database (`library.db`, expo-sqlite, WAL) with three tables —
+  `meta` (the `version` row marks the store as initialised), `shows` (one
+  JSON row per show, keyed by show name) and `kv` (one JSON row each for
+  `movies`, `audiobooks`, `mediaOverrides`, `thumbnails`). Redux still holds
+  the whole library in memory (same slice, reducers and selectors);
+  `LibraryStore` autosaves incrementally (only shows whose object reference
+  changed, throttled, flushed when the app backgrounds). Every save, and the
+  initial full write that also sets the version marker, is one transaction,
+  so a failure leaves the previous state intact and the unsaved diff is
+  retried on the next save. expo-sqlite reads rows through its own bundled
+  sqlite3, not Android's CursorWindow, so there is no ~2 MB per-row limit.
+  Transient `isScanning`/`scanProgress` are never persisted. The
+  `hydrateLibrary` reducer loads it into the slice.
 
 Startup (`startLibraryPersistence()`, memoised, never rejects), after
 redux-persist has bootstrapped:
@@ -196,7 +202,7 @@ redux-persist has bootstrapped:
 1. Store exists → `hydrateLibrary`, start autosave, allow settings writes.
    Any `libraryReducer` still in `persist:root` is stale and discarded.
 2. No store yet (fresh install or first launch after upgrading) → take the
-   legacy `libraryReducer` blob, write it to the file store (empty if none),
+   legacy `libraryReducer` blob, write it to the SQLite store (empty if none),
    hydrate, start autosave, allow settings writes. This is the one-time
    migration. If the write fails, Redux is still hydrated for the session
    but autosave and settings writes stay off, so the library remains in
@@ -215,10 +221,10 @@ Two guards in `store.ts` make this safe:
   whitelisted keys as the *whole* new `persist:root` value, which is what
   drops the legacy library from it. `persistConfig.storage` is therefore a
   wrapper whose `setItem` waits for `allowPersistWrites()` (called only once
-  the library is safely in the file store). If `REHYDRATE` carries an `err`
+  the library is safely in the SQLite store). If `REHYDRATE` carries an `err`
   (read failure, or redux-persist's 5 s timeout) a middleware blocks settings
   writes for the rest of the session, since state is then defaults and the
-  next write would overwrite the stored settings. An existing file store
+  next write would overwrite the stored settings. An existing library store
   still loads and autosaves then, but the migration is skipped, since the
   unreadable `persist:root` may hold the only copy of the legacy library.
 

@@ -1,26 +1,16 @@
 import { AppState } from 'react-native';
-import { Directory, File, Paths } from 'expo-file-system';
+import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import type { IMediaLibrary, IMediaShow, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/FileScanner';
 import { logger } from '@/scripts/Logger';
 
 const TAG = 'LibraryStore';
 
-/** Bump when the on-disk layout changes incompatibly. Newer-than-supported stores refuse to load. */
+/** Bump when the database layout changes incompatibly. Newer-than-supported stores refuse to load. */
 export const LIBRARY_STORE_VERSION = 1;
 
 /** Minimum gap between autosaves; changes arriving inside the window coalesce into one save. */
 export const AUTOSAVE_THROTTLE_MS = 1000;
-
-const MANIFEST_PATH = 'manifest.json';
-const MOVIES_PATH = 'movies.json';
-const AUDIOBOOKS_PATH = 'audiobooks.json';
-const OVERRIDES_PATH = 'overrides.json';
-const THUMBNAILS_PATH = 'thumbnails.json';
-const SHOWS_DIR = 'shows';
-
-/** How many shard files are read concurrently while loading. */
-const LOAD_CONCURRENCY = 16;
 
 /** The persisted part of libraryReducer (transient isScanning/scanProgress and legacy scanList are never stored). */
 export interface PersistedLibrary {
@@ -56,124 +46,108 @@ export function pickPersistedLibrary(state: Partial<Record<string, unknown>> | n
     };
 }
 
-// ── Filesystem abstraction ────────────────────────────────────────────────────
+// ── Database abstraction ──────────────────────────────────────────────────────
 
-/**
- * Minimal filesystem abstraction so the store is testable with an in-memory
- * fake.  Paths are relative to the library root directory and use '/'
- * separators (e.g. 'manifest.json', 'shows/ab12cd34.json').
- */
-export interface LibraryFs {
-    /** Returns null if the file does not exist; throws on other read errors. */
-    read(path: string): Promise<string | null>;
-    /** MUST be atomic: a crash leaves either the old or the new contents. */
-    write(path: string, contents: string): Promise<void>;
-    /** No-op if the file is missing. */
-    remove(path: string): Promise<void>;
-    /** File names directly inside `dir` ('' = root); [] if the directory is missing. */
-    list(dir: string): Promise<string[]>;
+/** Whole-collection keys stored in the `kv` table, one JSON document each. */
+const KV_KEYS = ['movies', 'audiobooks', 'mediaOverrides', 'thumbnails'] as const;
+
+/** Everything {@link LibraryDb.readAll} returns: raw rows, parsed and validated by {@link LibraryStore.load}. */
+export interface LibraryDbContents {
+    /** Value of the `meta` 'version' row. */
+    version: string;
+    /** One row per show, in insertion order. */
+    shows: { name: string; json: string }[];
+    kv: { key: string; json: string }[];
 }
 
-/** Suffix for the staging file of a first-time write (target did not exist). */
-const TMP_SUFFIX = '.tmp';
-/** Suffix for the staging file of an overwrite; see {@link createExpoLibraryFs}. */
-const NEW_SUFFIX = '.new';
+/** One atomic unit of writes; see {@link LibraryDb.write}. */
+export interface LibraryBatch {
+    /** Delete every show row first (full replace), then apply the rest. */
+    clearShows?: boolean;
+    putShows: { name: string; json: string }[];
+    deleteShows: string[];
+    putKv: { key: string; json: string }[];
+    /** Stored as the `meta` 'version' row; its presence marks the store as initialised. */
+    version?: string;
+}
 
 /**
- * {@link LibraryFs} backed by expo-file-system, rooted at
- * `<Paths.document>/<rootDirName>/`.
- *
- * Atomicity: contents are written to a staging file next to the target and
- * then moved into place.  `File.move` fails if the destination exists on both
- * platforms (Android `Path.moveTo` without REPLACE_EXISTING, iOS
- * `moveItem`), so overwriting must delete the target first.  That leaves a
- * tiny window (between the delete and the move) with no target file.  To make
- * even that window recoverable, overwrites stage to `<path>.new` (which is
- * always complete by the time the target is deleted) and `read()` heals a
- * missing target from a leftover `<path>.new`.  First-time writes stage to
- * `<path>.tmp`, which is never trusted (it may be partial).
+ * Minimal database abstraction so the store is testable with an in-memory
+ * fake (there is no native SQLite under Jest).
  */
-export function createExpoLibraryFs(rootDirName: string = 'library'): LibraryFs {
-    const root = new Directory(Paths.document, rootDirName);
-    const ensuredDirs = new Set<string>();
+export interface LibraryDb {
+    /** Resolves null when the store is not initialised (no 'version' row). */
+    readAll(): Promise<LibraryDbContents | null>;
+    /** Applies the whole batch in ONE transaction: everything commits or nothing does. */
+    write(batch: LibraryBatch): Promise<void>;
+}
 
-    const fileAt = (path: string) => new File(root, ...path.split('/'));
-    const ensureParent = (file: File) => {
-        const parent = file.parentDirectory;
-        if (ensuredDirs.has(parent.uri)) return;
-        parent.create({ intermediates: true, idempotent: true });
-        ensuredDirs.add(parent.uri);
+const SCHEMA = `
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS meta  (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS shows (name TEXT PRIMARY KEY NOT NULL, json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS kv    (key TEXT PRIMARY KEY NOT NULL, json TEXT NOT NULL);
+`;
+
+// ON CONFLICT ... DO UPDATE (unlike INSERT OR REPLACE) keeps a show's rowid, so its position in readAll() is stable.
+const UPSERT_SHOW = 'INSERT INTO shows (name, json) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET json = excluded.json';
+const UPSERT_KV = 'INSERT INTO kv (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json';
+const UPSERT_META = 'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value';
+
+/**
+ * {@link LibraryDb} backed by expo-sqlite (`library.db` in its default
+ * directory).  The database opens lazily on first use, and a failed open is
+ * retried on the next call.
+ *
+ * Batches run in `withExclusiveTransactionAsync`, which uses a dedicated
+ * connection: all statements must go through the `txn` it passes in, and an
+ * error rolls everything back.  Rows are read through expo-sqlite's bundled
+ * sqlite3 (JNI), not Android's CursorWindow, so there is no ~2 MB row limit.
+ */
+export function createExpoLibraryDb(name: string = 'library.db'): LibraryDb {
+    let opening: Promise<SQLiteDatabase> | null = null;
+    const open = () => {
+        opening ??= (async () => {
+            const db = await openDatabaseAsync(name);
+            await db.execAsync(SCHEMA);
+            return db;
+        })().catch(e => {
+            opening = null;
+            throw e;
+        });
+        return opening;
     };
 
     return {
-        async read(path) {
-            const file = fileAt(path);
-            if (!file.exists) {
-                // Crash between "delete old target" and "move staged file" in write().
-                const staged = fileAt(path + NEW_SUFFIX);
-                if (!staged.exists) return null;
-                logger.warn(TAG, `Recovering ${path} from interrupted write`);
-                staged.move(file);
-            }
-            return file.text();
+        async readAll() {
+            const db = await open();
+            const row = await db.getFirstAsync<{ value: string }>("SELECT value FROM meta WHERE key = 'version'");
+            if (!row) return null;
+            return {
+                version: row.value,
+                shows: await db.getAllAsync<{ name: string; json: string }>('SELECT name, json FROM shows ORDER BY rowid'),
+                kv: await db.getAllAsync<{ key: string; json: string }>('SELECT key, json FROM kv'),
+            };
         },
 
-        async write(path, contents) {
-            const target = fileAt(path);
-            ensureParent(target);
-            const overwriting = target.exists;
-            const staged = fileAt(path + (overwriting ? NEW_SUFFIX : TMP_SUFFIX));
-            staged.write(contents);
-            if (overwriting) {
-                target.delete();
-            } else {
-                const stale = fileAt(path + NEW_SUFFIX);
-                if (stale.exists) stale.delete();
-            }
-            staged.move(target);
-        },
-
-        async remove(path) {
-            for (const suffix of ['', NEW_SUFFIX, TMP_SUFFIX]) {
-                const file = fileAt(path + suffix);
-                if (file.exists) file.delete();
-            }
-        },
-
-        async list(dir) {
-            const directory = dir ? new Directory(root, ...dir.split('/')) : root;
-            if (!directory.exists) return [];
-            return directory.list().filter((entry): entry is File => entry instanceof File).map(entry => entry.name);
+        async write(batch) {
+            const db = await open();
+            await db.withExclusiveTransactionAsync(async txn => {
+                if (batch.clearShows) await txn.runAsync('DELETE FROM shows');
+                for (const name of batch.deleteShows) await txn.runAsync('DELETE FROM shows WHERE name = ?', [name]);
+                for (const { name, json } of batch.putShows) await txn.runAsync(UPSERT_SHOW, [name, json]);
+                for (const { key, json } of batch.putKv) await txn.runAsync(UPSERT_KV, [key, json]);
+                if (batch.version !== undefined) await txn.runAsync(UPSERT_META, ['version', batch.version]);
+            });
         },
     };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** FNV-1a 32-bit hash of the string's UTF-16 code units, as 8 hex chars. */
-export function fnv1a32Hex(input: string): string {
-    let h = 0x811c9dc5;
-    for (let i = 0; i < input.length; i++) {
-        h ^= input.charCodeAt(i);
-        h = Math.imul(h, 0x01000193);
-    }
-    return (h >>> 0).toString(16).padStart(8, '0');
-}
-
-interface Manifest {
-    version: number;
-    /** Show name → shard file path (relative to the library root). */
-    shows: { [showName: string]: string };
-}
-
-interface ShowShard {
-    name: string;
-    show: IMediaShow;
-}
-
 /**
- * What the disk is known to hold, expressed as the references that were last
- * written.  `undefined` means "not on disk yet / unknown", so it always
+ * What the database is known to hold, expressed as the references that were
+ * last written.  `undefined` means "not stored yet / unknown", so it always
  * compares unequal to a real value and gets written.
  */
 interface Baseline {
@@ -183,59 +157,46 @@ interface Baseline {
     audiobooks: IMediaAudiobook[] | undefined;
     mediaOverrides: PersistedLibrary['mediaOverrides'] | undefined;
     thumbnails: PersistedLibrary['thumbnails'] | undefined;
-    /** Manifest last written (or loaded). */
-    manifest: { [showName: string]: string };
-    /** Shard file → show object last written to it. */
-    shardRefs: Map<string, IMediaShow>;
-}
-
-const TOP_LEVEL_FILES = [
-    { key: 'movies', path: MOVIES_PATH },
-    { key: 'audiobooks', path: AUDIOBOOKS_PATH },
-    { key: 'mediaOverrides', path: OVERRIDES_PATH },
-    { key: 'thumbnails', path: THUMBNAILS_PATH },
-] as const;
-
-type TopLevelKey = typeof TOP_LEVEL_FILES[number]['key'];
-
-interface SavePlan {
-    /** Complete show name → shard file mapping for the library being saved. */
-    mapping: { [showName: string]: string };
-    /** Shards to (re)write: [file, name, show]. */
-    shards: [string, string, IMediaShow][];
-    topLevel: TopLevelKey[];
-    manifestChanged: boolean;
-    /** Shard files referenced by the old manifest but not the new one. */
-    removedFiles: string[];
+    /** Show name → show object last written to its row. */
+    showRefs: Map<string, IMediaShow>;
 }
 
 type AutoSaveSource = { getState(): PersistedLibrary; subscribe(listener: () => void): () => void };
 
-function parseJson<T>(path: string, text: string): T {
+function parseJson<T>(what: string, text: string): T {
     try {
         return JSON.parse(text) as T;
     } catch (e) {
-        throw new Error(`${path} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(`${what} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
     }
 }
 
-function sameKeys(a: object, b: object): boolean {
-    const ak = Object.keys(a);
-    return ak.length === Object.keys(b).length && ak.every(k => k in b);
-}
+const isRecord = (v: unknown): v is object => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const baselineOf = (lib: PersistedLibrary): Baseline => ({
+    library: lib.mediaLibrary,
+    movies: lib.movies,
+    audiobooks: lib.audiobooks,
+    mediaOverrides: lib.mediaOverrides,
+    thumbnails: lib.thumbnails,
+    showRefs: new Map(Object.entries(lib.mediaLibrary)),
+});
+
+const summarize = (lib: PersistedLibrary) =>
+    `${Object.keys(lib.mediaLibrary).length} show(s), ${lib.movies.length} movie(s), ${lib.audiobooks.length} audiobook(s)`;
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 /**
- * Persists the media library as a manifest plus one JSON shard per show and a
- * handful of whole-file collections, replacing the single `persist:root`
+ * Persists the media library in a SQLite database (one row per show plus one
+ * JSON document per whole-collection), replacing the single `persist:root`
  * AsyncStorage entry (which Android reads through a ~2 MB CursorWindow).
  * See ARCHITECTURE.md §5.
  *
- * Saves are incremental: Immer keeps unchanged shows referentially identical,
- * so only shards whose object reference changed are rewritten.  Write order
- * guarantees the manifest never references a shard that does not exist yet,
- * and a shard is only deleted after the manifest stopped referencing it.
+ * Every write is one transaction, so a crash or failure leaves the previous
+ * state intact.  Saves are incremental: Immer keeps unchanged shows
+ * referentially identical, so only rows whose object reference changed are
+ * rewritten.
  */
 export class LibraryStore {
     private static _instance: LibraryStore | null = null;
@@ -245,81 +206,42 @@ export class LibraryStore {
     private _timer: ReturnType<typeof setTimeout> | null = null;
     /** Tail of the save queue: saves never overlap. */
     private _queue: Promise<unknown> = Promise.resolve();
-    /** Shard files whose removal failed; retried on the next save / load. */
-    private _staleFiles = new Set<string>();
 
     static getInstance(): LibraryStore {
         if (!LibraryStore._instance) {
-            LibraryStore._instance = new LibraryStore(createExpoLibraryFs());
+            LibraryStore._instance = new LibraryStore(createExpoLibraryDb());
         }
         return LibraryStore._instance;
     }
 
-    /** `hash` is injectable so tests can force shard-name collisions. */
-    constructor(private readonly fs: LibraryFs, private readonly hash: (name: string) => string = fnv1a32Hex) {}
+    constructor(private readonly db: LibraryDb) {}
 
     // ── Load ──────────────────────────────────────────────────────────────────
 
     /**
-     * Resolves null when nothing is stored yet (no manifest).  Throws if a
-     * manifest exists but anything it references can't be read or parsed, or
-     * its version is newer than supported; callers must then NOT autosave
-     * (the files may still be recoverable).
+     * Resolves null when the store isn't initialised yet.  Throws if it is but
+     * can't be read or parsed, or its version is newer than supported; callers
+     * must then NOT autosave (the data may still be recoverable).
      */
     async load(): Promise<PersistedLibrary | null> {
         const started = Date.now();
-        const manifestText = await this.fs.read(MANIFEST_PATH);
-        if (manifestText === null) return null;
+        const contents = await this.db.readAll();
+        if (contents === null) return null;
 
-        const manifest = parseJson<Manifest>(MANIFEST_PATH, manifestText);
-        if (typeof manifest?.version !== 'number' || manifest.version < 1) {
-            throw new Error(`${MANIFEST_PATH} has an invalid version`);
+        const version = Number(contents.version);
+        if (!Number.isInteger(version) || version < 1) {
+            throw new Error(`Library store has an invalid version "${contents.version}"`);
         }
-        if (manifest.version > LIBRARY_STORE_VERSION) {
-            throw new Error(`Library store version ${manifest.version} is newer than supported (${LIBRARY_STORE_VERSION})`);
-        }
-        if (!manifest.shows || typeof manifest.shows !== 'object') {
-            throw new Error(`${MANIFEST_PATH} has no shows table`);
-        }
-
-        const names = Object.keys(manifest.shows);
-        const shards: ShowShard[] = new Array(names.length);
-        for (let i = 0; i < names.length; i += LOAD_CONCURRENCY) {
-            await Promise.all(names.slice(i, i + LOAD_CONCURRENCY).map(async (name, j) => {
-                const file = manifest.shows[name];
-                if (typeof file !== 'string' || !file.startsWith(`${SHOWS_DIR}/`)) {
-                    throw new Error(`Manifest entry for "${name}" has an invalid shard path`);
-                }
-                const text = await this.fs.read(file);
-                if (text === null) throw new Error(`Shard ${file} for "${name}" is missing`);
-                const shard = parseJson<ShowShard>(file, text);
-                if (shard?.name !== name || !shard.show || typeof shard.show !== 'object') {
-                    throw new Error(`Shard ${file} does not contain show "${name}"`);
-                }
-                shards[i + j] = shard;
-            }));
+        if (version > LIBRARY_STORE_VERSION) {
+            throw new Error(`Library store version ${version} is newer than supported (${LIBRARY_STORE_VERSION})`);
         }
 
         const mediaLibrary: IMediaLibrary = {};
-        const shardRefs = new Map<string, IMediaShow>();
-        shards.forEach(shard => {
-            mediaLibrary[shard.name] = shard.show;
-            shardRefs.set(manifest.shows[shard.name], shard.show);
-        });
-
-        const loaded = await Promise.all(TOP_LEVEL_FILES.map(async ({ key, path }) => {
-            const text = await this.fs.read(path);
-            const empty = Array.isArray(EMPTY_PERSISTED_LIBRARY[key]) ? [] : {};
-            if (text === null) {
-                logger.warn(TAG, `${path} is missing; treating as empty`);
-                return { key, value: empty, missing: true };
-            }
-            const value = parseJson<unknown>(path, text);
-            if (Array.isArray(value) !== Array.isArray(empty) || value === null || typeof value !== 'object') {
-                throw new Error(`${path} has an unexpected shape`);
-            }
-            return { key, value, missing: false };
-        }));
+        for (const { name, json } of contents.shows) {
+            const show = parseJson<IMediaShow>(`Show "${name}"`, json);
+            if (!isRecord(show)) throw new Error(`Show "${name}" has an unexpected shape`);
+            mediaLibrary[name] = show;
+        }
 
         const lib: PersistedLibrary = {
             mediaLibrary,
@@ -328,79 +250,50 @@ export class LibraryStore {
             mediaOverrides: {},
             thumbnails: {},
         };
-        const baseline: Baseline = {
-            library: mediaLibrary,
-            movies: undefined,
-            audiobooks: undefined,
-            mediaOverrides: undefined,
-            thumbnails: undefined,
-            manifest: { ...manifest.shows },
-            shardRefs,
-        };
-        for (const { key, value, missing } of loaded) {
+        const baseline = baselineOf(lib);
+        // A missing key stays "unwritten" in the baseline so the next save recreates it.
+        baseline.movies = baseline.audiobooks = baseline.mediaOverrides = baseline.thumbnails = undefined;
+        for (const key of KV_KEYS) {
+            const row = contents.kv.find(r => r.key === key);
+            if (!row) {
+                logger.warn(TAG, `"${key}" is missing; treating as empty`);
+                continue;
+            }
+            const value = parseJson<unknown>(`"${key}"`, row.json);
+            const shapeOk = Array.isArray(lib[key]) ? Array.isArray(value) : isRecord(value);
+            if (!shapeOk) {
+                throw new Error(`"${key}" has an unexpected shape`);
+            }
             (lib as any)[key] = value;
-            // A missing top-level file stays "unwritten" in the baseline so the next save recreates it.
-            if (!missing) (baseline as any)[key] = value;
+            (baseline as any)[key] = value;
         }
         this._baseline = baseline;
 
-        await this.removeOrphans(new Set(Object.values(manifest.shows)));
-
-        logger.log(TAG, `Loaded ${names.length} show(s), ${lib.movies.length} movie(s), ${lib.audiobooks.length} audiobook(s) in ${Date.now() - started} ms`);
+        logger.log(TAG, `Loaded ${summarize(lib)} in ${Date.now() - started} ms`);
         return lib;
-    }
-
-    /** Deletes shard files (and staging leftovers) the manifest doesn't reference. Best effort. */
-    private async removeOrphans(referenced: Set<string>): Promise<void> {
-        try {
-            const files = await this.fs.list(SHOWS_DIR);
-            for (const name of files) {
-                const path = `${SHOWS_DIR}/${name}`;
-                if (referenced.has(path)) continue;
-                try {
-                    await this.fs.remove(path);
-                } catch (e) {
-                    logger.warn(TAG, `Could not remove orphan ${path}`, e);
-                }
-            }
-        } catch (e) {
-            logger.warn(TAG, 'Could not list shard directory for orphan cleanup', e);
-        }
     }
 
     // ── Full write ────────────────────────────────────────────────────────────
 
     /**
-     * Writes the complete library (migration / first save): every shard, the
-     * top-level files, then the manifest LAST (its existence marks the store
-     * as initialised), then removes orphaned shard files.  Throws if any write
-     * fails.  Records what was written as the baseline for incremental saves.
+     * Writes the complete library (migration / first save), replacing any
+     * existing contents, and marks the store initialised — all in one
+     * transaction, so "initialised" is never visible with partial data.
+     * Rejects if the write fails.  Records what was written as the baseline
+     * for incremental saves (only once committed).
      */
     writeAll(lib: PersistedLibrary): Promise<void> {
         return this.enqueue(async () => {
-            const mapping = this.assignFiles(lib.mediaLibrary);
-            const shardRefs = new Map<string, IMediaShow>();
-            for (const name of Object.keys(lib.mediaLibrary)) {
-                const show = lib.mediaLibrary[name];
-                await this.fs.write(mapping[name], JSON.stringify({ name, show } satisfies ShowShard));
-                shardRefs.set(mapping[name], show);
-            }
-            for (const { key, path } of TOP_LEVEL_FILES) {
-                await this.fs.write(path, JSON.stringify(lib[key]));
-            }
-            await this.fs.write(MANIFEST_PATH, JSON.stringify({ version: LIBRARY_STORE_VERSION, shows: mapping } satisfies Manifest));
-
-            this._baseline = {
-                library: lib.mediaLibrary,
-                movies: lib.movies,
-                audiobooks: lib.audiobooks,
-                mediaOverrides: lib.mediaOverrides,
-                thumbnails: lib.thumbnails,
-                manifest: mapping,
-                shardRefs,
-            };
-            await this.removeOrphans(new Set(Object.values(mapping)));
-            logger.log(TAG, `Wrote full library: ${shardRefs.size} show(s), ${lib.movies.length} movie(s), ${lib.audiobooks.length} audiobook(s)`);
+            const started = Date.now();
+            await this.db.write({
+                clearShows: true,
+                putShows: Object.keys(lib.mediaLibrary).map(name => ({ name, json: JSON.stringify(lib.mediaLibrary[name]) })),
+                deleteShows: [],
+                putKv: KV_KEYS.map(key => ({ key, json: JSON.stringify(lib[key]) })),
+                version: String(LIBRARY_STORE_VERSION),
+            });
+            this._baseline = baselineOf(lib);
+            logger.log(TAG, `Wrote full library: ${summarize(lib)} in ${Date.now() - started} ms`);
         });
     }
 
@@ -470,138 +363,43 @@ export class LibraryStore {
             || lib.movies !== b.movies
             || lib.audiobooks !== b.audiobooks
             || lib.mediaOverrides !== b.mediaOverrides
-            || lib.thumbnails !== b.thumbnails
-            || this._staleFiles.size > 0;
+            || lib.thumbnails !== b.thumbnails;
     }
 
     /**
-     * Assigns a shard file to every show: reuses the existing mapping for known
-     * names (stable across saves), otherwise a hash-derived name with a numeric
-     * suffix on collision.  Files referenced by the current manifest are never
-     * handed to a different show, so a half-finished save can't corrupt it.
-     */
-    private assignFiles(library: IMediaLibrary): { [showName: string]: string } {
-        const existing = this._baseline?.manifest ?? {};
-        const mapping: { [showName: string]: string } = {};
-        const taken = new Set<string>();
-        const names = Object.keys(library);
-        for (const name of names) {
-            if (name in existing && !taken.has(existing[name])) {
-                mapping[name] = existing[name];
-                taken.add(existing[name]);
-            }
-        }
-        const reserved = new Set(Object.values(existing));
-        for (const name of names) {
-            if (name in mapping) continue;
-            const base = `${SHOWS_DIR}/${this.hash(name)}`;
-            let candidate = `${base}.json`;
-            for (let n = 1; taken.has(candidate) || reserved.has(candidate); n++) {
-                candidate = `${base}-${n}.json`;
-            }
-            mapping[name] = candidate;
-            taken.add(candidate);
-        }
-        return mapping;
-    }
-
-    private plan(lib: PersistedLibrary): SavePlan | null {
-        const b = this._baseline!;
-        if (!this.hasChanges(lib)) return null;
-
-        const mapping = this.assignFiles(lib.mediaLibrary);
-        const shards: SavePlan['shards'] = [];
-        if (lib.mediaLibrary !== b.library) {
-            for (const name of Object.keys(lib.mediaLibrary)) {
-                const show = lib.mediaLibrary[name];
-                if (b.shardRefs.get(mapping[name]) !== show) shards.push([mapping[name], name, show]);
-            }
-        }
-        const manifestChanged = !sameKeys(mapping, b.manifest)
-            || Object.keys(mapping).some(name => mapping[name] !== b.manifest[name]);
-        const newFiles = new Set(Object.values(mapping));
-        return {
-            mapping,
-            shards,
-            topLevel: TOP_LEVEL_FILES.map(f => f.key).filter(key => lib[key] !== b[key]),
-            manifestChanged,
-            removedFiles: Object.values(b.manifest).filter(file => !newFiles.has(file)),
-        };
-    }
-
-    /**
-     * One save pass.  Order: changed shards, top-level files, manifest (only if
-     * the show set changed and every shard landed), then deletion of shards the
-     * new manifest no longer references.  The baseline advances per successful
-     * write, so anything that failed is retried on the next pass.
+     * One save pass: diffs the state against the baseline and writes the
+     * difference as a single transaction.  The baseline only advances once it
+     * commits; on failure it is left alone, so the next pass retries everything.
      */
     private async saveChanges(): Promise<void> {
         const source = this._source;
         const b = this._baseline;
         if (!source || !b) return;
         const lib = source.getState();
-        const plan = this.plan(lib);
-        if (!plan) return;
+        if (!this.hasChanges(lib)) return;
 
-        let failed = false;
-        const attempt = async (what: string, write: () => Promise<void>): Promise<boolean> => {
-            try {
-                await write();
-                return true;
-            } catch (e) {
-                failed = true;
-                logger.error(TAG, `Failed to save ${what}; will retry on next save`, e);
-                return false;
+        try {
+            const putShows: LibraryBatch['putShows'] = [];
+            const deleteShows: string[] = [];
+            if (lib.mediaLibrary !== b.library) {
+                for (const name of Object.keys(lib.mediaLibrary)) {
+                    const show = lib.mediaLibrary[name];
+                    if (b.showRefs.get(name) !== show) putShows.push({ name, json: JSON.stringify(show) });
+                }
+                for (const name of b.showRefs.keys()) {
+                    if (!Object.prototype.hasOwnProperty.call(lib.mediaLibrary, name)) deleteShows.push(name);
+                }
             }
-        };
-
-        let shardsOk = true;
-        for (const [file, name, show] of plan.shards) {
-            const ok = await attempt(file, () => this.fs.write(file, JSON.stringify({ name, show } satisfies ShowShard)));
-            if (ok) b.shardRefs.set(file, show);
-            else shardsOk = false;
-        }
-
-        for (const { key, path } of TOP_LEVEL_FILES) {
-            if (!plan.topLevel.includes(key)) continue;
-            const value = lib[key];
-            if (await attempt(path, () => this.fs.write(path, JSON.stringify(value)))) {
-                (b as any)[key] = value;
-            }
-        }
-
-        let manifestOk = !plan.manifestChanged;
-        // Never publish a manifest that points at a shard which failed to write.
-        if (plan.manifestChanged && shardsOk) {
-            const manifest: Manifest = { version: LIBRARY_STORE_VERSION, shows: plan.mapping };
-            manifestOk = await attempt(MANIFEST_PATH, () => this.fs.write(MANIFEST_PATH, JSON.stringify(manifest)));
-            if (manifestOk) {
-                b.manifest = plan.mapping;
-                for (const file of plan.removedFiles) this._staleFiles.add(file);
-            }
-        }
-
-        if (manifestOk && shardsOk) {
-            b.library = lib.mediaLibrary;
-        }
-
-        // Safe now: the on-disk manifest no longer references these.
-        for (const file of [...this._staleFiles]) {
-            if (Object.values(b.manifest).includes(file)) {
-                this._staleFiles.delete(file);
-                continue;
-            }
-            try {
-                await this.fs.remove(file);
-                b.shardRefs.delete(file);
-                this._staleFiles.delete(file);
-            } catch (e) {
-                logger.warn(TAG, `Could not remove stale shard ${file}; will retry`, e);
-            }
-        }
-
-        if (!failed) {
-            logger.log(TAG, `Saved ${plan.shards.length} show(s)${plan.topLevel.length ? ` + ${plan.topLevel.join(', ')}` : ''}${plan.manifestChanged ? ' + manifest' : ''}`);
+            const changedKv = KV_KEYS.filter(key => lib[key] !== b[key]);
+            await this.db.write({
+                putShows,
+                deleteShows,
+                putKv: changedKv.map(key => ({ key, json: JSON.stringify(lib[key]) })),
+            });
+            this._baseline = baselineOf(lib);
+            logger.log(TAG, `Saved ${putShows.length} show(s)${deleteShows.length ? `, removed ${deleteShows.length}` : ''}${changedKv.length ? ` + ${changedKv.join(', ')}` : ''}`);
+        } catch (e) {
+            logger.error(TAG, 'Failed to save library; will retry on next save', e);
         }
     }
 }
