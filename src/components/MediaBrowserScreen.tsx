@@ -1,19 +1,18 @@
-import { Alert, BackHandler, Modal, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Modal, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { useThemeColor } from '@/hooks/useThemeColor';
 import { File } from 'expo-file-system';
 import { Image } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
-import { Link, router } from 'expo-router';
-import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
+import { Link, Stack, router } from 'expo-router';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder } from '@/store/settingsReducer';
 import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectIsScanning, selectMediaOverrides, selectScanProgress } from '@/store/libraryReducer';
 import { store } from '@/store/store';
-import { FlashList, FlashListRef, ViewToken } from '@shopify/flash-list';
+import { FlashList } from '@shopify/flash-list';
 import { FileScanner, IMediaObject, thumbnailCache } from '@/scripts/FileScanner';
 import type { IMediaLibrary, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes, sortOrders } from '@/store/settingsReducer';
@@ -25,7 +24,8 @@ import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, POR
 
 // ── Navigation types ─────────────────────────────────────────────────────────
 
-type NavLevel = {
+/** One folder level of the browser hierarchy (a show, a season, or a multi-part audiobook). */
+export type NavLevel = {
   label: string;
   showName?: string;
   seasonKey?: string;
@@ -247,15 +247,14 @@ function buildDisplayItems(
   movies: IMediaObject[],
   audiobooks: IMediaAudiobook[],
   viewType: viewTypes,
-  navStack: NavLevel[],
+  location: NavLevel | undefined,
   overrides: { [key: string]: IMediaOverride },
   navigateInto: (entry: NavLevel) => void,
   sortOrder: sortOrders,
 ): DisplayItem[] {
   // Inside a multi-part audiobook: list its files as openable items.
-  const audiobookLevel = navStack.find((n) => n.audiobookKey);
-  if (audiobookLevel) {
-    const audiobook = audiobooks.find((a) => a.folderKey === audiobookLevel.audiobookKey);
+  if (location?.audiobookKey) {
+    const audiobook = audiobooks.find((a) => a.folderKey === location.audiobookKey);
     if (!audiobook) return [];
     return audiobook.files.map((file) => ({
       kind: 'file' as const,
@@ -266,10 +265,10 @@ function buildDisplayItems(
     }));
   }
 
-  const baseItems = buildBaseDisplayItems(library, movies, viewType, navStack, overrides, navigateInto, sortOrder);
+  const baseItems = buildBaseDisplayItems(library, movies, viewType, location, overrides, navigateInto, sortOrder);
 
   // Audiobooks only appear at the root level (they have no viewType hierarchy).
-  if (navStack.length === 0 && audiobooks.length > 0) {
+  if (!location && audiobooks.length > 0) {
     const audiobookItems = buildAudiobookRootItems(audiobooks, overrides, navigateInto);
     return applySortOrder([...baseItems, ...audiobookItems], sortOrder);
   }
@@ -280,7 +279,7 @@ function buildBaseDisplayItems(
   library: IMediaLibrary,
   movies: IMediaObject[],
   viewType: viewTypes,
-  navStack: NavLevel[],
+  location: NavLevel | undefined,
   overrides: { [key: string]: IMediaOverride },
   navigateInto: (entry: NavLevel) => void,
   sortOrder: sortOrders,
@@ -339,7 +338,7 @@ function buildBaseDisplayItems(
     }
 
     case 'show': {
-      if (navStack.length === 0) {
+      if (!location) {
         // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
           .filter((showName) => !overrides[`show:${showName}`]?.hidden)
@@ -381,7 +380,7 @@ function buildBaseDisplayItems(
         return applySortOrder([...showFolders, ...movieItems], sortOrder);
       }
       // Inside a show: all episodes from every season
-      const show = library[navStack[0].showName!];
+      const show = library[location.showName!];
       if (!show) return [];
       const items: DisplayItem[] = [];
       const sortedSeasons = Object.values(show.seasons).sort((a, b) => a.seasonNumber - b.seasonNumber);
@@ -407,7 +406,7 @@ function buildBaseDisplayItems(
     }
 
     case 'show+season': {
-      if (navStack.length === 0) {
+      if (!location) {
         // Root: one folder per show+season combination + movie files, all sorted together by sort key
         const showSeasonItems: DisplayItem[] = [];
         for (const [showName, show] of Object.entries(library)) {
@@ -452,7 +451,7 @@ function buildBaseDisplayItems(
         return applySortOrder([...showSeasonItems, ...movieItems], sortOrder);
       }
       // Inside a show+season folder: episodes of that season
-      const { showName, seasonKey } = navStack[0];
+      const { showName, seasonKey } = location;
       const season = library[showName!]?.seasons[seasonKey!];
       if (!season) return [];
       return Object.values(season.episodes)
@@ -474,7 +473,7 @@ function buildBaseDisplayItems(
 
     case 'show/season':
     default: {
-      if (navStack.length === 0) {
+      if (!location) {
         // Root: one folder per show + movie files, all sorted together by sort key
         const showFolders: DisplayItem[] = Object.keys(library)
           .filter((showName) => !overrides[`show:${showName}`]?.hidden)
@@ -511,9 +510,9 @@ function buildBaseDisplayItems(
         // Interleave shows and movies, ordered by the user's chosen "Sorting" appearance setting.
         return applySortOrder([...showFolders, ...movieItems], sortOrder);
       }
-      if (navStack.length === 1) {
+      if (!location.seasonKey) {
         // Inside a show: one folder per season
-        const show = library[navStack[0].showName!];
+        const show = library[location.showName!];
         if (!show) return [];
         return Object.entries(show.seasons)
           .sort((a, b) => a[1].seasonNumber - b[1].seasonNumber)
@@ -526,12 +525,12 @@ function buildBaseDisplayItems(
               kind: 'folder' as const,
               label,
               key: seasonKey,
-              posterUri: overrides[`show:${navStack[0].showName!}`]?.poster || show.poster || undefined,
+              posterUri: overrides[`show:${location.showName!}`]?.poster || show.poster || undefined,
               thumbnailUri: firstEpThumb,
               onPress: () =>
                 navigateInto({
                   label,
-                  showName: navStack[0].showName,
+                  showName: location.showName,
                   seasonKey,
                 }),
               mediaType: 'season' as const,
@@ -540,8 +539,7 @@ function buildBaseDisplayItems(
           });
       }
       // Inside a season: episodes
-      const show = library[navStack[0].showName!];
-      const season = show?.seasons[navStack[1].seasonKey!];
+      const season = library[location.showName!]?.seasons[location.seasonKey];
       if (!season) return [];
       return Object.values(season.episodes)
         .sort((a, b) => compareEpisodes(a, b, overrides))
@@ -563,9 +561,6 @@ function buildBaseDisplayItems(
 }
 
 // ── Screen ───────────────────────────────────────────────────────────────────
-
-/** Serialises a nav stack into a stable string key used to save/restore scroll positions. */
-const navStackKey = (stack: NavLevel[]) => stack.map((n) => n.label).join('/');
 
 /** Stable empty collections, so filtered-out media types keep a constant identity across
  *  renders instead of handing the `displayItems` memo a fresh `{}`/`[]` every time. */
@@ -604,11 +599,30 @@ const PROGRESS_COLOR_ENRICHING = '#2196F3';
 
 export type MediaFilter = 'all' | 'tv' | 'movies' | 'audiobooks';
 
+/** A folder screen's place in the hierarchy: the level it shows plus its header title
+ *  (the labels of every level above it, e.g. "Show › Season 1"). */
+export type BrowseLocation = NavLevel & { title: string };
+
+/** The `folder` route of each media section's stack (see `src/app/(drawer)/<section>/`). */
+const FOLDER_ROUTES = {
+  all: '/folder',
+  tv: '/tv/folder',
+  movies: '/movies/folder',
+  audiobooks: '/audiobooks/folder',
+} as const satisfies Record<MediaFilter, string>;
+
 interface MediaBrowserScreenProps {
   mediaFilter: MediaFilter;
+  /** The folder being shown; omitted for the section's root screen. */
+  location?: BrowseLocation;
 }
 
-export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
+/**
+ * One level of a media section. Each folder level is its own screen in the section's
+ * native stack, so the levels above it stay mounted underneath (scroll position intact)
+ * and back navigation is handled by the navigator.
+ */
+export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreenProps) {
   const mediaSources = useSelector(selectMediaSources);
   const viewType = useSelector(selectMediaStructure);
   const viewScale = useSelector(selectViewScale);
@@ -623,14 +637,6 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const { editMode, selectedItems, toggleItemSelection, clearItemSelection } = useEditMode();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const backButtonBorderColor = useThemeColor(
-    { light: 'rgba(0,0,0,0.12)', dark: 'rgba(255,255,255,0.18)' },
-    'text',
-  );
-  const backButtonBackgroundColor = useThemeColor(
-    { light: 'rgba(0,0,0,0.04)', dark: 'rgba(255,255,255,0.08)' },
-    'background',
-  );
 
   const isScanning = useSelector(selectIsScanning);
   const scanProgress = useSelector(selectScanProgress);
@@ -668,108 +674,21 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   // Audiobooks appear on the dedicated Audiobooks page and on Home (all).
   const audiobooks: IMediaAudiobook[] = (mediaFilter === 'all' || mediaFilter === 'audiobooks') ? visibleAudiobooks : EMPTY_AUDIOBOOKS;
 
-  const [navStack, setNavStack] = useState<NavLevel[]>([]);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
-
-  // Ref to the FlashList so we can programmatically scroll it.
-  const flashListRef = useRef<FlashListRef<DisplayItem>>(null);
-  // Index of the topmost visible item, tracked without causing re-renders.
-  const firstVisibleIndex = useRef(0);
-  // Persists the topmost visible index for each nav level, keyed by serialised stack path.
-  const savedScrollIndices = useRef<Map<string, number>>(new Map());
-  // Latest `displayItems`, so the restore effect can clamp to the current item count
-  // without re-running every time the list contents change.
-  const displayItemsRef = useRef<DisplayItem[]>([]);
-
-  // Reset navigation and saved positions when viewType changes.
-  useEffect(() => {
-    savedScrollIndices.current.clear();
-    setNavStack([]);
-  }, [viewType]);
 
   const navigateInto = useCallback((entry: NavLevel) => {
     logger.log('MediaBrowserScreen', `Navigate into: ${entry.label} (showName=${entry.showName ?? '-'}, seasonKey=${entry.seasonKey ?? '-'})`);
     clearItemSelection();
-    setNavStack((prev: NavLevel[]) => {
-      // Save the scroll position for the level we are leaving.
-      savedScrollIndices.current.set(navStackKey(prev), firstVisibleIndex.current);
-      return [...prev, entry];
-    });
-  }, [clearItemSelection]);
-
-  const navigateBack = useCallback(() => {
-    logger.log('MediaBrowserScreen', 'Navigate back');
-    setNavStack((prev: NavLevel[]) => prev.slice(0, -1));
-  }, []);
-
-  // After the nav stack changes, scroll to the appropriate position:
-  // - going deeper → reset to top
-  // - going shallower (back) → restore the saved position for that level
-  // Navigation always moves exactly one level at a time (navigateInto pushes one entry,
-  // navigateBack pops one entry), so comparing lengths is sufficient to determine direction.
-  const prevNavStackLength = useRef(0);
-  useEffect(() => {
-    const goingDeeper = navStack.length > prevNavStackLength.current;
-    prevNavStackLength.current = navStack.length;
-    // Restore the index saved for this level. Because it is recorded in navigateInto at
-    // the moment the user leaves a level, the stored value always reflects exactly where
-    // the user was in that list—it cannot be stale within the same session.
-    const saved = goingDeeper ? 0 : (savedScrollIndices.current.get(navStackKey(navStack)) ?? 0);
-    // Clamp: the level may hold fewer items than when we left it (e.g. items hidden since).
-    const targetIndex = Math.min(saved, Math.max(0, displayItemsRef.current.length - 1));
-    firstVisibleIndex.current = targetIndex;
-    if (targetIndex === 0) {
-      // Offset 0 is always valid regardless of how much has been measured, so this needs
-      // none of the retry machinery below.
-      flashListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      return;
-    }
-    // Restore by index rather than by pixel offset. A raw scrollToOffset is a single
-    // native scrollTo that the underlying ScrollView clamps to the content size measured
-    // *so far*; right after a nav-level swap most of the new list is still unmeasured, so
-    // a large offset clamps to near the top. scrollToIndex instead steps toward the target
-    // and recomputes it as items get measured, which converges on the right row.
-    let cancelled = false;
-    const rafId = requestAnimationFrame(() => {
-      if (cancelled) return;
-      flashListRef.current?.scrollToIndex({ index: targetIndex, animated: false })
-        .catch((e: unknown) => {
-          logger.warn('MediaBrowserScreen', `Failed to restore scroll to index ${targetIndex}`, e);
-        });
-    });
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
+    // Route params are strings, so leave unset fields out rather than passing undefined.
+    const params: Record<string, string> = {
+      label: entry.label,
+      title: location ? `${location.title} › ${entry.label}` : entry.label,
     };
-  }, [navStack]);
-
-  // FlashList requires a stable identity here; the refs it writes to keep it dependency-free.
-  const handleViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: ViewToken<DisplayItem>[] }) => {
-      let topmost = -1;
-      for (const token of viewableItems) {
-        if (token.index !== null && token.index !== undefined && (topmost === -1 || token.index < topmost)) {
-          topmost = token.index;
-        }
-      }
-      if (topmost !== -1) {
-        firstVisibleIndex.current = topmost;
-      }
-    },
-    [],
-  );
-
-  // Intercept the Android hardware back button to pop the nav stack when inside a folder.
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (navStack.length > 0) {
-        navigateBack();
-        return true;
-      }
-      return false;
-    });
-    return () => subscription.remove();
-  }, [navStack, navigateBack]);
+    if (entry.showName !== undefined) params.showName = entry.showName;
+    if (entry.seasonKey !== undefined) params.seasonKey = entry.seasonKey;
+    if (entry.audiobookKey !== undefined) params.audiobookKey = entry.audiobookKey;
+    router.push({ pathname: FOLDER_ROUTES[mediaFilter], params });
+  }, [clearItemSelection, location, mediaFilter]);
 
   // Map viewScale (1-10) to number of grid columns based on current orientation.
   const isLandscape = screenWidth > screenHeight;
@@ -786,32 +705,24 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
   const listRowHeight = mapScaleToListRowHeight(viewScale);
 
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto, sortOrder),
+    () => buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, sortOrder),
     // scanProgress.thumbnailsDone is included so the memo re-runs each time a
     // thumbnail is added to thumbnailCache during the thumbnail generation phase.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mediaLibrary, movies, audiobooks, viewType, navStack, mediaOverrides, navigateInto, scanProgress.thumbnailsDone, sortOrder],
+    [mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, scanProgress.thumbnailsDone, sortOrder],
   );
-  // Kept in a ref so the scroll-restore effect can read the current item count without
-  // taking displayItems as a dependency (which would re-trigger restores mid-browse).
-  displayItemsRef.current = displayItems;
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0;
 
-  // Root label for breadcrumb
-  const rootLabel = mediaFilter === 'tv'
-    ? (editMode ? '✏️ TV' : 'TV')
+  // Header title: the section name at the root, otherwise the path below it ("Show › Season 1").
+  const sectionTitle = mediaFilter === 'tv'
+    ? 'TV'
     : mediaFilter === 'movies'
-      ? (editMode ? '✏️ Movies' : 'Movies')
+      ? 'Movies'
       : mediaFilter === 'audiobooks'
-        ? (editMode ? '✏️ Audiobooks' : 'Audiobooks')
-        : (editMode ? '✏️ Home' : 'Home');
-
-  // Build breadcrumb label: "Home / Show / Season 1"
-  const breadcrumb = [
-    rootLabel,
-    ...navStack.map((n: NavLevel) => n.label),
-  ].join(' › ');
+        ? 'Audiobooks'
+        : 'Home';
+  const headerTitle = `${editMode ? '✏️ ' : ''}${location?.title ?? sectionTitle}`;
 
   /** Records the current time as the `lastOpened` timestamp for a file display item. */
   const recordLastOpened = useCallback((item: DisplayItem & { kind: 'file' }) => {
@@ -823,10 +734,10 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
     } else if (item.mediaType === 'audiobook') {
       const folderKey = item.key.startsWith('audiobook:')
         ? item.key.slice('audiobook:'.length)
-        : navStack.find((n) => n.audiobookKey)?.audiobookKey;
+        : location?.audiobookKey;
       if (folderKey) dispatch(setAudiobookLastOpened({ folderKey, lastOpened: now }));
     }
-  }, [dispatch, navStack]);
+  }, [dispatch, location]);
 
   /** Open the edit screen for a given display item. */
   const openEditScreen = useCallback((item: DisplayItem) => {
@@ -1097,6 +1008,7 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
 
   return (
     <View style={styles.container}>
+      <Stack.Screen options={{ title: headerTitle }} />
       {mediaSources.length > 0 && hasLibraryContent ? (
         <ThemedView style={styles.listContainer}>
           {/* Scan progress banner – shown at the top of the grid while any scan phase is active */}
@@ -1149,38 +1061,11 @@ export function MediaBrowserScreen({ mediaFilter }: MediaBrowserScreenProps) {
             </View>
           )}
 
-          {/* Breadcrumb / back navigation – only shown when inside a subfolder */}
-          {navStack.length > 0 && (
-            <ThemedView style={styles.breadcrumbRow}>
-              <TouchableOpacity
-                onPress={navigateBack}
-                style={[styles.backButton, {
-                  borderColor: backButtonBorderColor,
-                  backgroundColor: backButtonBackgroundColor,
-                }]}
-              >
-                <ThemedText style={styles.backButtonArrow}>‹</ThemedText>
-                <ThemedText style={styles.backButtonText}>Back</ThemedText>
-              </TouchableOpacity>
-              <ThemedText style={styles.breadcrumb} numberOfLines={1}>
-                {breadcrumb}
-              </ThemedText>
-            </ThemedView>
-          )}
-
           <FlashList
-            ref={flashListRef}
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
             extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedItems).join(',')}`}
-            // v2 enables this by default to reduce feed/chat-style glitches, but it fights
-            // our own scroll save/restore below since each nav level swaps in an entirely
-            // unrelated item set (not an incremental append/prepend).
-            maintainVisibleContentPosition={{ disabled: true }}
-            // Tracks which item is at the top of the viewport, so navigating away can
-            // record a position that survives the list being re-laid out on return.
-            onViewableItemsChanged={handleViewableItemsChanged}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isEditable = (
                 item.mediaType === 'show' ||
@@ -1446,39 +1331,6 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     flex: 1,
-  },
-  breadcrumbRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    gap: 4,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    minHeight: 42,
-  },
-  backButtonArrow: {
-    fontSize: 28,
-    fontWeight: '300',
-  },
-  backButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  breadcrumb: {
-    flex: 1,
-    fontSize: 14,
-    opacity: 0.7,
   },
   gridContent: {
     padding: CARD_GAP,

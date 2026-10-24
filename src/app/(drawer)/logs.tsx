@@ -34,7 +34,7 @@ export default function LogsScreen() {
     useEffect(() => {
         if (!drawerUnlocked) {
             logger.warn('Logs', 'Blocked logs access while drawer is locked');
-            router.replace('/(drawer)');
+            router.replace('/(drawer)/(home)');
         }
     }, [drawerUnlocked]);
 

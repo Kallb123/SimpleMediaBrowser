@@ -59,17 +59,19 @@ SimpleMediaBrowser/
     │   ├── modal.tsx            # Stock Expo template "About" modal (leftover, see §10)
     │   ├── (drawer)/            # Real app navigation — drawer-based, this is what users see
     │   │   ├── _layout.tsx      # Drawer chrome: nav items, parent-mode lock/unlock, edit-mode toggle, startup scan trigger
-    │   │   ├── index.tsx        # Home — MediaBrowserScreen with mediaFilter="all"
-    │   │   ├── tv.tsx           # MediaBrowserScreen with mediaFilter="tv"
-    │   │   ├── movies.tsx       # MediaBrowserScreen with mediaFilter="movie"
-    │   │   ├── audiobooks.tsx   # MediaBrowserScreen with mediaFilter="audiobook"
+    │   │   ├── (home)/          # Home section (URL "/") — MediaBrowserScreen with mediaFilter="all"
+    │   │   │   ├── _layout.tsx  #   <MediaSectionStack /> — the section's native stack
+    │   │   │   ├── index.tsx    #   Section root
+    │   │   │   └── folder.tsx   #   One folder level (show / season / multi-part audiobook), pushed per level
+    │   │   ├── tv/, movies/, audiobooks/   # Same three files, mediaFilter="tv" / "movies" / "audiobooks"
     │   │   ├── settings.tsx     # Media sources, API keys, view options, import/export, parent-mode password
     │   │   └── logs.tsx         # Debug log viewer (reads Logger's in-memory/on-disk log)
     │   ├── (tabs)/ , index.tsx, explore.tsx   # Stock Expo template tab demo — NOT part of the real navigation flow (see §10)
     │   └── +html.tsx, +not-found.tsx          # Expo Router web/404 conventions
     │
     ├── components/
-    │   ├── MediaBrowserScreen.tsx   # THE core browsing UI: folder/grid navigation, FlashList rendering, thumbnails
+    │   ├── MediaBrowserScreen.tsx   # THE core browsing UI: one folder level's grid/list, FlashList rendering, thumbnails
+    │   ├── MediaSectionStack.tsx    # Shared native-stack layout for the four media sections
     │   ├── ui/                      # PosterBox, ListItem, MediaItem, DirectoryLink, FileLink, AddMediaSource
     │   ├── ThemedText.tsx, ThemedView.tsx, ThemedTextInput.tsx  # Theme-aware primitives used by real app screens
     │   ├── themed-text.tsx, themed-view.tsx, animated-icon*, app-tabs*, web-badge.tsx, hint-row.tsx
@@ -119,7 +121,7 @@ Entry point: `index.js` → `expo-router/entry` (configured via `"main"` in
    `firstTimeSetup` AsyncStorage key (`StorageKeys.FIRST_TIME_SETUP_KEY`).
    - Not set / not `"false"` → `router.replace('/firsttime')`.
    - Otherwise → redirect to the user's configured `defaultPage`
-     (`(drawer)`, `(drawer)/tv`, `(drawer)/movies`, or `(drawer)/audiobooks`).
+     (`(drawer)/(home)`, `(drawer)/tv`, `(drawer)/movies`, or `(drawer)/audiobooks`).
 4. Renders a `Stack` with screens: `firsttime`, `(drawer)`, `+not-found`,
    `modal` (presentation: modal), `edititem` (presentation: modal),
    `mergeshows` (presentation: modal).
@@ -131,8 +133,21 @@ password-gated "parent mode" unlock (see §9). It also fires the startup
 library scan (`FileScanner.scanAllSources`) on mount, once, if
 `rescanOnStartup` is enabled and at least one media source is configured.
 
-Screens are thin: `(drawer)/index.tsx`, `tv.tsx`, `movies.tsx`,
-`audiobooks.tsx` all render `<MediaBrowserScreen mediaFilter="..." />` — the
+Each media section (`(home)`, `tv`, `movies`, `audiobooks`) is a nested native
+stack (`MediaSectionStack`). Its `index.tsx` is the section root and every
+folder the user opens (a show, a season, a multi-part audiobook) is pushed as
+its own `folder.tsx` screen, with the level passed as route params
+(`label`, `title`, `showName`, `seasonKey`, `audiobookKey` — read by
+`hooks/useBrowseLocation.ts`). Because the levels above stay mounted
+underneath, their scroll positions survive navigating back without any
+save/restore logic, and the stack handles the header back arrow and Android
+hardware back. The drawer sets `popToTopOnBlur` on the sections so leaving one
+resets it to its root, and its custom item list also pops the current
+section to its root when tapped — that entry shows a back arrow while the
+section is deeper than its root.
+
+Screens are thin: every section's `index.tsx` and `folder.tsx` render
+`<MediaBrowserScreen mediaFilter="..." location={...} />` — the
 one large shared component that implements folder/grid navigation, list
 rendering, and playback launch.
 

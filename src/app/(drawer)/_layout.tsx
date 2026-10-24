@@ -1,7 +1,9 @@
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { Drawer } from 'expo-router/drawer';
 import { Colors } from '@/constants/Colors';
-import { DrawerContentScrollView, DrawerItemList, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
+import { DrawerContentScrollView, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
+import { CommonActions, DrawerActions, StackActions } from '@react-navigation/native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { useDispatch, useSelector } from 'react-redux';
 import { selectPassword, selectMediaSources, selectRescanOnStartup, setPassword } from '@/store/settingsReducer';
@@ -13,7 +15,7 @@ import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { logger } from '@/scripts/Logger';
 import { computeRecoveryCode, recoveryChallengeText } from '@/scripts/PasswordRecovery';
 
-const MAIN_ROUTES = ['index', 'tv', 'movies', 'audiobooks'];
+const MAIN_ROUTES = ['(home)', 'tv', 'movies', 'audiobooks'];
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { editMode, setEditMode, drawerUnlocked, setDrawerUnlocked } = useEditMode();
@@ -29,17 +31,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
   const currentRouteName = props.state.routes[props.state.index]?.name;
 
-  // Only show Home, TV, Movies in the main list; adjust index to match filtered routes
+  // Only the media sections go in the main list; the rest are behind the parent-mode unlock.
   const mainRoutes = props.state.routes.filter(r => MAIN_ROUTES.includes(r.name));
-  const mainIndex = mainRoutes.findIndex(r => r.name === currentRouteName);
-  const mainProps = {
-    ...props,
-    state: {
-      ...props.state,
-      routes: mainRoutes,
-      index: mainIndex >= 0 ? mainIndex : 0,
-    },
-  };
 
   const resetPasswordModal = () => {
     setShowPasswordModal(false);
@@ -67,7 +60,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     setEditMode(false);
     resetPasswordModal();
     if (currentRouteName === 'logs') {
-      props.navigation.navigate('index');
+      props.navigation.navigate('(home)');
     }
   };
 
@@ -133,7 +126,35 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={styles.drawerContent}>
-      <DrawerItemList {...mainProps} />
+      {mainRoutes.map((route) => {
+        const focused = route.name === currentRouteName;
+        const { drawerLabel, title } = props.descriptors[route.key].options;
+        const label = typeof drawerLabel === 'string' ? drawerLabel : (title ?? route.name);
+        // Each section is a stack of folder levels. Sections other than the current one are
+        // always at their root (popToTopOnBlur), so only the current one can be deeper; its
+        // entry then shows a back arrow, since tapping it returns to the section root.
+        const nestedState = route.state;
+        const isDeep = (nestedState?.index ?? 0) > 0;
+        const onPress = () => {
+          if (isDeep && nestedState?.key) {
+            props.navigation.dispatch({ ...StackActions.popToTop(), target: nestedState.key });
+          }
+          props.navigation.dispatch({
+            ...(focused ? DrawerActions.closeDrawer() : CommonActions.navigate(route)),
+            target: props.state.key,
+          });
+        };
+        return (
+          <DrawerItem
+            key={route.key}
+            label={label}
+            focused={focused}
+            onPress={onPress}
+            icon={isDeep ? ({ color, size }) => <Ionicons name="arrow-back" color={color} size={size} /> : undefined}
+            accessibilityLabel={isDeep ? `Back to ${title ?? label}` : undefined}
+          />
+        );
+      })}
 
       <View style={styles.drawerSpacer} />
 
@@ -286,8 +307,9 @@ export default function DrawerLayout() {
             headerStyle: { backgroundColor: Colors[theme].background },
         }}>
             <Drawer.Screen
-            name="index"
+            name="(home)"
             options={{
+                ...mediaSectionOptions,
                 drawerLabel: '🏠 Home',
                 title: "Home",
             }}
@@ -295,6 +317,7 @@ export default function DrawerLayout() {
             <Drawer.Screen
             name="tv"
             options={{
+                ...mediaSectionOptions,
                 drawerLabel: '📺 TV',
                 title: "TV",
             }}
@@ -302,6 +325,7 @@ export default function DrawerLayout() {
             <Drawer.Screen
             name="movies"
             options={{
+                ...mediaSectionOptions,
                 drawerLabel: '🎬 Movies',
                 title: "Movies",
             }}
@@ -309,6 +333,7 @@ export default function DrawerLayout() {
             <Drawer.Screen
             name="audiobooks"
             options={{
+                ...mediaSectionOptions,
                 drawerLabel: '🎧 Audiobooks',
                 title: "Audiobooks",
             }}
@@ -331,6 +356,14 @@ export default function DrawerLayout() {
         </Drawer>
     );
 }
+
+/** Options shared by the media sections, each of which is a nested stack (see MediaSectionStack). */
+const mediaSectionOptions = {
+  // The section's stack draws its own header (with the back arrow on folder levels).
+  headerShown: false,
+  // Leaving a section resets it to its root, so it is always entered at the top level.
+  popToTopOnBlur: true,
+};
 
 const styles = StyleSheet.create({
   drawerContent: {

@@ -204,7 +204,7 @@ export default function SettingsPrompt() {
   useEffect(() => {
     if (!drawerUnlocked) {
       logger.warn('Settings', 'Blocked settings access while drawer is locked');
-      router.replace('/(drawer)');
+      router.replace('/(drawer)/(home)');
       return;
     }
   }, [drawerUnlocked]);
@@ -354,7 +354,7 @@ export default function SettingsPrompt() {
         changeCount++;
       }
       logger.log('Settings', `Save complete – ${changeCount} setting(s) changed and persisted`);
-      router.replace('/(drawer)');
+      router.replace('/(drawer)/(home)');
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
