@@ -46,12 +46,13 @@ vs. code you should update alongside a real screen.
 npm install                # install dependencies
 npx expo start             # start the Metro dev server
 npm run android             # expo run:android
+npm run typegen             # write .expo/types (typed routes) without `expo start`; run before tsc
 npx tsc --noEmit            # type-check (must pass — CI runs this)
 npm run lint                 # expo lint (eslint-config-expo flat config)
 npx jest --ci --watchAll=false --passWithNoTests   # test suite
 ```
 
-CI (`.github/workflows/pre-build-test.yaml`) runs typecheck, lint, and jest
+CI (`.github/workflows/pre-build-test.yaml`) runs typegen, typecheck, lint, and jest
 on every PR into `main`. Run all three locally before considering a change
 done.
 
