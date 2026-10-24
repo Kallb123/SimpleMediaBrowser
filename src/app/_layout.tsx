@@ -11,7 +11,8 @@ import '@/global.css';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageKeys } from '@/constants/StorageKeys';
 import { Provider, useSelector } from 'react-redux';
-import { store, persistor } from '@/store/store';
+import { store, waitForPersistBootstrap } from '@/store/store';
+import { startLibraryPersistence } from '@/store/libraryPersistence';
 import { logger } from '@/scripts/Logger';
 import { EditModeProvider } from '@/contexts/EditModeContext';
 import { selectAppColorScheme } from '@/store/settingsReducer';
@@ -80,18 +81,10 @@ function AppRoot() {
   const firstTimeSetupCheck = async () => {
     logger.log('RootLayout', 'Checking first-time setup key');
     // Wait for redux-persist to finish rehydrating so defaultPage is available
-    await new Promise<void>((resolve) => {
-      if (persistor.getState().bootstrapped) {
-        resolve();
-        return;
-      }
-      const unsubscribe = persistor.subscribe(() => {
-        if (persistor.getState().bootstrapped) {
-          unsubscribe();
-          resolve();
-        }
-      });
-    });
+    await waitForPersistBootstrap();
+    // Load (or migrate) the library before routing: the drawer's startup scan
+    // carries metadata over from the existing library. Never rejects.
+    await startLibraryPersistence();
     const firstTimeLookup = await AsyncStorage.getItem(StorageKeys.FIRST_TIME_SETUP_KEY);
     console.log("First Time result:", firstTimeLookup);
     logger.log('RootLayout', `First-time setup key value: ${firstTimeLookup}`);
