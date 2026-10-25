@@ -157,6 +157,13 @@ function AppRoot() {
                   title: 'Merge Shows',
                 }}
               />
+              <Stack.Screen
+                name="player"
+                options={{
+                  presentation: 'modal',
+                  title: 'Now Playing',
+                }}
+              />
             </Stack>
           </BedtimeProvider>
         </EditModeProvider>

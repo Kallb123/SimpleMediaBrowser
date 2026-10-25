@@ -4,8 +4,10 @@ import { Image } from 'expo-image';
 import type { ImageLoadEventData } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { ThemedText } from '@/components/ThemedText';
+import { ListenProgressBar } from '@/components/ui/ListenProgressBar';
 import { WatchedBadge } from '@/components/ui/WatchedBadge';
 import type { ToggleWatched } from '@/components/ui/WatchedBadge';
+import type { IMediaAudiobook } from '@/store/libraryReducer';
 import { aspectRatio, needsBackdrop } from '@/utils/posterFit';
 
 type ThumbnailSource = VideoThumbnail | string;
@@ -41,6 +43,10 @@ export type PosterBoxProps = {
   /** A file's watched key (its `parsedPath`); a folder passes `watchKeys` instead. */
   watchKey?: string;
   watchKeys?: () => readonly string[];
+  /** An audiobook cell (a root book or one of its part rows) gets a listening progress bar. */
+  audiobook?: IMediaAudiobook;
+  /** For a part row: its `parsedPath`, so the bar shows that part only. Absent on a root book. */
+  audiobookPartPath?: string;
   onToggleWatched?: ToggleWatched;
   onPress: () => void;
   onLongPress?: () => void;
@@ -58,6 +64,8 @@ export function PosterBox({
   isSelected,
   watchKey,
   watchKeys,
+  audiobook,
+  audiobookPartPath,
   onToggleWatched,
   onPress,
   onLongPress,
@@ -172,6 +180,7 @@ export function PosterBox({
           editable={editMode}
           onToggle={onToggleWatched}
         />
+        {audiobook && <ListenProgressBar audiobook={audiobook} partPath={audiobookPartPath} />}
         {/* Entry count badge for show/season folders */}
         {item.kind === 'folder' && item.count !== undefined && (
           <View

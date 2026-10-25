@@ -9,12 +9,13 @@ import type { VideoThumbnail } from 'expo-video';
 import { Link, Stack, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder } from '@/store/settingsReducer';
+import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder, selectAudiobookPlayer } from '@/store/settingsReducer';
 import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, markWatched, markUnwatched, getShowWatchKeys, getSeasonWatchKeys, getAudiobookWatchKeys, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectMediaOverrides } from '@/store/libraryReducer';
 import { selectIsScanning, selectScanProgress } from '@/store/scanReducer';
 import { store } from '@/store/store';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner } from '@/scripts/FileScanner';
+import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { useThumbnailVersion } from '@/hooks/useThumbnailVersion';
 import { audioPartFiles } from '@/scripts/libraryUtils';
@@ -41,8 +42,8 @@ export type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number; /** Watch keys of the files below this folder (resolved lazily; drives its tick and bulk toggle). */ watchKeys: () => readonly string[] }
-  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook'; partNumber?: number };
+  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number; /** Watch keys of the files below this folder (resolved lazily; drives its tick and bulk toggle). */ watchKeys: () => readonly string[]; /** The audiobook a root multi-part entry stands for (drives its progress bar). */ audiobook?: IMediaAudiobook }
+  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook'; /** 1-based position in `audioPartFiles` of an audiobook part row (absent on a root single-file book). */ partNumber?: number; /** The audiobook this file belongs to (set for every audiobook file; the in-app player and progress bar use it). */ audiobook?: IMediaAudiobook };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -227,6 +228,7 @@ function buildAudiobookRootItems(
           mediaType: 'audiobook' as const,
           count: files.length,
           watchKeys: () => getAudiobookWatchKeys(audiobook),
+          audiobook,
         };
       }
       return {
@@ -239,6 +241,7 @@ function buildAudiobookRootItems(
         posterUri,
         mediaObject: makeAudiobookFileObject(files[0] ?? { path: audiobook.path, parsedPath: audiobook.path, filename: audiobook.title }),
         mediaType: 'audiobook' as const,
+        audiobook,
       };
     });
 }
@@ -270,6 +273,7 @@ function buildDisplayItems(
       mediaObject: makeAudiobookFileObject(file),
       mediaType: 'audiobook' as const,
       partNumber: index + 1,
+      audiobook,
     }));
   }
 
@@ -640,6 +644,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   const viewScale = useSelector(selectViewScale);
   const viewOrientation = useSelector(selectViewOrientation);
   const sortOrder = useSelector(selectSortOrder);
+  const audiobookPlayer = useSelector(selectAudiobookPlayer);
   const allLibrary = useSelector(selectMediaLibrary);
   const allMovies = useSelector(selectMovies);
   const allAudiobooks = useSelector(selectAudiobooks);
@@ -760,6 +765,19 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     dispatch(markWatched({ keys: [parsedPath], watchedAt: Date.now() }));
     return watchedBefore;
   }, [dispatch]);
+
+  /**
+   * Plays an audiobook in the in-app player and opens it. The player resumes where the book was
+   * left off (or the tapped part, if that is where it was) and marks parts listened as they finish,
+   * so unlike the external hand-off nothing is ticked here. It also records the book as last opened.
+   */
+  const playAudiobookInApp = useCallback((audiobook: IMediaAudiobook, partNumber: number | undefined) => {
+    logger.log('MediaBrowserScreen', `Playing audiobook in-app: ${audiobook.folderKey}${partNumber !== undefined ? ` part ${partNumber}` : ''}`);
+    AudiobookPlayer.getInstance()
+      .play(audiobook, partNumber !== undefined ? partNumber - 1 : undefined)
+      .catch((e: unknown) => logger.error('MediaBrowserScreen', `Failed to play audiobook: ${audiobook.folderKey}`, e));
+    router.push('/player');
+  }, []);
 
   /** Manual watched toggle (edit mode): sets or clears every file the badge stands for in one dispatch. */
   const handleToggleWatched = useCallback((keys: readonly string[], watched: boolean) => {
@@ -1093,7 +1111,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
-            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${Array.from(selectedItems).join(',')}`}
+            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${audiobookPlayer}|${Array.from(selectedItems).join(',')}`}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isEditable = (
                 item.mediaType === 'show' ||
@@ -1120,6 +1138,9 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                 handlePress = toggleSelection;
               } else if (item.kind === 'folder') {
                 handlePress = item.onPress;
+              } else if (item.mediaType === 'audiobook' && item.audiobook && audiobookPlayer === 'inapp') {
+                const { audiobook, partNumber } = item;
+                handlePress = () => playAudiobookInApp(audiobook, partNumber);
               } else {
                 handlePress = () => {
                   logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
@@ -1149,6 +1170,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                     partNumber={item.kind === 'file' ? item.partNumber : undefined}
                     watchKey={item.kind === 'file' ? item.mediaObject.parsedPath : undefined}
                     watchKeys={item.kind === 'folder' ? item.watchKeys : undefined}
+                    audiobook={item.audiobook}
+                    audiobookPartPath={item.kind === 'file' && item.partNumber !== undefined ? item.mediaObject.parsedPath : undefined}
                     onToggleWatched={handleToggleWatched}
                     onPress={handlePress}
                     onLongPress={toggleSelection}
@@ -1187,6 +1210,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                   isSelected={isSelected}
                   watchKey={item.kind === 'file' ? item.mediaObject.parsedPath : undefined}
                   watchKeys={item.kind === 'folder' ? item.watchKeys : undefined}
+                  audiobook={item.audiobook}
+                  audiobookPartPath={item.kind === 'file' && item.partNumber !== undefined ? item.mediaObject.parsedPath : undefined}
                   onToggleWatched={handleToggleWatched}
                   onPress={handlePress}
                   onLongPress={handleLongPress}
