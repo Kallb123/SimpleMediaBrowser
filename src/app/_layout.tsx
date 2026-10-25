@@ -164,6 +164,14 @@ function AppRoot() {
                   title: 'Now Playing',
                 }}
               />
+              <Stack.Screen
+                name="videoplayer"
+                options={{
+                  headerShown: false,
+                  presentation: 'fullScreenModal',
+                  animation: 'fade',
+                }}
+              />
             </Stack>
           </BedtimeProvider>
         </EditModeProvider>

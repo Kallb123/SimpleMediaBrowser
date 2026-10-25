@@ -12,6 +12,7 @@ import { setLibrarySink } from '@/scripts/librarySink';
 import type { LibrarySink } from '@/scripts/librarySink';
 import { logger } from '@/scripts/Logger';
 import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
+import { createAudioPlayer } from 'expo-audio';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -678,6 +679,40 @@ describe('AudiobookPlayer', () => {
 
     it('does nothing when nothing is loaded', () => {
       service.togglePlayPause();
+      expect(mockPlayer.play).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pause', () => {
+    it('pauses what is playing', async () => {
+      await playAndLoad(600);
+      mockPlayer.emit({ playing: true });
+      mockPlayer.pause.mockClear();
+
+      service.pause();
+      expect(mockPlayer.pause).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing when already paused', async () => {
+      await playAndLoad(600);
+      pauseByEvent();
+      mockPlayer.pause.mockClear();
+
+      service.pause();
+      expect(mockPlayer.pause).not.toHaveBeenCalled();
+    });
+
+    it('does not create the native player when nothing has played', () => {
+      service.pause();
+      expect(createAudioPlayer).not.toHaveBeenCalled();
+    });
+
+    it('leaves a part that is still loading paused once it has loaded', async () => {
+      await service.play(book);
+      service.pause();
+      mockPlayer.play.mockClear();
+
+      mockPlayer.finishLoading(600);
       expect(mockPlayer.play).not.toHaveBeenCalled();
     });
   });

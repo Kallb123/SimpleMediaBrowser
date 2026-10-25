@@ -1,6 +1,6 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import { openDatabaseAsync } from 'expo-sqlite';
-import type { IMediaLibrary, IMediaShow, IMediaAudiobook, IMediaOverride, IListenProgress } from '@/store/libraryReducer';
+import type { IMediaLibrary, IMediaShow, IMediaAudiobook, IMediaOverride, IListenProgress, IWatchProgress } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import { logger } from '@/scripts/Logger';
 
@@ -23,6 +23,8 @@ export interface PersistedLibrary {
     watched: { [key: string]: number };
     /** In-app audiobook resume points: `folderKey` → progress (see `libraryReducer`). */
     listenProgress: { [folderKey: string]: IListenProgress };
+    /** In-app video resume points: file `parsedPath` → progress (see `libraryReducer`). */
+    watchProgress: { [parsedPath: string]: IWatchProgress };
 }
 
 export const EMPTY_PERSISTED_LIBRARY: PersistedLibrary = Object.freeze({
@@ -33,6 +35,7 @@ export const EMPTY_PERSISTED_LIBRARY: PersistedLibrary = Object.freeze({
     thumbnails: Object.freeze({}),
     watched: Object.freeze({}),
     listenProgress: Object.freeze({}),
+    watchProgress: Object.freeze({}),
 });
 
 /**
@@ -51,20 +54,21 @@ export function pickPersistedLibrary(state: Partial<Record<string, unknown>> | n
         thumbnails: (s.thumbnails as PersistedLibrary['thumbnails'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.thumbnails,
         watched: (s.watched as PersistedLibrary['watched'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.watched,
         listenProgress: (s.listenProgress as PersistedLibrary['listenProgress'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.listenProgress,
+        watchProgress: (s.watchProgress as PersistedLibrary['watchProgress'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.watchProgress,
     };
 }
 
 // ── Database abstraction ──────────────────────────────────────────────────────
 
 /** Whole-collection keys stored in the `kv` table, one JSON document each. */
-const KV_KEYS = ['movies', 'audiobooks', 'mediaOverrides', 'thumbnails', 'watched', 'listenProgress'] as const;
+const KV_KEYS = ['movies', 'audiobooks', 'mediaOverrides', 'thumbnails', 'watched', 'listenProgress', 'watchProgress'] as const;
 
 /**
  * kv keys added after the first release of this layout. Stores written by an older
  * app lack them, which is expected (not worth a warning) and needs no version bump:
  * the row is simply created on the next save, and older apps ignore rows they don't know.
  */
-const KV_KEYS_ADDED_LATER: ReadonlySet<string> = new Set(['watched', 'listenProgress']);
+const KV_KEYS_ADDED_LATER: ReadonlySet<string> = new Set(['watched', 'listenProgress', 'watchProgress']);
 
 /** Everything {@link LibraryDb.readAll} returns: raw rows, parsed and validated by {@link LibraryStore.load}. */
 export interface LibraryDbContents {
@@ -196,6 +200,7 @@ interface Baseline {
     thumbnails: PersistedLibrary['thumbnails'] | undefined;
     watched: PersistedLibrary['watched'] | undefined;
     listenProgress: PersistedLibrary['listenProgress'] | undefined;
+    watchProgress: PersistedLibrary['watchProgress'] | undefined;
     /** Show name → show object last written to its row. */
     showRefs: Map<string, IMediaShow>;
 }
@@ -225,6 +230,7 @@ const baselineOf = (lib: PersistedLibrary): Baseline => ({
     thumbnails: lib.thumbnails,
     watched: lib.watched,
     listenProgress: lib.listenProgress,
+    watchProgress: lib.watchProgress,
     showRefs: new Map(Object.entries(lib.mediaLibrary)),
 });
 
@@ -297,10 +303,11 @@ export class LibraryStore {
             thumbnails: {},
             watched: {},
             listenProgress: {},
+            watchProgress: {},
         };
         const baseline = baselineOf(lib);
         // A missing key stays "unwritten" in the baseline so the next save recreates it.
-        baseline.movies = baseline.audiobooks = baseline.mediaOverrides = baseline.thumbnails = baseline.watched = baseline.listenProgress = undefined;
+        baseline.movies = baseline.audiobooks = baseline.mediaOverrides = baseline.thumbnails = baseline.watched = baseline.listenProgress = baseline.watchProgress = undefined;
         for (const key of KV_KEYS) {
             const row = contents.kv.find(r => r.key === key);
             if (!row) {
@@ -415,7 +422,8 @@ export class LibraryStore {
             || lib.mediaOverrides !== b.mediaOverrides
             || lib.thumbnails !== b.thumbnails
             || lib.watched !== b.watched
-            || lib.listenProgress !== b.listenProgress;
+            || lib.listenProgress !== b.listenProgress
+            || lib.watchProgress !== b.watchProgress;
     }
 
     /**

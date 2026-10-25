@@ -20,6 +20,7 @@ A local media browser for Android. Point it at folders on your device or network
 - **Metadata overrides** — An edit-mode allows changes to any items title, poster, or other metadata and override what was fetched automatically.
 - **Flexible display options** — Choose between grid and list layouts, adjust poster/thumbnail scale, and select landscape or portrait orientation modes.
 - **Parent-mode** — Includes password-protection for all settings pages, so that the usual user is limited to selecting media to watch. If the password is forgotten, "Forgot password?" on the unlock screen presents a small daily arithmetic challenge (computed from today's date, no internet required) that clears the password when solved.
+- **In-app video player** — Movies and episodes play inside the app. Tapping one that you stopped part-way asks whether to resume from where you left off or start over, and a video is ticked as watched once you get past 90% of it. If a file can't be played in the app, you can open it in an external player instead, or switch *Settings → Video player* to *External app*.
 - **Bedtime mode** — Optional parental control: during configured hours (e.g. 19:00–07:00) only the libraries you choose (audiobooks by default) open freely. Restricted sections, including Home, show a bed icon in the menu and need the settings password to open. Checked each time the app is opened.
 - **Dark & light theme** — Follows the system colour scheme automatically.
 - **Debug log viewer** — An in-app log screen captures scan and metadata activity to help diagnose issues without needing a connected debugger.
@@ -39,7 +40,7 @@ Enrichment includes per-episode images, so the user can see which one they are s
 | State | Redux Toolkit + redux-persist |
 | File access | expo-file-system (SAF / Storage Access Framework) |
 | Metadata | TMDB / TheTVDB REST APIs (TV & movies), iTunes Search API (audiobook cover art) |
-| Video | expo-video (thumbnail generation via expo-image-manipulator) |
+| Video | expo-video (in-app video playback; thumbnail generation via expo-image-manipulator) |
 | Audio | expo-audio (in-app audiobook playback, background + lock-screen controls) |
 | List rendering | @shopify/flash-list |
 

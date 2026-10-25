@@ -9,6 +9,8 @@ export type defaultPages = 'home' | 'tv' | 'movies' | 'audiobooks';
 export type appColorSchemes = 'light' | 'dark' | 'system';
 /** How audiobooks are played: in the app's own player (with resume) or handed to an external app. */
 export type audiobookPlayers = 'inapp' | 'external';
+/** How movies and episodes are played: in the app's own player (with resume) or handed to an external app. */
+export type videoPlayers = 'inapp' | 'external';
 export type sortOrders = 'alphabetical' | 'reverseAlphabetical' | 'lastOpened' | 'reverseLastOpened' | 'recentlyAdded';
 
 export interface IMediaSource {
@@ -47,6 +49,7 @@ interface SettingsState {
   bedtimeEnd: string
   /** Content types that stay accessible while bedtime mode is in effect. */
   bedtimeAllowedTypes: contentTypes[]
+  videoPlayer: videoPlayers
   audiobookPlayer: audiobookPlayers
   /** In-app audiobook playback speed (1 = normal). */
   audiobookPlaybackRate: number
@@ -77,6 +80,7 @@ const initialState: SettingsState = {
   bedtimeStart: '19:00',
   bedtimeEnd: '07:00',
   bedtimeAllowedTypes: ['audiobook'],
+  videoPlayer: 'inapp',
   audiobookPlayer: 'inapp',
   audiobookPlaybackRate: 1,
   audiobookRewindSeconds: 10,
@@ -164,6 +168,9 @@ export const settingsSlice = createSlice({
     setBedtimeAllowedTypes: (state, action: PayloadAction<contentTypes[]>) => {
       state.bedtimeAllowedTypes = action.payload;
     },
+    setVideoPlayer: (state, action: PayloadAction<videoPlayers>) => {
+      state.videoPlayer = action.payload;
+    },
     setAudiobookPlayer: (state, action: PayloadAction<audiobookPlayers>) => {
       state.audiobookPlayer = action.payload;
     },
@@ -178,7 +185,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setAudiobookPlayer, setAudiobookPlaybackRate, setAudiobookRewindSeconds } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setAudiobookPlaybackRate, setAudiobookRewindSeconds } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -204,6 +211,7 @@ export const selectAppColorScheme = (state: RootState): appColorSchemes =>
   (state.settingsReducer.appColorScheme ?? 'system') as appColorSchemes;
 export const selectSortOrder = (state: RootState): sortOrders =>
   (state.settingsReducer.sortOrder ?? 'alphabetical') as sortOrders;
+export const selectVideoPlayer = (state: RootState): videoPlayers => state.settingsReducer.videoPlayer ?? 'inapp';
 export const selectAudiobookPlayer = (state: RootState): audiobookPlayers => state.settingsReducer.audiobookPlayer ?? 'inapp';
 export const selectAudiobookPlaybackRate = (state: RootState): number => state.settingsReducer.audiobookPlaybackRate ?? 1;
 export const selectAudiobookRewindSeconds = (state: RootState): number => state.settingsReducer.audiobookRewindSeconds ?? 10;

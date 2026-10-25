@@ -9,13 +9,16 @@ import type { VideoThumbnail } from 'expo-video';
 import { Link, Stack, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder, selectAudiobookPlayer } from '@/store/settingsReducer';
+import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder, selectAudiobookPlayer, selectVideoPlayer } from '@/store/settingsReducer';
 import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, markWatched, markUnwatched, getShowWatchKeys, getSeasonWatchKeys, getAudiobookWatchKeys, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectMediaOverrides } from '@/store/libraryReducer';
 import { selectIsScanning, selectScanProgress } from '@/store/scanReducer';
 import { store } from '@/store/store';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner } from '@/scripts/FileScanner';
 import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
+import { setVideoRequest } from '@/scripts/VideoPlayback';
+import { resumePosition } from '@/scripts/videoProgress';
+import { formatClock } from '@/utils/formatClock';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { useThumbnailVersion } from '@/hooks/useThumbnailVersion';
 import { audioPartFiles } from '@/scripts/libraryUtils';
@@ -645,6 +648,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   const viewOrientation = useSelector(selectViewOrientation);
   const sortOrder = useSelector(selectSortOrder);
   const audiobookPlayer = useSelector(selectAudiobookPlayer);
+  const videoPlayer = useSelector(selectVideoPlayer);
   const allLibrary = useSelector(selectMediaLibrary);
   const allMovies = useSelector(selectMovies);
   const allAudiobooks = useSelector(selectAudiobooks);
@@ -778,6 +782,35 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       .catch((e: unknown) => logger.error('MediaBrowserScreen', `Failed to play audiobook: ${audiobook.folderKey}`, e));
     router.push('/player');
   }, []);
+
+  /**
+   * Plays a movie or episode in the in-app video player and opens it. Unlike the external hand-off
+   * nothing is ticked here: the player marks it watched once it gets near the end. With a saved resume
+   * point it asks first whether to continue from there. It also records the file as last opened.
+   */
+  const playVideoInApp = useCallback((item: DisplayItem & { kind: 'file' }) => {
+    const { path, parsedPath, filename } = item.mediaObject;
+    recordLastOpened(item);
+    const resumeAt = resumePosition(store.getState().libraryReducer.watchProgress[parsedPath]);
+    const play = (startAt: number) => {
+      logger.log('MediaBrowserScreen', `Playing video in-app: ${filename} (${path}) from ${Math.round(startAt)}s`);
+      setVideoRequest({ path, parsedPath, filename, title: item.label, startAt });
+      router.push('/videoplayer');
+    };
+    if (resumeAt > 0) {
+      Alert.alert(
+        item.label,
+        `Resume from ${formatClock(resumeAt)}?`,
+        [
+          { text: 'Start over', onPress: () => play(0) },
+          { text: 'Resume', onPress: () => play(resumeAt) },
+        ],
+        { cancelable: true },
+      );
+    } else {
+      play(0);
+    }
+  }, [recordLastOpened]);
 
   /** Manual watched toggle (edit mode): sets or clears every file the badge stands for in one dispatch. */
   const handleToggleWatched = useCallback((keys: readonly string[], watched: boolean) => {
@@ -1111,7 +1144,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
             data={displayItems}
             keyExtractor={(item: DisplayItem) => item.key}
             numColumns={numColumns}
-            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${audiobookPlayer}|${Array.from(selectedItems).join(',')}`}
+            extraData={`${editMode}|${pressedKey ?? ''}|${isListMode}|${audiobookPlayer}|${videoPlayer}|${Array.from(selectedItems).join(',')}`}
             renderItem={({ item }: { item: DisplayItem }) => {
               const isEditable = (
                 item.mediaType === 'show' ||
@@ -1141,6 +1174,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
               } else if (item.mediaType === 'audiobook' && item.audiobook && audiobookPlayer === 'inapp') {
                 const { audiobook, partNumber } = item;
                 handlePress = () => playAudiobookInApp(audiobook, partNumber);
+              } else if ((item.mediaType === 'movie' || item.mediaType === 'episode') && videoPlayer === 'inapp') {
+                handlePress = () => playVideoInApp(item);
               } else {
                 handlePress = () => {
                   logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);

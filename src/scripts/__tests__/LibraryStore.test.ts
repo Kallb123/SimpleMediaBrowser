@@ -79,7 +79,7 @@ describe('pickPersistedLibrary', () => {
       scanProgress: { phase: 'scanning' },
       scanList: ['x'],
     });
-    expect(Object.keys(picked).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaLibrary', 'mediaOverrides', 'movies', 'thumbnails', 'watched']);
+    expect(Object.keys(picked).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaLibrary', 'mediaOverrides', 'movies', 'thumbnails', 'watchProgress', 'watched']);
   });
 
   it('defaults missing fields to empty', () => {
@@ -101,6 +101,7 @@ describe('pickPersistedLibrary', () => {
     expect(picked.thumbnails).toBe(lib.thumbnails);
     expect(picked.watched).toBe(lib.watched);
     expect(picked.listenProgress).toBe(lib.listenProgress);
+    expect(picked.watchProgress).toBe(lib.watchProgress);
   });
 });
 
@@ -177,7 +178,7 @@ describe('LibraryStore', () => {
       expect(batch.version).toBe(String(LIBRARY_STORE_VERSION));
       expect(batch.clearShows).toBe(true);
       expect(names(batch)).toEqual(Object.keys(lib.mediaLibrary));
-      expect(batch.putKv.map(k => k.key).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaOverrides', 'movies', 'thumbnails', 'watched']);
+      expect(batch.putKv.map(k => k.key).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaOverrides', 'movies', 'thumbnails', 'watchProgress', 'watched']);
     });
 
     it('writeAll replaces previous contents', async () => {
@@ -261,6 +262,34 @@ describe('LibraryStore', () => {
       const lib = makeLibrary();
       await new LibraryStore(db).writeAll(lib);
       expect((await new LibraryStore(db).load())!.listenProgress).toEqual(lib.listenProgress);
+    });
+
+    it('loads a store written before video progress as having none, and adds the row on the next save', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.delete('watchProgress');
+
+      const store = new LibraryStore(db);
+      const loaded = (await store.load())!;
+      expect(loaded.watchProgress).toEqual({});
+      const stop = store.startAutoSave(makeSource(loaded), appState);
+      db.clearBatches();
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['watchProgress']);
+      expect(db.kv.get('watchProgress')).toBe('{}');
+      stop();
+    });
+
+    it('persists video progress and loads it back', async () => {
+      const lib = makeLibrary();
+      await new LibraryStore(db).writeAll(lib);
+      expect((await new LibraryStore(db).load())!.watchProgress).toEqual(lib.watchProgress);
+    });
+
+    it('throws when the watchProgress row has the wrong shape', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.set('watchProgress', '[]');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
     });
 
     it('throws when the listenProgress row has the wrong shape', async () => {
@@ -395,6 +424,18 @@ describe('LibraryStore', () => {
       expect(db.batches[0].putShows).toEqual([]);
       expect(db.batches[0].putKv.map(k => k.key)).toEqual(['listenProgress']);
       expect(JSON.parse(db.kv.get('listenProgress')!)).toEqual({ book: progress });
+      stop();
+    });
+
+    it('writes only the watchProgress row when video progress is recorded', async () => {
+      const { store, source, lib, stop } = await started();
+      const progress = { position: 600, duration: 5400, updatedAt: 1700000003000 };
+      source.set({ ...lib, watchProgress: { ...lib.watchProgress, 'm/b.mkv': progress } });
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putShows).toEqual([]);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['watchProgress']);
+      expect(JSON.parse(db.kv.get('watchProgress')!)).toEqual({ 'm/a.mkv': lib.watchProgress['m/a.mkv'], 'm/b.mkv': progress });
       stop();
     });
 
