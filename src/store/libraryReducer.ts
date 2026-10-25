@@ -157,6 +157,19 @@ export interface IListenProgress {
 }
 
 /**
+ * Where the in-app video player left off in a movie or episode (see `scripts/VideoProgressTracker.ts`).
+ * Keyed by the file's `parsedPath` in `LibraryState.watchProgress`.
+ */
+export interface IWatchProgress {
+  /** Position in seconds. */
+  position: number;
+  /** Length of the video in seconds, once known (0 when unknown). */
+  duration: number;
+  /** Timestamp (`Date.now()`) the progress was recorded; the later one wins on import. */
+  updatedAt: number;
+}
+
+/**
  * Payload for a single episode entry streamed to Redux during scanning.
  * Exported so FileScanner can build typed batch arrays without importing
  * a separate type module.
@@ -218,6 +231,12 @@ export interface LibraryState {
    * removed when the last part finishes, so the next play starts from the beginning.
    */
   listenProgress: { [folderKey: string]: IListenProgress };
+  /**
+   * In-app video resume points: file `parsedPath` → where watching stopped. Like `watched`,
+   * it sits beside the scanned objects so rescans don't lose it. An entry is removed once
+   * the video counts as watched, so the next play starts from the beginning.
+   */
+  watchProgress: { [parsedPath: string]: IWatchProgress };
 }
 
 // Define the initial state using that type
@@ -229,6 +248,7 @@ const initialState: LibraryState = {
   mediaOverrides: {},
   watched: {},
   listenProgress: {},
+  watchProgress: {},
 }
 
 export const settingsSlice = createSlice({
@@ -249,6 +269,7 @@ export const settingsSlice = createSlice({
       state.thumbnails = action.payload.thumbnails;
       state.watched = action.payload.watched ?? {};
       state.listenProgress = action.payload.listenProgress ?? {};
+      state.watchProgress = action.payload.watchProgress ?? {};
     },
     setMediaLibrary: (state, action: PayloadAction<IMediaLibrary>) => {
       state.mediaLibrary = action.payload;
@@ -413,6 +434,21 @@ export const settingsSlice = createSlice({
       for (const [key, progress] of Object.entries(action.payload)) {
         const existing = state.listenProgress[key];
         if (existing === undefined || progress.updatedAt > existing.updatedAt) state.listenProgress[key] = progress;
+      }
+    },
+    /** Records where in-app watching of a movie or episode stopped (replaces any previous point). */
+    setWatchProgress: (state, action: PayloadAction<{ key: string; progress: IWatchProgress }>) => {
+      state.watchProgress[action.payload.key] = action.payload.progress;
+    },
+    /** Forgets a video's resume point (watched, or reset by the user). */
+    clearWatchProgress: (state, action: PayloadAction<string>) => {
+      delete state.watchProgress[action.payload];
+    },
+    /** Folds imported resume points into the current ones, keeping the later `updatedAt` per video. */
+    mergeWatchProgress: (state, action: PayloadAction<{ [key: string]: IWatchProgress }>) => {
+      for (const [key, progress] of Object.entries(action.payload)) {
+        const existing = state.watchProgress[key];
+        if (existing === undefined || progress.updatedAt > existing.updatedAt) state.watchProgress[key] = progress;
       }
     },
     clearShowMetadata: (state, action: PayloadAction<string>) => {
@@ -678,7 +714,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, markWatched, markUnwatched, mergeWatched, setListenProgress, clearListenProgress, mergeListenProgress, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, markWatched, markUnwatched, mergeWatched, setListenProgress, clearListenProgress, mergeListenProgress, setWatchProgress, clearWatchProgress, mergeWatchProgress, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
@@ -688,6 +724,7 @@ export const selectThumbnails = (state: RootState) => state.libraryReducer.thumb
 export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;
 export const selectWatched = (state: RootState) => state.libraryReducer.watched;
 export const selectListenProgress = (state: RootState) => state.libraryReducer.listenProgress;
+export const selectWatchProgress = (state: RootState) => state.libraryReducer.watchProgress;
 
 /** True when `keys` is non-empty and every key is marked watched (an empty folder is never "all watched"). */
 export function areAllWatched(watched: { [key: string]: number }, keys: readonly string[]): boolean {

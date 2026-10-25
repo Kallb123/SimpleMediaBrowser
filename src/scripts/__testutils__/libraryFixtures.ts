@@ -24,6 +24,7 @@ export const makeLibrary = (): PersistedLibrary => ({
   thumbnails: { 'content://m/a.mkv': 'file:///t/a.jpg' },
   watched: { 'm/a.mkv': 1700000000000 },
   listenProgress: { book: { partPath: 'book/1.mp3', position: 12.5, duration: 600, updatedAt: 1700000000000 } },
+  watchProgress: { 'm/a.mkv': { position: 300, duration: 5400, updatedAt: 1700000000000 } },
 });
 
 /** Minimal stand-in for a Redux store holding a PersistedLibrary. */

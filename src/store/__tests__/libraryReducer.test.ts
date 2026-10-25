@@ -4,6 +4,7 @@ import libraryReducer, {
   areAllWatched,
   clearAllOverrides,
   clearListenProgress,
+  clearWatchProgress,
   clearLibraryAndMovies,
   getAudiobookWatchKeys,
   getSeasonWatchKeys,
@@ -13,8 +14,10 @@ import libraryReducer, {
   markWatched,
   mergeEpisodeBatch,
   mergeListenProgress,
+  mergeWatchProgress,
   mergeWatched,
   setListenProgress,
+  setWatchProgress,
   setMediaLibrary,
   setMediaOverride,
   setMoviePoster,
@@ -22,7 +25,7 @@ import libraryReducer, {
   updateMovieMetadata,
   updateShowMetadata,
 } from '@/store/libraryReducer';
-import type { IListenProgress, IMediaAudiobook, IMediaShow } from '@/store/libraryReducer';
+import type { IListenProgress, IMediaAudiobook, IMediaShow, IWatchProgress } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 
 const NO_IDS = () => ({ tvdb: null, imdb: null, tmdb: null });
@@ -238,7 +241,7 @@ describe('listen progress', () => {
 
   describe('hydrateLibrary', () => {
     const payload = (listenProgress?: Record<string, IListenProgress>): any => ({
-      mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress,
+      mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress, watchProgress: {},
     });
 
     it('restores persisted progress', () => {
@@ -248,6 +251,62 @@ describe('listen progress', () => {
     it('defaults to empty when the payload has none', () => {
       const seeded = libraryReducer(init(), setListenProgress({ folderKey: 'b', progress: progress(1) }));
       expect(libraryReducer(seeded, hydrateLibrary(payload())).listenProgress).toEqual({});
+    });
+  });
+});
+
+describe('watch progress', () => {
+  const init = () => libraryReducer(undefined, { type: '@@INIT' });
+  const progress = (updatedAt: number, position = 10): IWatchProgress => ({ position, duration: 5400, updatedAt });
+
+  it('starts empty', () => {
+    expect(init().watchProgress).toEqual({});
+  });
+
+  it('records a resume point per video, replacing the previous one', () => {
+    let state = libraryReducer(init(), setWatchProgress({ key: 'm/a.mkv', progress: progress(100, 10) }));
+    state = libraryReducer(state, setWatchProgress({ key: 'm/b.mkv', progress: progress(150) }));
+    state = libraryReducer(state, setWatchProgress({ key: 'm/a.mkv', progress: progress(200, 42) }));
+    expect(state.watchProgress).toEqual({ 'm/a.mkv': progress(200, 42), 'm/b.mkv': progress(150) });
+  });
+
+  it('forgets a resume point, ignoring unknown videos', () => {
+    let state = libraryReducer(init(), setWatchProgress({ key: 'm/a.mkv', progress: progress(100) }));
+    state = libraryReducer(state, setWatchProgress({ key: 'm/b.mkv', progress: progress(100) }));
+    state = libraryReducer(state, clearWatchProgress('m/a.mkv'));
+    state = libraryReducer(state, clearWatchProgress('never'));
+    expect(Object.keys(state.watchProgress)).toEqual(['m/b.mkv']);
+  });
+
+  it('merges imported points, keeping the later updatedAt', () => {
+    let state = libraryReducer(init(), setWatchProgress({ key: 'a', progress: progress(100, 1) }));
+    state = libraryReducer(state, setWatchProgress({ key: 'b', progress: progress(300, 2) }));
+    state = libraryReducer(state, mergeWatchProgress({
+      a: progress(200, 11), // newer: wins
+      b: progress(100, 22), // older: ignored
+      c: progress(50, 33), // new video: added
+    }));
+    expect(state.watchProgress).toEqual({ a: progress(200, 11), b: progress(300, 2), c: progress(50, 33) });
+  });
+
+  it('survives clearLibraryAndMovies, like listen progress', () => {
+    let state = libraryReducer(init(), setWatchProgress({ key: 'a', progress: progress(100) }));
+    state = libraryReducer(state, clearLibraryAndMovies());
+    expect(state.watchProgress).toEqual({ a: progress(100) });
+  });
+
+  describe('hydrateLibrary', () => {
+    const payload = (watchProgress?: Record<string, IWatchProgress>): any => ({
+      mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress: {}, watchProgress,
+    });
+
+    it('restores persisted progress', () => {
+      expect(libraryReducer(init(), hydrateLibrary(payload({ a: progress(7) }))).watchProgress).toEqual({ a: progress(7) });
+    });
+
+    it('defaults to empty when the payload has none', () => {
+      const seeded = libraryReducer(init(), setWatchProgress({ key: 'a', progress: progress(1) }));
+      expect(libraryReducer(seeded, hydrateLibrary(payload())).watchProgress).toEqual({});
     });
   });
 });
