@@ -1,4 +1,4 @@
-import { audiobookProgressFraction, partProgressFraction, resolveStartPoint } from '@/scripts/audiobookProgress';
+import { REWIND_MIN_PAUSE_MS, audiobookProgressFraction, partProgressFraction, resolveStartPoint, rewindOnResume } from '@/scripts/audiobookProgress';
 import type { IListenProgress, IMediaAudiobook } from '@/store/libraryReducer';
 
 const makeBook = (filenames: string[] = ['1.mp3', '2.mp3', '3.mp3', '4.mp3']): IMediaAudiobook => ({
@@ -123,5 +123,36 @@ describe('partProgressFraction', () => {
   it('is 0 when the part length is unknown and clamped to 1 past the end', () => {
     expect(partProgressFraction(progress('2.mp3', 25, 0), 'x/2.mp3')).toBe(0);
     expect(partProgressFraction(progress('2.mp3', 250, 100), 'x/2.mp3')).toBe(1);
+  });
+});
+
+describe('rewindOnResume', () => {
+  const LONG = REWIND_MIN_PAUSE_MS;
+
+  it('steps back after a long enough pause', () => {
+    expect(rewindOnResume(100, 10, LONG)).toBe(90);
+    expect(rewindOnResume(100, 30, LONG * 100)).toBe(70);
+  });
+
+  it('leaves the position alone after a short pause', () => {
+    expect(rewindOnResume(100, 10, LONG - 1)).toBe(100);
+    expect(rewindOnResume(100, 10, 0)).toBe(100);
+  });
+
+  it('does nothing when rewinding is off', () => {
+    expect(rewindOnResume(100, 0, LONG * 10)).toBe(100);
+  });
+
+  it('never goes before the start of the part', () => {
+    expect(rewindOnResume(4, 10, LONG)).toBe(0);
+    expect(rewindOnResume(10, 10, LONG)).toBe(0);
+  });
+
+  it('leaves an unusable position or input alone', () => {
+    expect(rewindOnResume(0, 10, LONG)).toBe(0);
+    expect(rewindOnResume(NaN, 10, LONG)).toBeNaN();
+    expect(rewindOnResume(100, NaN, LONG)).toBe(100);
+    expect(rewindOnResume(100, 10, NaN)).toBe(100);
+    expect(rewindOnResume(100, -5, LONG)).toBe(100);
   });
 });

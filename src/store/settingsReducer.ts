@@ -48,6 +48,10 @@ interface SettingsState {
   /** Content types that stay accessible while bedtime mode is in effect. */
   bedtimeAllowedTypes: contentTypes[]
   audiobookPlayer: audiobookPlayers
+  /** In-app audiobook playback speed (1 = normal). */
+  audiobookPlaybackRate: number
+  /** Seconds the in-app audiobook player steps back when resuming after a pause; 0 = off. */
+  audiobookRewindSeconds: number
 }
 
 // Define the initial state using that type
@@ -74,6 +78,8 @@ const initialState: SettingsState = {
   bedtimeEnd: '07:00',
   bedtimeAllowedTypes: ['audiobook'],
   audiobookPlayer: 'inapp',
+  audiobookPlaybackRate: 1,
+  audiobookRewindSeconds: 10,
 }
 
 // Stable fallback for persisted state that predates bedtime mode, so selectors don't
@@ -161,10 +167,18 @@ export const settingsSlice = createSlice({
     setAudiobookPlayer: (state, action: PayloadAction<audiobookPlayers>) => {
       state.audiobookPlayer = action.payload;
     },
+    setAudiobookPlaybackRate: (state, action: PayloadAction<number>) => {
+      if (!Number.isFinite(action.payload)) return;
+      state.audiobookPlaybackRate = Math.min(2, Math.max(0.5, action.payload));
+    },
+    setAudiobookRewindSeconds: (state, action: PayloadAction<number>) => {
+      if (!Number.isFinite(action.payload)) return;
+      state.audiobookRewindSeconds = Math.min(300, Math.max(0, Math.round(action.payload)));
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setAudiobookPlayer } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setAudiobookPlayer, setAudiobookPlaybackRate, setAudiobookRewindSeconds } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -191,6 +205,8 @@ export const selectAppColorScheme = (state: RootState): appColorSchemes =>
 export const selectSortOrder = (state: RootState): sortOrders =>
   (state.settingsReducer.sortOrder ?? 'alphabetical') as sortOrders;
 export const selectAudiobookPlayer = (state: RootState): audiobookPlayers => state.settingsReducer.audiobookPlayer ?? 'inapp';
+export const selectAudiobookPlaybackRate = (state: RootState): number => state.settingsReducer.audiobookPlaybackRate ?? 1;
+export const selectAudiobookRewindSeconds = (state: RootState): number => state.settingsReducer.audiobookRewindSeconds ?? 10;
 export const selectBedtimeEnabled = (state: RootState) => state.settingsReducer.bedtimeEnabled ?? false;
 export const selectBedtimeStart = (state: RootState) => state.settingsReducer.bedtimeStart ?? '19:00';
 export const selectBedtimeEnd = (state: RootState) => state.settingsReducer.bedtimeEnd ?? '07:00';

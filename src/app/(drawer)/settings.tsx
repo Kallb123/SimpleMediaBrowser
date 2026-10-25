@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -68,6 +68,15 @@ const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
 const audiobookPlayerOptions: { id: audiobookPlayers; label: string }[] = [
   {id: 'inapp', label: 'In-app'},
   {id: 'external', label: 'External app'},
+];
+
+const audiobookRewindOptions: { id: number; label: string }[] = [
+  {id: 0, label: 'Off'},
+  {id: 5, label: '5 s'},
+  {id: 10, label: '10 s'},
+  {id: 15, label: '15 s'},
+  {id: 30, label: '30 s'},
+  {id: 60, label: '60 s'},
 ];
 
 const sortOrderOptions: { id: sortOrders; label: string }[] = [
@@ -174,6 +183,7 @@ export default function SettingsPrompt() {
   const [appColorScheme, setLocalAppColorScheme] = useState('system' as appColorSchemes);
   const [sortOrder, setLocalSortOrder] = useState('alphabetical' as sortOrders);
   const [audiobookPlayer, setLocalAudiobookPlayer] = useState('inapp' as audiobookPlayers);
+  const [audiobookRewindSeconds, setLocalAudiobookRewindSeconds] = useState(10);
   const [bedtimeEnabled, setLocalBedtimeEnabled] = useState(false);
   const [bedtimeStart, setLocalBedtimeStart] = useState('19:00');
   const [bedtimeEnd, setLocalBedtimeEnd] = useState('07:00');
@@ -206,6 +216,7 @@ export default function SettingsPrompt() {
   const settingsAppColorScheme = useSelector(selectAppColorScheme);
   const settingsSortOrder = useSelector(selectSortOrder);
   const settingsAudiobookPlayer = useSelector(selectAudiobookPlayer);
+  const settingsAudiobookRewindSeconds = useSelector(selectAudiobookRewindSeconds);
   const settingsBedtimeEnabled = useSelector(selectBedtimeEnabled);
   const settingsBedtimeStart = useSelector(selectBedtimeStart);
   const settingsBedtimeEnd = useSelector(selectBedtimeEnd);
@@ -218,6 +229,7 @@ export default function SettingsPrompt() {
   const appColorSchemeRef = useRef(null);
   const sortOrderRef = useRef(null);
   const audiobookPlayerRef = useRef(null);
+  const audiobookRewindRef = useRef(null);
   const bedtimeStartRef = useRef(null);
   const bedtimeEndRef = useRef(null);
 
@@ -328,6 +340,12 @@ export default function SettingsPrompt() {
       }
       setLocalAudiobookPlayer(settingsAudiobookPlayer);
 
+      const audiobookRewindIndex = audiobookRewindOptions.findIndex(o => o.id === settingsAudiobookRewindSeconds);
+      if (audiobookRewindRef.current && audiobookRewindIndex >= 0) {
+        (audiobookRewindRef.current as any).selectIndex(audiobookRewindIndex);
+      }
+      setLocalAudiobookRewindSeconds(settingsAudiobookRewindSeconds);
+
       setLocalBedtimeEnabled(settingsBedtimeEnabled);
       const normalisedBedtimeStart = normaliseBedtimeTime(settingsBedtimeStart);
       const normalisedBedtimeEnd = normaliseBedtimeTime(settingsBedtimeEnd);
@@ -345,7 +363,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsAudiobookPlayer, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsAudiobookPlayer, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]);
 
   const save = useCallback(() => {
     try {
@@ -437,6 +455,11 @@ export default function SettingsPrompt() {
         dispatch(setAudiobookPlayer(audiobookPlayer));
         changeCount++;
       }
+      if (audiobookRewindSeconds !== settingsAudiobookRewindSeconds) {
+        logger.log('Settings', `Persisting: audiobookRewindSeconds changed ${settingsAudiobookRewindSeconds} → ${audiobookRewindSeconds}`);
+        dispatch(setAudiobookRewindSeconds(audiobookRewindSeconds));
+        changeCount++;
+      }
       if (bedtimeEnabled !== settingsBedtimeEnabled) {
         logger.log('Settings', `Persisting: bedtimeEnabled changed ${settingsBedtimeEnabled} → ${bedtimeEnabled}`);
         dispatch(setBedtimeEnabled(bedtimeEnabled));
@@ -462,7 +485,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, audiobookPlayer, settingsAudiobookPlayer, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, audiobookPlayer, settingsAudiobookPlayer, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
@@ -1254,8 +1277,39 @@ export default function SettingsPrompt() {
             dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
           />
         </View>
+
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Rewind on resume:</ThemedText>
+          <SelectDropdown
+            ref={audiobookRewindRef}
+            data={audiobookRewindOptions}
+            defaultValue={audiobookRewindOptions.find(o => o.id === settingsAudiobookRewindSeconds)}
+            onSelect={(selectedItem) => {
+              try {
+                setLocalAudiobookRewindSeconds(selectedItem.id);
+              } catch (e) {
+                logger.error('Settings', 'Exception while selecting audiobook rewind', e as Error);
+              }
+            }}
+            renderButton={(selectedItem, isOpened) => (
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                  {(selectedItem && selectedItem.label) || 'Please select...'}
+                </Text>
+                <Text>{isOpened ? "🔼" : "🔽"}</Text>
+              </View>
+            )}
+            renderItem={(item, index, isSelected) => (
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+          />
+        </View>
         <ThemedText style={styles.emptyText}>
-          In-app remembers your place in each audiobook and keeps playing in the background. External app hands the files to another app.
+          In-app remembers your place in each audiobook and keeps playing in the background. External app hands the files to another app. Rewind on resume steps back a few seconds when you come back after a pause.
         </ThemedText>
       </View>
 

@@ -4,9 +4,10 @@ import type { AudioPlayer, AudioStatus } from 'expo-audio';
 import { librarySink } from '@/scripts/librarySink';
 import { logger } from '@/scripts/Logger';
 import { audioPartFiles } from '@/scripts/libraryUtils';
-import { resolveStartPoint } from '@/scripts/audiobookProgress';
+import { resolveStartPoint, rewindOnResume } from '@/scripts/audiobookProgress';
 import { clearListenProgress, markWatched, setAudiobookLastOpened, setListenProgress } from '@/store/libraryReducer';
 import type { IMediaAudiobook } from '@/store/libraryReducer';
+import { setAudiobookPlaybackRate } from '@/store/settingsReducer';
 
 const TAG = 'AudiobookPlayer';
 
@@ -17,6 +18,18 @@ const SAVE_INTERVAL_MS = 10_000;
 const RESTART_THRESHOLD_SECONDS = 3;
 
 const LOAD_ERROR_MESSAGE = 'This file could not be played.';
+
+/** Length of the player screen's skip back / forward buttons. (The lock-screen ones are a fixed 10 s natively.) */
+export const SKIP_INTERVAL_SECONDS = 30;
+
+/** Selectable playback speeds. */
+export const PLAYBACK_RATES: readonly number[] = [0.75, 1, 1.25, 1.5, 1.75, 2];
+
+/** Selectable sleep-timer lengths, in minutes (the other option is "end of the current part"). */
+export const SLEEP_TIMER_MINUTES: readonly number[] = [15, 30, 45, 60];
+
+/** Stops playback after a while (`endsAt` is a `Date.now()` time) or when the current part ends. */
+export type SleepTimer = { kind: 'duration'; endsAt: number } | { kind: 'endOfPart' };
 
 /** What the in-app player has loaded; observable via `subscribe` / `getSnapshot`. */
 export interface NowPlaying {
@@ -32,6 +45,8 @@ export interface NowPlaying {
     finished: boolean;
     /** Set when the current part failed to load; cleared by the next load. */
     error: string | null;
+    /** Active sleep timer, if any. Survives switching parts and books. */
+    sleepTimer: SleepTimer | null;
 }
 
 /** A part that has been asked for but is not ready to play yet. */
@@ -47,6 +62,8 @@ interface PendingLoad {
      * had no source (first play) or had failed, so "idle" only means failure after this.
      */
     started: boolean;
+    /** Start playing once loaded; false after a sleep timer ended the previous part, so the next one waits for play. */
+    autoplay: boolean;
 }
 
 /**
@@ -80,6 +97,8 @@ export class AudiobookPlayer {
     /** Whether the last status event said the player was playing (the player's own flag drops while buffering). */
     private lastPlaying = false;
     private lastSaveAt = 0;
+    /** When playback last stopped (not at a part's end), for rewind on resume; null once consumed, or after a seek or load. */
+    private pausedAt: number | null = null;
 
     private constructor() {}
 
@@ -116,7 +135,7 @@ export class AudiobookPlayer {
         const now = this.snapshot;
         const alreadyLoaded = now?.folderKey === audiobook.folderKey && !now.error && !now.finished;
         if (now && alreadyLoaded && (partIndex === undefined || partIndex === now.partIndex)) {
-            if (!this.pending && !this.isPlaying()) this.player?.play();
+            if (!this.pending && !this.isPlaying()) this.resume();
             return;
         }
 
@@ -125,7 +144,12 @@ export class AudiobookPlayer {
 
         const progress = librarySink.getState().libraryReducer.listenProgress[audiobook.folderKey];
         const start = resolveStartPoint(audiobook, progress, partIndex);
-        await this.startLoad(audiobook, start.partIndex, start.position);
+        // A position above 0 can only come from the saved progress (any other part starts at 0), so
+        // reopening the book after a while steps back like resuming after a pause does.
+        const position = progress && start.position > 0
+            ? rewindOnResume(start.position, this.rewindSeconds(), Date.now() - progress.updatedAt)
+            : start.position;
+        await this.startLoad(audiobook, start.partIndex, position);
     }
 
     togglePlayPause(): void {
@@ -139,7 +163,44 @@ export class AudiobookPlayer {
         }
         if (this.pending) return;
         if (this.isPlaying()) player.pause();
-        else player.play();
+        else this.resume();
+    }
+
+    /**
+     * Relative seek within the current part (negative = back). Forward never reaches the very end: ending
+     * a paused part would auto-advance and start playing the next one.
+     */
+    skipBy(seconds: number): void {
+        const player = this.player;
+        const now = this.snapshot;
+        if (!player || !now || now.error || this.pending || !Number.isFinite(seconds)) return;
+        const from = player.currentTime;
+        if (!Number.isFinite(from)) return;
+        let target = Math.max(0, from + seconds);
+        if (seconds > 0 && this.partDuration > 0) target = Math.min(target, Math.max(from, this.partDuration - 1));
+        if (target === from) return;
+        void this.seekTo(target);
+    }
+
+    /** Stores the playback speed (remembered across books and restarts) and applies it to the player. */
+    setPlaybackRate(rate: number): void {
+        librarySink.dispatch(setAudiobookPlaybackRate(rate));
+        this.applyPlaybackRate();
+    }
+
+    /** Sets (`{ minutes }` / `'endOfPart'`) or clears (`null`) the sleep timer. It needs a loaded book to live in. */
+    setSleepTimer(option: { minutes: number } | 'endOfPart' | null): void {
+        const now = this.snapshot;
+        if (!now) return;
+        let timer: SleepTimer | null = null;
+        if (option === 'endOfPart') {
+            timer = { kind: 'endOfPart' };
+        } else if (option) {
+            if (!(option.minutes > 0)) return;
+            timer = { kind: 'duration', endsAt: Date.now() + option.minutes * 60_000 };
+        }
+        logger.log(TAG, `Sleep timer: ${timer === null ? 'cleared' : timer.kind === 'endOfPart' ? 'end of part' : `${Math.round((timer.endsAt - Date.now()) / 60_000)} min`}`);
+        this.setSnapshot({ ...now, sleepTimer: timer });
     }
 
     async seekTo(seconds: number): Promise<void> {
@@ -147,6 +208,8 @@ export class AudiobookPlayer {
         const before = this.snapshot;
         if (!player || !before || before.error || this.pending) return;
         const target = Math.max(0, this.partDuration > 0 ? Math.min(seconds, this.partDuration) : seconds);
+        // The listener picked this spot on purpose, so resuming from it must not step back further.
+        this.pausedAt = null;
         const token = this.loadToken;
         try {
             await player.seekTo(target);
@@ -185,21 +248,31 @@ export class AudiobookPlayer {
     // ── Loading ───────────────────────────────────────────────────────────────
 
     /**
-     * Points the player at a part and, once it has loaded, seeks to `position` and plays.
+     * Points the player at a part and, once it has loaded, seeks to `position` and plays (unless `autoplay` is false).
      * The snapshot is updated synchronously (before any await) so a screen opened right after
      * `play()` already sees the book.
      */
-    private async startLoad(audiobook: IMediaAudiobook, partIndex: number, position: number): Promise<void> {
+    private async startLoad(audiobook: IMediaAudiobook, partIndex: number, position: number, autoplay = true): Promise<void> {
         const parts = audioPartFiles(audiobook.files);
         const part = parts[partIndex];
         if (!part) return;
 
         const token = ++this.loadToken;
         const { title, poster } = this.displayFor(audiobook);
-        this.pending = { token, position, replaced: false, started: false };
+        this.pending = { token, position, replaced: false, started: false, autoplay };
         this.partDuration = 0;
         this.lastPlaying = false;
-        this.setSnapshot({ folderKey: audiobook.folderKey, partIndex, audiobook, title, poster, finished: false, error: null });
+        this.pausedAt = null;
+        this.setSnapshot({
+            folderKey: audiobook.folderKey,
+            partIndex,
+            audiobook,
+            title,
+            poster,
+            finished: false,
+            error: null,
+            sleepTimer: this.snapshot?.sleepTimer ?? null,
+        });
 
         try {
             const player = this.ensurePlayer();
@@ -231,7 +304,17 @@ export class AudiobookPlayer {
             if (position > 0) {
                 player.seekTo(position).catch((e: unknown) => logger.warn(TAG, 'Seek to saved position failed', e));
             }
-            player.play();
+            // Applied per part: it is cheap, and not every native player keeps the rate across `replace`.
+            this.applyPlaybackRate();
+            // A duration timer that ran out while the part loaded (e.g. at a part boundary) stops here: the
+            // first playing event after a load reads as a resume, which would drop the timer instead.
+            const timer = this.snapshot?.sleepTimer;
+            const timerEnded = timer?.kind === 'duration' && Date.now() >= timer.endsAt;
+            if (timerEnded && this.snapshot) {
+                logger.log(TAG, 'Sleep timer ended while a part loaded, not starting it');
+                this.setSnapshot({ ...this.snapshot, sleepTimer: null });
+            }
+            if (pending.autoplay && !timerEnded) player.play();
             this.saveProgress(position);
         } else if (status.playbackState === 'buffering') {
             pending.started = true;
@@ -264,13 +347,70 @@ export class AudiobookPlayer {
         }
         const wasPlaying = this.lastPlaying;
         this.lastPlaying = status.playing;
+        if (this.enforceSleepTimer(wasPlaying, status)) return;
         if (status.playing) {
             if (this.snapshot.finished) this.setSnapshot({ ...this.snapshot, finished: false });
+            if (!wasPlaying) this.rewindAfterOutsideResume(status.currentTime);
             if (Date.now() - this.lastSaveAt >= SAVE_INTERVAL_MS) this.saveProgress(status.currentTime);
         } else if (wasPlaying) {
+            this.pausedAt = Date.now();
             this.saveProgress(status.currentTime);
         }
     };
+
+    /**
+     * Enforces an expired duration timer from the status events (a JS timer would not fire reliably with
+     * the app in the background, but these keep arriving while playing). Returns true when it paused playback.
+     */
+    private enforceSleepTimer(wasPlaying: boolean, status: AudioStatus): boolean {
+        const now = this.snapshot;
+        const timer = now?.sleepTimer;
+        if (!now || timer?.kind !== 'duration' || Date.now() < timer.endsAt) return false;
+        this.setSnapshot({ ...now, sleepTimer: null });
+        // Expired while paused, or this event is the resume itself: drop it quietly so play does not pause again.
+        if (!wasPlaying || !status.playing || !this.player) return false;
+        logger.log(TAG, 'Sleep timer ended, pausing');
+        this.player.pause();
+        this.lastPlaying = false;
+        this.pausedAt = Date.now();
+        this.saveProgress(status.currentTime);
+        return true;
+    }
+
+    /** Resumed from outside the app (lock screen, headset, audio focus back): step back like the in-app resume does. */
+    private rewindAfterOutsideResume(currentTime: number): void {
+        const pausedAt = this.pausedAt;
+        this.pausedAt = null;
+        const player = this.player;
+        if (pausedAt === null || !player) return;
+        const target = rewindOnResume(currentTime, this.rewindSeconds(), Date.now() - pausedAt);
+        if (target === currentTime) return;
+        player.seekTo(target).catch((e: unknown) => logger.warn(TAG, 'Rewind on resume failed', e));
+        this.saveProgress(target);
+    }
+
+    /** Resumes the loaded part from the app, stepping back if it has been paused for a while. */
+    private resume(): void {
+        const player = this.player;
+        const now = this.snapshot;
+        if (!player || !now) return;
+        // An expired timer must not pause the playback this starts.
+        if (now.sleepTimer?.kind === 'duration' && Date.now() >= now.sleepTimer.endsAt) {
+            this.setSnapshot({ ...now, sleepTimer: null });
+        }
+        // Consumed before `play()`, so the status event that reports the resume does not rewind again.
+        const pausedAt = this.pausedAt;
+        this.pausedAt = null;
+        if (pausedAt !== null) {
+            const from = player.currentTime;
+            const target = rewindOnResume(from, this.rewindSeconds(), Date.now() - pausedAt);
+            if (target !== from) {
+                player.seekTo(target).catch((e: unknown) => logger.warn(TAG, 'Rewind on resume failed', e));
+                this.saveProgress(target);
+            }
+        }
+        player.play();
+    }
 
     /** The app left the foreground: it may be killed, so keep the place of anything still playing. */
     private onAppState = (state: string): void => {
@@ -285,16 +425,24 @@ export class AudiobookPlayer {
         const part = parts[now.partIndex];
         if (part) librarySink.dispatch(markWatched({ keys: [part.parsedPath], watchedAt: Date.now() }));
 
+        // An "end of part" sleep timer is used up here: the next part is loaded but left waiting for play.
+        const sleeping = now.sleepTimer?.kind === 'endOfPart';
+        if (sleeping) {
+            logger.log(TAG, 'Sleep timer ended at the end of the part');
+            this.setSnapshot({ ...now, sleepTimer: null });
+        }
+
         const next = parts[now.partIndex + 1];
         if (next) {
-            logger.log(TAG, `Part ${now.partIndex + 1} of "${now.title}" finished, advancing`);
+            logger.log(TAG, `Part ${now.partIndex + 1} of "${now.title}" finished, ${sleeping ? 'waiting on the next part' : 'advancing'}`);
             // Persist the move now, so a restart before the next part has loaded resumes at its start.
             this.dispatchProgress(now.folderKey, next.parsedPath, 0, 0);
-            void this.startLoad(now.audiobook, now.partIndex + 1, 0);
+            void this.startLoad(now.audiobook, now.partIndex + 1, 0, !sleeping);
         } else {
             logger.log(TAG, `"${now.title}" finished`);
             librarySink.dispatch(clearListenProgress(now.folderKey));
-            this.setSnapshot({ ...now, finished: true });
+            // The book is over, so any timer (even a duration one) has nothing left to stop.
+            this.setSnapshot({ ...now, finished: true, sleepTimer: null });
         }
     }
 
@@ -364,7 +512,7 @@ export class AudiobookPlayer {
                     // (a content:// URI would make the whole call fail), and covers are local files.
                     artworkUrl: /^(file|https?):\/\//i.test(poster) ? poster : undefined,
                 },
-                { showSeekBackward: false, showSeekForward: false },
+                { showSeekBackward: true, showSeekForward: true },
             );
         } catch (e) {
             logger.warn(TAG, 'Failed to activate lock-screen controls', e);
@@ -372,6 +520,21 @@ export class AudiobookPlayer {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private rewindSeconds(): number {
+        return librarySink.getState().settingsReducer.audiobookRewindSeconds ?? 10;
+    }
+
+    private applyPlaybackRate(): void {
+        const player = this.player;
+        if (!player) return;
+        const rate = librarySink.getState().settingsReducer.audiobookPlaybackRate ?? 1;
+        try {
+            player.setPlaybackRate(rate);
+        } catch (e) {
+            logger.warn(TAG, `Failed to set the playback rate to ${rate}`, e);
+        }
+    }
 
     private isPlaying(): boolean {
         return this.lastPlaying || (this.player?.playing ?? false);
@@ -397,6 +560,7 @@ export class AudiobookPlayer {
             && prev.poster === next.poster
             && prev.finished === next.finished
             && prev.error === next.error
+            && prev.sleepTimer === next.sleepTimer
         ) return;
         this.snapshot = next;
         // Copy so a listener unsubscribing during notification can't skip another one.

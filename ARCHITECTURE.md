@@ -75,7 +75,9 @@ SimpleMediaBrowser/
     │
     ├── components/
     │   ├── MediaBrowserScreen.tsx   # THE core browsing UI: one folder level's grid/list, FlashList rendering, thumbnails
-    │   ├── MediaSectionStack.tsx    # Shared native-stack layout for the four media sections
+    │   ├── MediaSectionStack.tsx    # Shared native-stack layout for the four media sections (+ the mini-player bar)
+    │   ├── MiniPlayer.tsx           # "Now playing" bar under the browse screens; tap opens the /player modal
+    │   ├── OptionSheet.tsx          # Small modal option list (player speed / sleep-timer pickers)
     │   ├── ui/                      # PosterBox, ListItem, WatchedBadge, MediaItem, DirectoryLink, FileLink, AddMediaSource
     │   ├── ThemedText.tsx, ThemedView.tsx, ThemedTextInput.tsx  # Theme-aware primitives used by real app screens
     │   ├── themed-text.tsx, themed-view.tsx, animated-icon*, app-tabs*, web-badge.tsx, hint-row.tsx
@@ -197,6 +199,8 @@ Redux Toolkit with three slices, combined in `store/store.ts`:
   feature toggles (`enablePosterFetching`, `enableThumbnailGeneration`,
   `rescanOnStartup`, `fetchEpisodeNames`, `fetchEpisodeThumbnails`),
   `audiobookPlayer` (`inapp` | `external`, default `inapp`),
+  `audiobookPlaybackRate` (0.5–2, default 1, set from the player screen),
+  `audiobookRewindSeconds` (rewind on resume, 0 = off, default 10),
   `appColorScheme`, and `settingsPassword` (parent-mode lock).
 - **`libraryReducer`** — everything produced by scanning/enrichment:
   `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`,
@@ -667,8 +671,32 @@ Redux only through `librarySink`. Behaviour:
   because the native side loads it with `java.net.URL`). The `expo-audio` config plugin
   in `app.json` (`enableBackgroundPlayback: true`, microphone/recording disabled) adds
   the media-playback foreground service and its permissions. That is a native change,
-  so it needs a rebuild. The media notification has play/pause and no part navigation
-  (expo-audio removes next/previous from the session).
+  so it needs a rebuild. The media notification has play/pause and seek back/forward
+  (expo-audio fixes those at 10 s natively), and no part navigation (expo-audio removes
+  next/previous from the session).
+- **Skip.** `skipBy(±SKIP_INTERVAL_SECONDS)` (30 s) seeks within the current part. Forward
+  stops 1 s short of the end, so a skip never ends a paused part (which would auto-advance
+  and start playing).
+- **Speed.** `setPlaybackRate` stores `settings.audiobookPlaybackRate` (via `librarySink`)
+  and applies it; it is re-applied after every part load. Android preserves pitch.
+- **Sleep timer.** `setSleepTimer({ minutes } | 'endOfPart' | null)`; the timer is in the
+  `NowPlaying` snapshot. A duration timer is enforced from `playbackStatusUpdate` events,
+  not `setTimeout`: RN's JS timers don't fire while the app is backgrounded on Android,
+  but status events keep arriving while audio plays. A timer that expires while paused is
+  just cleared, so pressing play afterwards doesn't pause again straight away. One that
+  expires while a part is loading stops there, and the part is not started. "End of
+  part" ticks the part and loads the next one paused (`startLoad`'s `autoplay: false`).
+- **Rewind on resume.** When playback resumes after a pause of at least
+  `REWIND_MIN_PAUSE_MS` (30 s), it steps back `settings.audiobookRewindSeconds` within the
+  part (`rewindOnResume` in `audiobookProgress.ts`). The pause starts when status goes from
+  playing to paused (`pausedAt`). For a book loaded fresh from saved progress, the pause is
+  measured from `listenProgress.updatedAt`. The rewind applies to the in-app play button,
+  the lock screen/headset (detected in `onStatus` on the paused→playing transition) and
+  reopening a book. A seek while paused clears `pausedAt`, because the listener picked
+  that spot.
+- **Mini-player.** `MediaSectionStack` renders `MiniPlayer` under each media section's
+  stack once something has been played in-app. While it shows, it zeroes the bottom
+  safe-area inset for the stack subtree because it owns the bottom edge.
 
 **Video, and audiobooks with `audiobookPlayer === 'external'`.** These are handed off to
 another app. `openMediaInExternalApp` resolves a

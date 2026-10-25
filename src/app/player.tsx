@@ -1,20 +1,27 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useAudioPlayerStatus } from 'expo-audio';
 import Slider from '@react-native-community/slider';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { OptionSheet } from '@/components/OptionSheet';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useTheme } from '@/hooks/use-theme';
+import { useAppSelector } from '@/hooks/useRedux';
 import { useThemeColor } from '@/hooks/useThemeColor';
-import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
+import { AudiobookPlayer, PLAYBACK_RATES, SKIP_INTERVAL_SECONDS, SLEEP_TIMER_MINUTES } from '@/scripts/AudiobookPlayer';
 import { audioPartFiles } from '@/scripts/libraryUtils';
+import { selectAudiobookPlaybackRate } from '@/store/settingsReducer';
 import { formatClock } from '@/utils/formatClock';
 
 const COVER_MAX_SIZE = 360;
 const ERROR_COLOR = '#d9534f';
+
+/** 1 -> "1×", 1.5 -> "1.5×", 0.75 -> "0.75×". */
+const formatRate = (rate: number) => `${parseFloat(rate.toFixed(2))}×`;
 
 /**
  * The in-app audiobook player. It only observes the `AudiobookPlayer` service, which owns the
@@ -34,6 +41,20 @@ export default function PlayerScreen() {
   // While the thumb is held, show the thumb's position rather than the playing one; the seek
   // happens on release, so a drag is never fought by live position updates.
   const [dragPosition, setDragPosition] = useState<number | null>(null);
+  const [picker, setPicker] = useState<'speed' | 'sleep' | null>(null);
+  const playbackRate = useAppSelector(selectAudiobookPlaybackRate);
+
+  // Re-render each second while a duration sleep timer is counting down. The screen is in the
+  // foreground here, so a JS interval is fine; the service itself enforces the timer.
+  const sleepTimer = nowPlaying?.sleepTimer ?? null;
+  const countingDown = sleepTimer?.kind === 'duration';
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!countingDown) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [countingDown]);
 
   if (!nowPlaying) {
     return (
@@ -59,6 +80,36 @@ export default function PlayerScreen() {
     setDragPosition(value);
     await service.seekTo(value);
     setDragPosition(null);
+  };
+
+  const canSkip = !error && !loading && duration > 0;
+  const sleepLabel =
+    sleepTimer?.kind === 'duration'
+      ? formatClock(Math.ceil((sleepTimer.endsAt - now) / 1000))
+      : sleepTimer?.kind === 'endOfPart'
+        ? 'End of part'
+        : 'Sleep';
+  const rateLabel = formatRate(playbackRate);
+
+  const speedOptions = PLAYBACK_RATES.map((rate) => ({
+    key: String(rate),
+    label: formatRate(rate),
+    selected: rate === playbackRate,
+  }));
+  const sleepOptions = [
+    { key: 'off', label: 'Off', selected: !sleepTimer },
+    ...SLEEP_TIMER_MINUTES.map((minutes) => ({ key: String(minutes), label: `${minutes} min` })),
+    { key: 'endOfPart', label: 'End of part', selected: sleepTimer?.kind === 'endOfPart' },
+  ];
+  const handleSelectSleep = (key: string) => {
+    setPicker(null);
+    if (key === 'off') service.setSleepTimer(null);
+    else if (key === 'endOfPart') service.setSleepTimer('endOfPart');
+    else service.setSleepTimer({ minutes: Number(key) });
+  };
+  const handleSelectSpeed = (key: string) => {
+    setPicker(null);
+    service.setPlaybackRate(Number(key));
   };
 
   const statusLine = error ?? (finished ? 'Finished' : partCount > 1 ? `Part ${partIndex + 1} of ${partCount}` : null);
@@ -117,7 +168,17 @@ export default function PlayerScreen() {
               accessibilityRole="button"
               accessibilityLabel="Previous part"
             >
-              <Ionicons name="play-skip-back" size={36} color={text} />
+              <Ionicons name="play-skip-back" size={30} color={text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => service.skipBy(-SKIP_INTERVAL_SECONDS)}
+              disabled={!canSkip}
+              hitSlop={8}
+              style={!canSkip && styles.disabled}
+              accessibilityRole="button"
+              accessibilityLabel={`Back ${SKIP_INTERVAL_SECONDS} seconds`}
+            >
+              <MaterialIcons name="replay-30" size={34} color={text} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => service.togglePlayPause()}
@@ -132,6 +193,16 @@ export default function PlayerScreen() {
               )}
             </TouchableOpacity>
             <TouchableOpacity
+              onPress={() => service.skipBy(SKIP_INTERVAL_SECONDS)}
+              disabled={!canSkip}
+              hitSlop={8}
+              style={!canSkip && styles.disabled}
+              accessibilityRole="button"
+              accessibilityLabel={`Forward ${SKIP_INTERVAL_SECONDS} seconds`}
+            >
+              <MaterialIcons name="forward-30" size={34} color={text} />
+            </TouchableOpacity>
+            <TouchableOpacity
               onPress={() => service.nextPart()}
               disabled={isLastPart}
               hitSlop={12}
@@ -139,11 +210,47 @@ export default function PlayerScreen() {
               accessibilityRole="button"
               accessibilityLabel="Next part"
             >
-              <Ionicons name="play-skip-forward" size={36} color={text} />
+              <Ionicons name="play-skip-forward" size={30} color={text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.secondaryButtons}>
+            <TouchableOpacity
+              onPress={() => setPicker('speed')}
+              style={[styles.pill, { backgroundColor: theme.backgroundElement }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Playback speed, ${rateLabel}`}
+            >
+              <Ionicons name="speedometer-outline" size={18} color={text} />
+              <ThemedText style={styles.pillText}>{rateLabel}</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setPicker('sleep')}
+              style={[styles.pill, { backgroundColor: theme.backgroundElement }]}
+              accessibilityRole="button"
+              accessibilityLabel={sleepTimer ? `Sleep timer, ${sleepLabel}` : 'Sleep timer, off'}
+            >
+              <Ionicons name={sleepTimer ? 'moon' : 'moon-outline'} size={18} color={sleepTimer ? tint : text} />
+              <ThemedText style={[styles.pillText, countingDown && styles.pillTextClock]}>{sleepLabel}</ThemedText>
             </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
+
+      <OptionSheet
+        visible={picker === 'speed'}
+        title="Playback speed"
+        options={speedOptions}
+        onSelect={handleSelectSpeed}
+        onDismiss={() => setPicker(null)}
+      />
+      <OptionSheet
+        visible={picker === 'sleep'}
+        title="Sleep timer"
+        options={sleepOptions}
+        onSelect={handleSelectSleep}
+        onDismiss={() => setPicker(null)}
+      />
     </ThemedView>
   );
 }
@@ -210,8 +317,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 40,
+    gap: 20,
     marginTop: 16,
+  },
+  secondaryButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginTop: 20,
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 40,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  pillText: {
+    fontSize: 15,
+  },
+  pillTextClock: {
+    fontVariant: ['tabular-nums'],
   },
   playButton: {
     width: 72,

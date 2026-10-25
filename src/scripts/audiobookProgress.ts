@@ -44,6 +44,20 @@ export function resolveStartPoint(
     return saved ? { partIndex: saved.index, position: saved.position } : { partIndex: 0, position: 0 };
 }
 
+/** A pause shorter than this never rewinds: a quick interruption doesn't need a recap. */
+export const REWIND_MIN_PAUSE_MS = 30_000;
+
+/**
+ * Where to resume after being paused for `pausedForMs`: `rewindSeconds` earlier than `position`, so the
+ * listener remembers where they were. Stays within the part (never goes before 0); unchanged for a short
+ * pause, a rewind of 0 (off) or an unusable position.
+ */
+export function rewindOnResume(position: number, rewindSeconds: number, pausedForMs: number): number {
+    if (!Number.isFinite(position) || position <= 0) return position;
+    if (!(rewindSeconds > 0) || !(pausedForMs >= REWIND_MIN_PAUSE_MS)) return position;
+    return Math.max(0, position - rewindSeconds);
+}
+
 /** Fraction (0..1) of the part `progress` is in that has been played; 0 when its length is unknown. */
 function partFraction(progress: IListenProgress): number {
     if (!(progress.duration > 0) || !Number.isFinite(progress.position)) return 0;
