@@ -11,9 +11,11 @@ codebase. For a quick orientation and contributor workflow, see
 Zibo ("Zibo — Local Media Library") is an Android-first Expo/React Native app
 that turns
 folders on local or network storage (accessed via Android's Storage Access
-Framework) into a browsable media library. It does **not** play media itself
-— it scans, organizes, and enriches metadata, then hands playback off to an
-external player app via an Android intent. Three media types are supported:
+Framework) into a browsable media library. It scans, organizes, and enriches
+metadata, then hands video playback off to an external player app via an
+Android intent. Audiobooks play in the app by default (so listening progress
+can be tracked and resumed — §13), with the external hand-off as a setting.
+Three media types are supported:
 TV shows (with seasons/episodes), movies, and audiobooks.
 
 ## 2. Tech Stack
@@ -26,6 +28,7 @@ TV shows (with seasons/episodes), movies, and audiobooks.
 | File access | `expo-file-system` (new `File`/`Directory` API) + SAF (`expo-file-system/legacy`'s `StorageAccessFramework`) |
 | Metadata | TMDB and TheTVDB REST APIs (TV/movies), iTunes Search API (audiobook cover art, keyless) |
 | Video | `expo-video` (thumbnail generation via `expo-image-manipulator`) |
+| Audio | `expo-audio` (in-app audiobook player; config plugin enables background playback) |
 | List rendering | `@shopify/flash-list` |
 | Language | TypeScript (`strict: true`), path alias `@/*` → `src/*` |
 
@@ -56,6 +59,7 @@ SimpleMediaBrowser/
     │   ├── firsttime.tsx        # First-run onboarding (add a media source, pick defaults)
     │   ├── edititem.tsx         # Modal: edit/override title, poster, provider match for a show/movie/episode
     │   ├── mergeshows.tsx       # Modal: merge two show entries that scanning didn't auto-merge
+    │   ├── player.tsx           # Modal: in-app audiobook player ("Now Playing"), observes AudiobookPlayer
     │   ├── modal.tsx            # Stock Expo template "About" modal (leftover, see §10)
     │   ├── (drawer)/            # Real app navigation — drawer-based, this is what users see
     │   │   ├── _layout.tsx      # Drawer chrome: nav items, parent-mode lock/unlock, edit-mode toggle, startup scan trigger
@@ -93,6 +97,8 @@ SimpleMediaBrowser/
     │   ├── LibraryStore.ts          # SQLite-backed library persistence (one row per show), incremental autosave
     │   ├── Logger.ts                # In-memory + on-disk logger, singleton, used everywhere via `logger`
     │   ├── openMedia.ts             # Hands a media file off to an external player via Android intent
+    │   ├── AudiobookPlayer.ts       # In-app audiobook playback singleton (expo-audio): resume, part advance, progress saving
+    │   ├── audiobookProgress.ts     # Pure helpers: resume start point, whole-book / per-part progress fractions
     │   └── providers/
     │       ├── IMetadataProvider.ts # Common interface all providers implement
     │       ├── TmdbProvider.ts      # TMDB REST client
@@ -153,7 +159,7 @@ turns it into `extra.router.root`, which both the dev server and
      (`(drawer)/(home)`, `(drawer)/tv`, `(drawer)/movies`, or `(drawer)/audiobooks`).
 4. Renders a `Stack` with screens: `firsttime`, `(drawer)`, `+not-found`,
    `modal` (presentation: modal), `edititem` (presentation: modal),
-   `mergeshows` (presentation: modal).
+   `mergeshows` (presentation: modal), `player` (presentation: modal).
 
 **Real navigation lives entirely under `(drawer)`.** `(drawer)/_layout.tsx`
 renders a custom drawer (`CustomDrawerContent`) with Home/TV/Movies/
@@ -190,11 +196,13 @@ Redux Toolkit with three slices, combined in `store/store.ts`:
   `viewType`, `viewScale`, `viewOrientation`, API keys/PIN, `defaultPage`,
   feature toggles (`enablePosterFetching`, `enableThumbnailGeneration`,
   `rescanOnStartup`, `fetchEpisodeNames`, `fetchEpisodeThumbnails`),
+  `audiobookPlayer` (`inapp` | `external`, default `inapp`),
   `appColorScheme`, and `settingsPassword` (parent-mode lock).
 - **`libraryReducer`** — everything produced by scanning/enrichment:
   `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`,
   `mediaOverrides` (user edits, keyed by namespaced string — see §7), `watched`
-  (files marked watched/listened — see §6) and the legacy `thumbnails` map. Everything in this slice is persisted (see below).
+  (files marked watched/listened — see §6), `listenProgress` (audiobook resume
+  points — see §6) and the legacy `thumbnails` map. Everything in this slice is persisted (see below).
   Besides the usual reducers it handles `applyLibraryActions(actions[])`, which
   applies several library actions as one dispatch (one subscriber
   notification) — used by `MetadataService` to batch enrichment updates.
@@ -220,9 +228,9 @@ roughly 2,000 episodes):
   a SQLite database (`library.db`, expo-sqlite, WAL) with three tables —
   `meta` (the `version` row marks the store as initialised), `shows` (one
   JSON row per show, keyed by show name) and `kv` (one JSON row each for
-  `movies`, `audiobooks`, `mediaOverrides`, `thumbnails`, `watched`). `watched` was
-  added without a `LIBRARY_STORE_VERSION` bump: a store from before it simply lacks
-  the row, which loads as empty and is created on the next save, and older apps ignore
+  `movies`, `audiobooks`, `mediaOverrides`, `thumbnails`, `watched`, `listenProgress`).
+  `watched` and `listenProgress` were added without a `LIBRARY_STORE_VERSION` bump: a
+  store from before them simply lacks the row, which loads as empty and is created on the next save, and older apps ignore
   rows they don't know. Redux still holds
   the whole library in memory (same slice, reducers and selectors);
   `LibraryStore` autosaves incrementally (only shows whose object reference
@@ -387,6 +395,19 @@ Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
   badge is also the manual toggle on every file and folder cell; a folder cell sets or
   clears every file below it in one dispatch (`markWatched` / `markUnwatched`). The JSON
   backup has an optional `watched` section, merged on import (later timestamp wins).
+  With the in-app audiobook player (§13) an audiobook part is **not** marked on tap: it is
+  marked when it plays to its end.
+
+- **Listening progress** — `libraryReducer.listenProgress`: `{ [folderKey]: IListenProgress }`
+  (`partPath` = the part's `parsedPath`, `position`/`duration` in seconds, `updatedAt`).
+  Written only by `AudiobookPlayer` (§13); like `watched` it sits beside the scanned
+  objects so rescans keep it. The entry is removed when the last part finishes, so the
+  next play starts over. If the saved part is no longer among the book's parts after a
+  rescan, playback starts from the beginning. `ListenProgressBar` (inside `PosterBox` /
+  `ListItem`) subscribes to it itself, like `WatchedBadge`, and shows the whole-book
+  fraction on a book cell and the part fraction on the in-progress part row. It is
+  exported in the JSON backup alongside `watched` (same checkbox) and merged on import
+  (later `updatedAt` wins).
 
 Provider/data-source resolution follows a strict override chain, applied
 consistently in `MetadataService` and the UI: **per-item override →
@@ -614,9 +635,43 @@ native OS scheme; `AppRoot` in `_layout.tsx` overrides it with the user's
 `ThemedTextInput` are the theme-aware primitives used throughout the real
 app screens.
 
-## 13. Playback Handoff (`openMedia.ts`)
+## 13. Playback (`openMedia.ts`, `AudiobookPlayer.ts`)
 
-The app never plays media in-process. `openMediaInExternalApp` resolves a
+**Audiobooks — in-app player** (default; `settings.audiobookPlayer === 'inapp'`). Tapping
+an audiobook file in `MediaBrowserScreen` calls `AudiobookPlayer.getInstance().play(book,
+partIndex?)` and pushes the `/player` modal. `AudiobookPlayer` is a singleton owning one
+`expo-audio` player (`createAudioPlayer`), so playback outlives every screen; the player
+screen only observes it (`subscribe`/`getSnapshot` for `useSyncExternalStore`, plus
+`useAudioPlayerStatus(getPlayer())` for live position). Like `FileScanner` it reaches
+Redux only through `librarySink`. Behaviour:
+
+- **Resume.** `resolveStartPoint` (`audiobookProgress.ts`): a book tap resumes the saved
+  part and position; tapping a specific part resumes it if it is the saved part, else
+  starts it at 0. Tapping the book that is already loaded just resumes it.
+- **Loading.** `pause()` → `replace(content:// path)` → wait for the player's live
+  `isLoaded` → `seekTo(saved position)` → `play()`. Android emits no load-error event, so
+  a part that reports `buffering` and then falls back to `idle` is treated as failed. An
+  early `idle` that `setMediaSource` emits before `prepare` is ignored. The error is shown
+  on the player screen, and pressing play retries.
+- **Progress saving** (`setListenProgress`): at most every 10 s while playing, plus
+  immediately on pause (including from the lock screen), seek, part load, part change,
+  switching books, and the app leaving the foreground. It is not saved on every status
+  tick, because each dispatch notifies every store subscriber and schedules a library
+  autosave.
+- **End of a part.** On `didJustFinish` the part is `markWatched` and the next part
+  loads at 0. After the last part the book's progress is cleared and the book stays
+  loaded as "Finished", where play starts it over.
+- **Background / lock screen.** `setAudioModeAsync({ shouldPlayInBackground: true,
+  interruptionMode: 'doNotMix' })` and `setActiveForLockScreen` (title respects the
+  `audiobook:` override, artist = author, cover passed only as a `file:`/`http(s):` URL,
+  because the native side loads it with `java.net.URL`). The `expo-audio` config plugin
+  in `app.json` (`enableBackgroundPlayback: true`, microphone/recording disabled) adds
+  the media-playback foreground service and its permissions. That is a native change,
+  so it needs a rebuild. The media notification has play/pause and no part navigation
+  (expo-audio removes next/previous from the session).
+
+**Video, and audiobooks with `audiobookPlayer === 'external'`.** These are handed off to
+another app. `openMediaInExternalApp` resolves a
 MIME type from the file extension and, on Android, fires an
 `ACTION_VIEW` intent (`expo-intent-launcher`) at the SAF `content://` URI
 with `FLAG_GRANT_READ_URI_PERMISSION` so external players (VLC, MX Player,

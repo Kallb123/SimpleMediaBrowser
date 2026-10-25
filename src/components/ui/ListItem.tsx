@@ -1,7 +1,9 @@
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
+import { ListenProgressBar } from '@/components/ui/ListenProgressBar';
 import { WatchedBadge } from '@/components/ui/WatchedBadge';
 import type { ToggleWatched } from '@/components/ui/WatchedBadge';
+import type { IMediaAudiobook } from '@/store/libraryReducer';
 
 export type ListItemProps = {
   kind: 'folder' | 'file';
@@ -16,6 +18,10 @@ export type ListItemProps = {
   /** A file's watched key (its `parsedPath`); a folder passes `watchKeys` instead. */
   watchKey?: string;
   watchKeys?: () => readonly string[];
+  /** An audiobook row (a root book or one of its part rows) gets a listening progress bar. */
+  audiobook?: IMediaAudiobook;
+  /** For a part row: its `parsedPath`, so the bar shows that part only. Absent on a root book. */
+  audiobookPartPath?: string;
   onToggleWatched?: ToggleWatched;
   onPress: () => void;
   onLongPress?: () => void;
@@ -33,6 +39,8 @@ export function ListItem({
   partNumber,
   watchKey,
   watchKeys,
+  audiobook,
+  audiobookPartPath,
   onToggleWatched,
   onPress,
   onLongPress,
@@ -78,6 +86,7 @@ export function ListItem({
           <ThemedText style={styles.editIcon}>✏️</ThemedText>
         </TouchableOpacity>
       ) : null}
+      {audiobook && <ListenProgressBar audiobook={audiobook} partPath={audiobookPartPath} />}
     </TouchableOpacity>
   );
 }

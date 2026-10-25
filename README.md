@@ -13,6 +13,7 @@ A local media browser for Android. Point it at folders on your device or network
 - **Automatic library scanning** — Add one or more media source folders via Android's Storage Access Framework (SAF). The scanner recursively discovers TV episodes, movies and audiobooks and streams results into the library as they are found.
 - **TV show, movie & audiobook views** — Browse all media together or switch to dedicated TV, Movies and Audiobooks tabs. TV content can be viewed structurally in different ways (shows/seasons/episodes or all seasons flattened etc.).
 - **Audiobook support** — Point a source folder at your audiobooks (mp3, m4a, m4b, etc.). Multiple audio files in the same folder are grouped as a single multi-part audiobook, and cover art is fetched automatically from the iTunes Search API (no API key required).
+- **In-app audiobook player** — Audiobooks play inside the app, keep playing in the background with lock-screen / notification controls, and remember where you stopped: tapping a book resumes it, parts advance automatically, a part is ticked as listened when it finishes, and covers show a progress bar. Prefer your own player? Switch *Settings → Audiobook player* to *External app*.
 - **Local metadata enrichment** — Standard metadata (folder.png etc.) will automatically be consumed as the library is scanned.
 - **Cloud metadata enrichment** — Enter a TMDB or TheTVDB API key in Settings to fetch official titles, years, and poster artwork automatically. Posters are cached locally so the library is usable offline after the first fetch.
 - **Video thumbnail generation** — Thumbnails are generated for episodes and movies that have no poster, persisted to disk, and reused across sessions.
@@ -39,6 +40,7 @@ Enrichment includes per-episode images, so the user can see which one they are s
 | File access | expo-file-system (SAF / Storage Access Framework) |
 | Metadata | TMDB / TheTVDB REST APIs (TV & movies), iTunes Search API (audiobook cover art) |
 | Video | expo-video (thumbnail generation via expo-image-manipulator) |
+| Audio | expo-audio (in-app audiobook playback, background + lock-screen controls) |
 | List rendering | @shopify/flash-list |
 
 ## Getting Started (Development)

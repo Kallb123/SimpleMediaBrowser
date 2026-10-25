@@ -30,6 +30,14 @@
       ["expo-router", { "root": "src/app" }],
       "@react-native-async-storage/expo-with-async-storage",
       [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": true
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#EC3013",

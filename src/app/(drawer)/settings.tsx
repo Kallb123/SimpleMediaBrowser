@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { router } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
@@ -63,6 +63,11 @@ const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
   {id: 'system', label: 'System'},
   {id: 'light', label: 'Light'},
   {id: 'dark', label: 'Dark'},
+];
+
+const audiobookPlayerOptions: { id: audiobookPlayers; label: string }[] = [
+  {id: 'inapp', label: 'In-app'},
+  {id: 'external', label: 'External app'},
 ];
 
 const sortOrderOptions: { id: sortOrders; label: string }[] = [
@@ -168,6 +173,7 @@ export default function SettingsPrompt() {
   const [fetchEpisodeThumbnails, setLocalFetchEpisodeThumbnails] = useState(true);
   const [appColorScheme, setLocalAppColorScheme] = useState('system' as appColorSchemes);
   const [sortOrder, setLocalSortOrder] = useState('alphabetical' as sortOrders);
+  const [audiobookPlayer, setLocalAudiobookPlayer] = useState('inapp' as audiobookPlayers);
   const [bedtimeEnabled, setLocalBedtimeEnabled] = useState(false);
   const [bedtimeStart, setLocalBedtimeStart] = useState('19:00');
   const [bedtimeEnd, setLocalBedtimeEnd] = useState('07:00');
@@ -199,6 +205,7 @@ export default function SettingsPrompt() {
   const settingsFetchEpisodeThumbnails = useSelector(selectFetchEpisodeThumbnails);
   const settingsAppColorScheme = useSelector(selectAppColorScheme);
   const settingsSortOrder = useSelector(selectSortOrder);
+  const settingsAudiobookPlayer = useSelector(selectAudiobookPlayer);
   const settingsBedtimeEnabled = useSelector(selectBedtimeEnabled);
   const settingsBedtimeStart = useSelector(selectBedtimeStart);
   const settingsBedtimeEnd = useSelector(selectBedtimeEnd);
@@ -210,6 +217,7 @@ export default function SettingsPrompt() {
   const defaultPageRef = useRef(null);
   const appColorSchemeRef = useRef(null);
   const sortOrderRef = useRef(null);
+  const audiobookPlayerRef = useRef(null);
   const bedtimeStartRef = useRef(null);
   const bedtimeEndRef = useRef(null);
 
@@ -314,6 +322,12 @@ export default function SettingsPrompt() {
       }
       setLocalSortOrder(settingsSortOrder);
 
+      const audiobookPlayerIndex = audiobookPlayerOptions.findIndex(o => o.id === settingsAudiobookPlayer);
+      if (audiobookPlayerRef.current && audiobookPlayerIndex >= 0) {
+        (audiobookPlayerRef.current as any).selectIndex(audiobookPlayerIndex);
+      }
+      setLocalAudiobookPlayer(settingsAudiobookPlayer);
+
       setLocalBedtimeEnabled(settingsBedtimeEnabled);
       const normalisedBedtimeStart = normaliseBedtimeTime(settingsBedtimeStart);
       const normalisedBedtimeEnd = normaliseBedtimeTime(settingsBedtimeEnd);
@@ -331,7 +345,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsAudiobookPlayer, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]);
 
   const save = useCallback(() => {
     try {
@@ -418,6 +432,11 @@ export default function SettingsPrompt() {
         dispatch(setSortOrder(sortOrder));
         changeCount++;
       }
+      if (audiobookPlayer && audiobookPlayer !== settingsAudiobookPlayer) {
+        logger.log('Settings', `Persisting: audiobookPlayer changed ${settingsAudiobookPlayer} → ${audiobookPlayer}`);
+        dispatch(setAudiobookPlayer(audiobookPlayer));
+        changeCount++;
+      }
       if (bedtimeEnabled !== settingsBedtimeEnabled) {
         logger.log('Settings', `Persisting: bedtimeEnabled changed ${settingsBedtimeEnabled} → ${bedtimeEnabled}`);
         dispatch(setBedtimeEnabled(bedtimeEnabled));
@@ -443,7 +462,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, audiobookPlayer, settingsAudiobookPlayer, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
@@ -1204,6 +1223,40 @@ export default function SettingsPrompt() {
             dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
           />
         </View>
+
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Audiobook player:</ThemedText>
+          <SelectDropdown
+            ref={audiobookPlayerRef}
+            data={audiobookPlayerOptions}
+            defaultValue={audiobookPlayerOptions.find(o => o.id === settingsAudiobookPlayer)}
+            onSelect={(selectedItem) => {
+              try {
+                setLocalAudiobookPlayer(selectedItem.id as audiobookPlayers);
+              } catch (e) {
+                logger.error('Settings', 'Exception while selecting audiobook player', e as Error);
+              }
+            }}
+            renderButton={(selectedItem, isOpened) => (
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                  {(selectedItem && selectedItem.label) || 'Please select...'}
+                </Text>
+                <Text>{isOpened ? "🔼" : "🔽"}</Text>
+              </View>
+            )}
+            renderItem={(item, index, isSelected) => (
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+          />
+        </View>
+        <ThemedText style={styles.emptyText}>
+          In-app remembers your place in each audiobook and keeps playing in the background. External app hands the files to another app.
+        </ThemedText>
       </View>
 
       {/* Import / Export */}
@@ -1231,7 +1284,7 @@ export default function SettingsPrompt() {
             </View>
             <View style={styles.row}>
               <Switch value={exportIncludeWatched} onValueChange={setExportIncludeWatched} />
-              <ThemedText style={styles.rowLabel}>Watched (which files are marked watched)</ThemedText>
+              <ThemedText style={styles.rowLabel}>Watched marks & listening progress</ThemedText>
             </View>
             <View style={styles.row}>
               <Switch value={exportIncludeMatches} onValueChange={setExportIncludeMatches} />
@@ -1243,7 +1296,7 @@ export default function SettingsPrompt() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.importExportButton} onPress={handleImportJson}>
               <ThemedText style={styles.importExportButtonText}>📥 Import app state from JSON</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Restores settings, overrides, watched marks and/or matches from a previously exported JSON file.</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Restores settings, overrides, watched marks, listening progress and/or matches from a previously exported JSON file.</ThemedText>
             </TouchableOpacity>
             {/* Filesystem export */}
             <TouchableOpacity style={styles.importExportButton} onPress={handleExportToFilesystem}>
