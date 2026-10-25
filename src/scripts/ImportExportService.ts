@@ -37,6 +37,8 @@ import {
     setFetchEpisodeThumbnails,
     setAppColorScheme,
     setAudiobookPlayer,
+    setAudiobookPlaybackRate,
+    setAudiobookRewindSeconds,
     setBedtimeEnabled,
     setBedtimeStart,
     setBedtimeEnd,
@@ -242,6 +244,8 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             fetchEpisodeThumbnails: s.fetchEpisodeThumbnails,
             appColorScheme: s.appColorScheme,
             audiobookPlayer: s.audiobookPlayer,
+            audiobookPlaybackRate: s.audiobookPlaybackRate,
+            audiobookRewindSeconds: s.audiobookRewindSeconds,
             bedtimeEnabled: s.bedtimeEnabled,
             bedtimeStart: s.bedtimeStart,
             bedtimeEnd: s.bedtimeEnd,
@@ -354,6 +358,8 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (typeof s.fetchEpisodeThumbnails === 'boolean') store.dispatch(setFetchEpisodeThumbnails(s.fetchEpisodeThumbnails));
         if (typeof s.appColorScheme === 'string') store.dispatch(setAppColorScheme(s.appColorScheme as appColorSchemes));
         if (s.audiobookPlayer === 'inapp' || s.audiobookPlayer === 'external') store.dispatch(setAudiobookPlayer(s.audiobookPlayer as audiobookPlayers));
+        if (typeof s.audiobookPlaybackRate === 'number' && Number.isFinite(s.audiobookPlaybackRate)) store.dispatch(setAudiobookPlaybackRate(s.audiobookPlaybackRate));
+        if (typeof s.audiobookRewindSeconds === 'number' && Number.isFinite(s.audiobookRewindSeconds)) store.dispatch(setAudiobookRewindSeconds(s.audiobookRewindSeconds));
         if (typeof s.bedtimeEnabled === 'boolean') store.dispatch(setBedtimeEnabled(s.bedtimeEnabled));
         // Times and allowed types are validated: a malformed window or an empty list would
         // otherwise lock every library (or none) without the user noticing.

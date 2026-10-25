@@ -87,4 +87,16 @@ describe('importJson listenProgress', () => {
     await importFile({ settings: { audiobookPlayer: 'bogus' } });
     expect(mockStore.getState().settingsReducer.audiobookPlayer).toBe('external');
   });
+
+  it('imports the audiobook speed and rewind settings, ignoring non-numbers and clamping', async () => {
+    await importFile({ settings: { audiobookPlaybackRate: 1.5, audiobookRewindSeconds: 30 } });
+    expect(mockStore.getState().settingsReducer.audiobookPlaybackRate).toBe(1.5);
+    expect(mockStore.getState().settingsReducer.audiobookRewindSeconds).toBe(30);
+    await importFile({ settings: { audiobookPlaybackRate: '2', audiobookRewindSeconds: null } });
+    expect(mockStore.getState().settingsReducer.audiobookPlaybackRate).toBe(1.5);
+    expect(mockStore.getState().settingsReducer.audiobookRewindSeconds).toBe(30);
+    await importFile({ settings: { audiobookPlaybackRate: 9, audiobookRewindSeconds: 1000 } });
+    expect(mockStore.getState().settingsReducer.audiobookPlaybackRate).toBe(2);
+    expect(mockStore.getState().settingsReducer.audiobookRewindSeconds).toBe(300);
+  });
 });

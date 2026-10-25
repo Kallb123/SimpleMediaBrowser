@@ -7,7 +7,7 @@ import libraryReducer, {
 } from '@/store/libraryReducer';
 import type { IListenProgress, IMediaAudiobook } from '@/store/libraryReducer';
 import scanReducer from '@/store/scanReducer';
-import settingsReducer from '@/store/settingsReducer';
+import settingsReducer, { setAudiobookPlaybackRate, setAudiobookRewindSeconds } from '@/store/settingsReducer';
 import { setLibrarySink } from '@/scripts/librarySink';
 import type { LibrarySink } from '@/scripts/librarySink';
 import { logger } from '@/scripts/Logger';
@@ -39,6 +39,7 @@ class FakePlayer {
   });
   seekTo = jest.fn(async (seconds: number) => { this.currentTime = seconds; });
   setActiveForLockScreen = jest.fn();
+  setPlaybackRate = jest.fn();
   addListener = jest.fn((_event: string, listener: StatusListener) => {
     this.listeners.add(listener);
     return { remove: () => this.listeners.delete(listener) };
@@ -120,6 +121,22 @@ describe('AudiobookPlayer', () => {
   const lib = () => store.getState().libraryReducer;
   const progress = () => lib().listenProgress[book.folderKey];
 
+  /** Lets the un-awaited promise chains (`seekTo` then save) finish. */
+  const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+
+  /** Loads and plays, reports it playing, and moves to `position` (a listener part-way through a part). */
+  const listeningAt = async (position: number, duration = 600) => {
+    await playAndLoad(duration);
+    mockPlayer.emit({ playing: true });
+    mockPlayer.tick(position);
+  };
+
+  /** Pauses the way the native player reports it. */
+  const pauseByEvent = () => {
+    mockPlayer.pause();
+    mockPlayer.emit({ playing: false });
+  };
+
   /** Starts playing and completes the load of the part the player was pointed at. */
   const playAndLoad = async (duration: number, partIndex?: number) => {
     await service.play(book, partIndex);
@@ -182,7 +199,7 @@ describe('AudiobookPlayer', () => {
     it('resumes the book at the saved part and position', async () => {
       store.dispatch(setListenProgress({
         folderKey: book.folderKey,
-        progress: { partPath: partPath(2), position: 120, duration: 600, updatedAt: 1 },
+        progress: { partPath: partPath(2), position: 120, duration: 600, updatedAt: now },
       }));
 
       await service.play(book);
@@ -213,7 +230,7 @@ describe('AudiobookPlayer', () => {
     it('resumes an explicitly chosen part when it is the saved part', async () => {
       store.dispatch(setListenProgress({
         folderKey: book.folderKey,
-        progress: { partPath: partPath(2), position: 45, duration: 600, updatedAt: 1 },
+        progress: { partPath: partPath(2), position: 45, duration: 600, updatedAt: now },
       }));
 
       await playAndLoad(600, 1);
@@ -379,7 +396,7 @@ describe('AudiobookPlayer', () => {
       expect(mockPlayer.setActiveForLockScreen).toHaveBeenCalledWith(
         true,
         { title: 'The Book', artist: 'An Author', albumTitle: 'Part 2 of 3', artworkUrl: 'file:///posters/scanned.jpg' },
-        { showSeekBackward: false, showSeekForward: false },
+        { showSeekBackward: true, showSeekForward: true },
       );
     });
 
@@ -709,6 +726,499 @@ describe('AudiobookPlayer', () => {
       expect(mockPlayer.replace).toHaveBeenCalledTimes(2);
       mockPlayer.finishLoading(300);
       expect(mockPlayer.play).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Skipping ───────────────────────────────────────────────────────────────
+
+  describe('skipBy', () => {
+    it('seeks relative to the current position and saves it', async () => {
+      await listeningAt(100);
+      mockPlayer.seekTo.mockClear();
+
+      service.skipBy(30);
+      await flush();
+      expect(mockPlayer.seekTo).toHaveBeenLastCalledWith(130);
+      expect(progress()).toMatchObject({ position: 130 });
+
+      service.skipBy(-30);
+      await flush();
+      expect(mockPlayer.seekTo).toHaveBeenLastCalledWith(100);
+      expect(progress()).toMatchObject({ position: 100 });
+    });
+
+    it('stops at the start when skipping back from near it', async () => {
+      await listeningAt(10);
+      service.skipBy(-30);
+      await flush();
+      expect(mockPlayer.seekTo).toHaveBeenLastCalledWith(0);
+    });
+
+    it('stops a second short of the end so a skip never finishes the part', async () => {
+      await listeningAt(590);
+      service.skipBy(30);
+      await flush();
+      expect(mockPlayer.seekTo).toHaveBeenLastCalledWith(599);
+    });
+
+    it('never moves backwards when skipping forward inside the last second', async () => {
+      await listeningAt(599.5);
+      mockPlayer.seekTo.mockClear();
+      service.skipBy(30);
+      await flush();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('does nothing while a part is loading, after a failure, or with nothing loaded', async () => {
+      service.skipBy(30);
+      await service.play(book);
+      service.skipBy(30);
+      await flush();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+
+      mockPlayer.emit({ playbackState: 'buffering', isLoaded: false });
+      mockPlayer.emit({ playbackState: 'idle', isLoaded: false });
+      expect(service.getSnapshot()?.error).not.toBeNull();
+      service.skipBy(30);
+      await flush();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('ignores a non-finite amount', async () => {
+      await listeningAt(100);
+      mockPlayer.seekTo.mockClear();
+      service.skipBy(NaN);
+      await flush();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Playback rate ──────────────────────────────────────────────────────────
+
+  describe('playback rate', () => {
+    it('applies the stored rate once a part has loaded, before it plays', async () => {
+      store.dispatch(setAudiobookPlaybackRate(1.5));
+      await playAndLoad(600);
+      expect(mockPlayer.setPlaybackRate).toHaveBeenCalledWith(1.5);
+      expect(mockPlayer.setPlaybackRate.mock.invocationCallOrder[0]).toBeLessThan(mockPlayer.play.mock.invocationCallOrder[0]);
+    });
+
+    it('applies it to every part, and defaults to normal speed', async () => {
+      await playAndLoad(600);
+      expect(mockPlayer.setPlaybackRate).toHaveBeenLastCalledWith(1);
+      store.dispatch(setAudiobookPlaybackRate(1.25));
+      service.nextPart();
+      mockPlayer.finishLoading(300);
+      expect(mockPlayer.setPlaybackRate).toHaveBeenCalledTimes(2);
+      expect(mockPlayer.setPlaybackRate).toHaveBeenLastCalledWith(1.25);
+    });
+
+    it('setPlaybackRate stores the rate and applies it to the loaded player', async () => {
+      await playAndLoad(600);
+      service.setPlaybackRate(1.75);
+      expect(store.getState().settingsReducer.audiobookPlaybackRate).toBe(1.75);
+      expect(mockPlayer.setPlaybackRate).toHaveBeenLastCalledWith(1.75);
+    });
+
+    it('applies the clamped value that was stored', async () => {
+      await playAndLoad(600);
+      service.setPlaybackRate(5);
+      expect(store.getState().settingsReducer.audiobookPlaybackRate).toBe(2);
+      expect(mockPlayer.setPlaybackRate).toHaveBeenLastCalledWith(2);
+    });
+
+    it('still stores the rate when no player exists yet', () => {
+      service.setPlaybackRate(1.5);
+      expect(store.getState().settingsReducer.audiobookPlaybackRate).toBe(1.5);
+      expect(mockPlayer.setPlaybackRate).not.toHaveBeenCalled();
+    });
+
+    it('does not break playback if applying it throws', async () => {
+      mockPlayer.setPlaybackRate.mockImplementation(() => { throw new Error('nope'); });
+      await playAndLoad(600);
+      expect(mockPlayer.play).toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalled();
+    });
+  });
+
+  // ── Sleep timer ────────────────────────────────────────────────────────────
+
+  describe('sleep timer', () => {
+    const MIN = 60_000;
+
+    it('is set, replaced and cleared in the snapshot', async () => {
+      await playAndLoad(600);
+      expect(service.getSnapshot()?.sleepTimer).toBeNull();
+
+      service.setSleepTimer({ minutes: 15 });
+      expect(service.getSnapshot()?.sleepTimer).toEqual({ kind: 'duration', endsAt: now + 15 * MIN });
+
+      service.setSleepTimer('endOfPart');
+      expect(service.getSnapshot()?.sleepTimer).toEqual({ kind: 'endOfPart' });
+
+      service.setSleepTimer(null);
+      expect(service.getSnapshot()?.sleepTimer).toBeNull();
+    });
+
+    it('notifies subscribers when it changes', async () => {
+      await playAndLoad(600);
+      const listener = jest.fn();
+      service.subscribe(listener);
+      service.setSleepTimer({ minutes: 30 });
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing with nothing loaded', () => {
+      service.setSleepTimer({ minutes: 15 });
+      expect(service.getSnapshot()).toBeNull();
+    });
+
+    it('pauses playback, saves the place and clears itself once it has run out', async () => {
+      await listeningAt(100);
+      service.setSleepTimer({ minutes: 15 });
+      mockPlayer.pause.mockClear();
+
+      now += 14 * MIN;
+      mockPlayer.tick(200);
+      expect(mockPlayer.pause).not.toHaveBeenCalled();
+      expect(service.getSnapshot()?.sleepTimer).not.toBeNull();
+
+      now += 1 * MIN;
+      mockPlayer.tick(300);
+      expect(mockPlayer.pause).toHaveBeenCalledTimes(1);
+      expect(service.getSnapshot()?.sleepTimer).toBeNull();
+      expect(progress()).toMatchObject({ position: 300 });
+
+      // The pause that follows is not a second one.
+      mockPlayer.emit({ playing: false });
+      expect(mockPlayer.pause).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not pause again when play is pressed after it expired while paused (lock screen)', async () => {
+      await listeningAt(100);
+      service.setSleepTimer({ minutes: 15 });
+      pauseByEvent();
+      now += 20 * MIN;
+
+      mockPlayer.play();
+      mockPlayer.emit({ playing: true });
+      expect(service.getSnapshot()?.sleepTimer).toBeNull();
+
+      mockPlayer.pause.mockClear();
+      mockPlayer.tick(101);
+      expect(mockPlayer.pause).not.toHaveBeenCalled();
+    });
+
+    it('does not pause again when play is pressed in the app after it expired while paused', async () => {
+      await listeningAt(100);
+      service.setSleepTimer({ minutes: 15 });
+      pauseByEvent();
+      now += 20 * MIN;
+
+      service.togglePlayPause();
+      expect(service.getSnapshot()?.sleepTimer).toBeNull();
+      expect(mockPlayer.play).toHaveBeenCalled();
+
+      mockPlayer.pause.mockClear();
+      mockPlayer.tick(101);
+      expect(mockPlayer.pause).not.toHaveBeenCalled();
+    });
+
+    it('does not start the next part when it ran out while that part was loading', async () => {
+      await listeningAt(100);
+      service.setSleepTimer({ minutes: 15 });
+      mockPlayer.finishPlaying();
+      now += 15 * MIN;
+      mockPlayer.play.mockClear();
+
+      mockPlayer.finishLoading(600);
+      expect(service.getSnapshot()?.partIndex).toBe(1);
+      expect(mockPlayer.play).not.toHaveBeenCalled();
+      expect(service.getSnapshot()?.sleepTimer).toBeNull();
+    });
+
+    it('keeps a timer that has not run out when resuming', async () => {
+      await listeningAt(100);
+      service.setSleepTimer({ minutes: 15 });
+      pauseByEvent();
+      now += 5 * MIN;
+      service.togglePlayPause();
+      expect(service.getSnapshot()?.sleepTimer).toMatchObject({ kind: 'duration' });
+    });
+
+    it('survives moving to another part', async () => {
+      await listeningAt(100);
+      service.setSleepTimer({ minutes: 15 });
+      service.nextPart();
+      mockPlayer.finishLoading(300);
+      expect(service.getSnapshot()?.sleepTimer).toMatchObject({ kind: 'duration' });
+    });
+
+    it('at the end of the part: loads the next one but waits for play, and clears itself', async () => {
+      await listeningAt(100);
+      service.setSleepTimer('endOfPart');
+      mockPlayer.play.mockClear();
+      mockPlayer.seekTo.mockClear();
+
+      mockPlayer.finishPlaying();
+      expect(lib().watched[partPath(1)]).toBe(now);
+      expect(mockPlayer.replace).toHaveBeenLastCalledWith(partUri(2));
+      expect(service.getSnapshot()).toMatchObject({ partIndex: 1, sleepTimer: null });
+      expect(progress()).toMatchObject({ partPath: partPath(2), position: 0 });
+
+      mockPlayer.finishLoading(500);
+      expect(mockPlayer.play).not.toHaveBeenCalled();
+      expect(progress()).toMatchObject({ partPath: partPath(2), position: 0, duration: 500 });
+
+      // Pressing play afterwards just plays: no rewind, and the timer is gone.
+      service.togglePlayPause();
+      expect(mockPlayer.play).toHaveBeenCalledTimes(1);
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('at the end of the last part: finishes the book as usual and clears itself', async () => {
+      await playAndLoad(600, 2);
+      service.setSleepTimer('endOfPart');
+      mockPlayer.replace.mockClear();
+
+      mockPlayer.finishPlaying();
+      expect(mockPlayer.replace).not.toHaveBeenCalled();
+      expect(progress()).toBeUndefined();
+      expect(service.getSnapshot()).toMatchObject({ finished: true, sleepTimer: null });
+    });
+
+    it('a duration timer is cleared when the book finishes', async () => {
+      await playAndLoad(600, 2);
+      service.setSleepTimer({ minutes: 60 });
+      mockPlayer.finishPlaying();
+      expect(service.getSnapshot()).toMatchObject({ finished: true, sleepTimer: null });
+    });
+
+    it('carries on to the next part as usual without an end-of-part timer', async () => {
+      await listeningAt(100);
+      service.setSleepTimer({ minutes: 60 });
+      mockPlayer.play.mockClear();
+      mockPlayer.finishPlaying();
+      mockPlayer.finishLoading(500);
+      expect(mockPlayer.play).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Rewind on resume ───────────────────────────────────────────────────────
+
+  describe('rewind on resume', () => {
+    it('steps back (default 10 s) when resumed in the app after a long pause', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+      mockPlayer.play.mockClear();
+
+      service.togglePlayPause();
+
+      expect(mockPlayer.seekTo).toHaveBeenCalledWith(90);
+      expect(mockPlayer.play).toHaveBeenCalledTimes(1);
+      expect(mockPlayer.seekTo.mock.invocationCallOrder[0]).toBeLessThan(mockPlayer.play.mock.invocationCallOrder[0]);
+      await flush();
+      expect(progress()).toMatchObject({ position: 90 });
+    });
+
+    it('does not rewind a second time when the status event reporting the resume arrives', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+
+      service.togglePlayPause();
+      mockPlayer.emit({ playing: true });
+      mockPlayer.tick(91);
+
+      expect(mockPlayer.seekTo).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses the configured amount, and 0 turns it off', async () => {
+      store.dispatch(setAudiobookRewindSeconds(30));
+      await listeningAt(100);
+      pauseByEvent();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+      service.togglePlayPause();
+      expect(mockPlayer.seekTo).toHaveBeenCalledWith(70);
+
+      store.dispatch(setAudiobookRewindSeconds(0));
+      mockPlayer.emit({ playing: true });
+      pauseByEvent();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+      service.togglePlayPause();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('does not rewind after a short pause', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 29_000;
+      mockPlayer.seekTo.mockClear();
+      service.togglePlayPause();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+      expect(mockPlayer.play).toHaveBeenCalled();
+    });
+
+    it('never rewinds past the start of the part', async () => {
+      await listeningAt(4);
+      pauseByEvent();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+      service.togglePlayPause();
+      expect(mockPlayer.seekTo).toHaveBeenCalledWith(0);
+    });
+
+    it('rewinds once per pause', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 60_000;
+      service.togglePlayPause();
+      mockPlayer.emit({ playing: true });
+      mockPlayer.seekTo.mockClear();
+
+      // Paused and resumed straight away: the earlier long pause is not counted again.
+      mockPlayer.tick(95);
+      pauseByEvent();
+      now += 1000;
+      service.togglePlayPause();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('does not rewind after the listener sought while paused', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      await service.seekTo(200);
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+
+      service.togglePlayPause();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+      expect(mockPlayer.play).toHaveBeenCalled();
+    });
+
+    it('does not rewind after skipBy while paused', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      service.skipBy(-30);
+      await flush();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+
+      service.togglePlayPause();
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('does not rewind a part that was just loaded', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 60_000;
+      service.nextPart();
+      mockPlayer.seekTo.mockClear();
+      mockPlayer.finishLoading(300);
+      mockPlayer.emit({ playing: true });
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('rewinds when play() resumes the already loaded book', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+
+      await service.play(book);
+      expect(mockPlayer.seekTo).toHaveBeenCalledWith(90);
+    });
+
+    it('rewinds when playback is resumed from outside the app (lock screen, headset)', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+
+      mockPlayer.play();
+      mockPlayer.emit({ playing: true });
+      expect(mockPlayer.seekTo).toHaveBeenCalledWith(90);
+      await flush();
+      expect(progress()).toMatchObject({ position: 90 });
+
+      // Only once.
+      mockPlayer.tick(91);
+      expect(mockPlayer.seekTo).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not rewind an outside resume after a short pause', async () => {
+      await listeningAt(100);
+      pauseByEvent();
+      now += 5000;
+      mockPlayer.seekTo.mockClear();
+
+      mockPlayer.play();
+      mockPlayer.emit({ playing: true });
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('does not rewind after the part finished (the next part starts at 0)', async () => {
+      await listeningAt(100);
+      now += 60_000;
+      mockPlayer.seekTo.mockClear();
+      mockPlayer.finishPlaying();
+      mockPlayer.finishLoading(300);
+      mockPlayer.emit({ playing: true });
+      expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+    });
+
+    describe('when reopening a book from saved progress', () => {
+      const saved = (updatedAt: number, position = 120) => store.dispatch(setListenProgress({
+        folderKey: book.folderKey,
+        progress: { partPath: partPath(2), position, duration: 600, updatedAt },
+      }));
+
+      it('steps back when the progress is old enough', async () => {
+        saved(now - 60_000);
+        await service.play(book);
+        expect(mockPlayer.seekTo).not.toHaveBeenCalled(); // not before the part has loaded
+        mockPlayer.finishLoading(600);
+        expect(mockPlayer.seekTo).toHaveBeenCalledWith(110);
+        expect(progress()).toMatchObject({ partPath: partPath(2), position: 110 });
+      });
+
+      it('does not when it was saved moments ago', async () => {
+        saved(now - 5000);
+        await playAndLoad(600);
+        expect(mockPlayer.seekTo).toHaveBeenCalledWith(120);
+      });
+
+      it('does not when rewinding is off', async () => {
+        store.dispatch(setAudiobookRewindSeconds(0));
+        saved(now - 60_000);
+        await playAndLoad(600);
+        expect(mockPlayer.seekTo).toHaveBeenCalledWith(120);
+      });
+
+      it('goes to the start of the part rather than before it', async () => {
+        saved(now - 60_000, 4);
+        await playAndLoad(600);
+        expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+        expect(progress()).toMatchObject({ position: 0 });
+      });
+
+      it('also applies when the saved part is asked for explicitly', async () => {
+        saved(now - 60_000);
+        await playAndLoad(600, 1);
+        expect(mockPlayer.seekTo).toHaveBeenCalledWith(110);
+      });
+
+      it('does not apply to a different part that starts from 0', async () => {
+        saved(now - 60_000);
+        await playAndLoad(600, 0);
+        expect(mockPlayer.seekTo).not.toHaveBeenCalled();
+        expect(progress()).toMatchObject({ partPath: partPath(1), position: 0 });
+      });
     });
   });
 });
