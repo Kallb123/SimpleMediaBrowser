@@ -2,7 +2,7 @@
  * ImportExportService — import/export functionality for Zibo.
  *
  * Provides three operations:
- *  1. exportJson  – save settings, overrides and/or matched metadata to a JSON file.
+ *  1. exportJson  – save settings, overrides, watched marks and/or matched metadata to a JSON file.
  *  2. importJson  – restore state from a previously exported JSON file.
  *  3. exportToFilesystem – write smb.json metadata, poster images and episode thumbnails
  *                          alongside the media files in the configured SAF directories.
@@ -14,6 +14,7 @@ import { store } from '@/store/store';
 import {
     setMediaOverride,
     clearAllOverrides,
+    mergeWatched,
     updateShowMetadata,
     updateMovieMetadata,
     updateSeasonEpisodeMetadata,
@@ -168,6 +169,8 @@ export interface JsonExportOptions {
     includeSettings: boolean;
     /** Include all user-defined media overrides (title, sort title, poster, etc.). */
     includeOverrides: boolean;
+    /** Include which files are marked watched / listened. */
+    includeWatched: boolean;
     /** Include matched metadata IDs and episode names from enrichment. */
     includeMatches: boolean;
 }
@@ -191,6 +194,8 @@ interface SmbExportJson {
     exportedAt: string;
     settings?: Record<string, unknown>;
     overrides?: Record<string, IMediaOverride>;
+    /** Watched/listened files: file `parsedPath` → time it was marked. */
+    watched?: Record<string, number>;
     matches?: {
         shows: Record<string, ShowMatchExport>;
         movies: MovieMatchExport[];
@@ -241,6 +246,10 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
 
     if (options.includeOverrides) {
         payload.overrides = { ...state.libraryReducer.mediaOverrides };
+    }
+
+    if (options.includeWatched) {
+        payload.watched = { ...state.libraryReducer.watched };
     }
 
     if (options.includeMatches) {
@@ -361,6 +370,16 @@ export async function importJson(): Promise<{ applied: string[] }> {
             }
         }
         applied.push('overrides');
+    }
+
+    if (data.watched && typeof data.watched === 'object' && !Array.isArray(data.watched)) {
+        // Merged rather than replacing, so importing never un-watches what was watched since the export.
+        const incoming: Record<string, number> = {};
+        for (const [key, at] of Object.entries(data.watched)) {
+            if (typeof at === 'number' && Number.isFinite(at)) incoming[key] = at;
+        }
+        store.dispatch(mergeWatched(incoming));
+        applied.push('watched');
     }
 
     if (data.matches && typeof data.matches === 'object') {

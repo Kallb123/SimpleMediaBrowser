@@ -72,7 +72,7 @@ SimpleMediaBrowser/
     ├── components/
     │   ├── MediaBrowserScreen.tsx   # THE core browsing UI: one folder level's grid/list, FlashList rendering, thumbnails
     │   ├── MediaSectionStack.tsx    # Shared native-stack layout for the four media sections
-    │   ├── ui/                      # PosterBox, ListItem, MediaItem, DirectoryLink, FileLink, AddMediaSource
+    │   ├── ui/                      # PosterBox, ListItem, WatchedBadge, MediaItem, DirectoryLink, FileLink, AddMediaSource
     │   ├── ThemedText.tsx, ThemedView.tsx, ThemedTextInput.tsx  # Theme-aware primitives used by real app screens
     │   ├── themed-text.tsx, themed-view.tsx, animated-icon*, app-tabs*, web-badge.tsx, hint-row.tsx
     │   │                             # ^ Newer-template kebab-case components used only by the leftover
@@ -193,8 +193,8 @@ Redux Toolkit with three slices, combined in `store/store.ts`:
   `appColorScheme`, and `settingsPassword` (parent-mode lock).
 - **`libraryReducer`** — everything produced by scanning/enrichment:
   `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`,
-  `mediaOverrides` (user edits, keyed by namespaced string — see §7) and the
-  legacy `thumbnails` map. Everything in this slice is persisted (see below).
+  `mediaOverrides` (user edits, keyed by namespaced string — see §7), `watched`
+  (files marked watched/listened — see §6) and the legacy `thumbnails` map. Everything in this slice is persisted (see below).
   Besides the usual reducers it handles `applyLibraryActions(actions[])`, which
   applies several library actions as one dispatch (one subscriber
   notification) — used by `MetadataService` to batch enrichment updates.
@@ -220,7 +220,10 @@ roughly 2,000 episodes):
   a SQLite database (`library.db`, expo-sqlite, WAL) with three tables —
   `meta` (the `version` row marks the store as initialised), `shows` (one
   JSON row per show, keyed by show name) and `kv` (one JSON row each for
-  `movies`, `audiobooks`, `mediaOverrides`, `thumbnails`). Redux still holds
+  `movies`, `audiobooks`, `mediaOverrides`, `thumbnails`, `watched`). `watched` was
+  added without a `LIBRARY_STORE_VERSION` bump: a store from before it simply lacks
+  the row, which loads as empty and is created on the next save, and older apps ignore
+  rows they don't know. Redux still holds
   the whole library in memory (same slice, reducers and selectors);
   `LibraryStore` autosaves incrementally (only shows whose object reference
   changed, throttled, flushed when the app backgrounds). Every save, and the
@@ -365,6 +368,25 @@ Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
   or `audiobook:<folderKey>`. Overrides are **additive and non-destructive**
   — clearing one restores the underlying scanned/provider value; nothing is
   deleted from the scan result itself.
+
+- **Watched / listened** — `libraryReducer.watched`: `{ [parsedPath]: timestamp }`.
+  Tapping a playable file (episode, movie, audiobook part or single-file audiobook) in
+  `MediaBrowserScreen` marks it as it is handed to the external player (undone if the
+  hand-off throws and it wasn't already marked); folders are never marked by a tap. The
+  key is the file's `parsedPath` (the decoded SAF URI — the same identity the
+  `episode:`/`movie:` override keys use), and the map sits beside `mediaOverrides`
+  rather than on the scanned objects, so a rescan, which rebuilds those and clears the
+  library at its start, cannot lose it, and a temporarily unavailable source keeps its
+  marks. Moving or renaming a file (or re-adding a source under a different SAF tree)
+  changes its `parsedPath`, same as for overrides; stale entries are kept, not pruned.
+  `WatchedBadge` (in `PosterBox`'s bottom-left corner, or inline in `ListItem`) shows a
+  green tick for a watched file, or for a show/season/multi-part audiobook whose files
+  (`getShowWatchKeys` / `getSeasonWatchKeys` / `getAudiobookWatchKeys`; hidden episodes
+  excluded) are all watched. Each badge subscribes to `selectWatched` itself, so marking
+  re-renders only badges, not cells or the list. In **edit mode** (parent-lock gated) the
+  badge is also the manual toggle on every file and folder cell; a folder cell sets or
+  clears every file below it in one dispatch (`markWatched` / `markUnwatched`). The JSON
+  backup has an optional `watched` section, merged on import (later timestamp wins).
 
 Provider/data-source resolution follows a strict override chain, applied
 consistently in `MetadataService` and the UI: **per-item override →
@@ -517,7 +539,7 @@ import between the two).
 
 `ImportExportService` also provides an independent **JSON state
 backup/restore** pair (`exportJson`/`importJson`, via
-`expo-document-picker`) that serializes settings + overrides + matched
+`expo-document-picker`) that serializes settings + overrides + watched marks + matched
 metadata to a single file the user can save/share — this is a full app-state
 snapshot, separate from the filesystem `smb.json` export.
 

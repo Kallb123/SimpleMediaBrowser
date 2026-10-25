@@ -1,5 +1,7 @@
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
+import { WatchedBadge } from '@/components/ui/WatchedBadge';
+import type { ToggleWatched } from '@/components/ui/WatchedBadge';
 
 export type ListItemProps = {
   kind: 'folder' | 'file';
@@ -11,6 +13,10 @@ export type ListItemProps = {
   count?: number;
   /** 1-based part number of an audiobook file; shown in place of the icon. */
   partNumber?: number;
+  /** A file's watched key (its `parsedPath`); a folder passes `watchKeys` instead. */
+  watchKey?: string;
+  watchKeys?: () => readonly string[];
+  onToggleWatched?: ToggleWatched;
   onPress: () => void;
   onLongPress?: () => void;
   onEditPress?: () => void;
@@ -25,6 +31,9 @@ export function ListItem({
   isSelected,
   count,
   partNumber,
+  watchKey,
+  watchKeys,
+  onToggleWatched,
   onPress,
   onLongPress,
   onEditPress,
@@ -47,6 +56,13 @@ export function ListItem({
         {icon}
       </ThemedText>
       <ThemedText style={styles.label} numberOfLines={1}>{label}</ThemedText>
+      <WatchedBadge
+        variant="list"
+        watchKey={watchKey}
+        watchKeys={watchKeys}
+        editable={editMode}
+        onToggle={onToggleWatched}
+      />
       {kind === 'folder' && count !== undefined && (
         <View
           style={styles.countBadge}

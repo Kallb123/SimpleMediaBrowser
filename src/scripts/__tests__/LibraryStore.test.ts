@@ -79,7 +79,7 @@ describe('pickPersistedLibrary', () => {
       scanProgress: { phase: 'scanning' },
       scanList: ['x'],
     });
-    expect(Object.keys(picked).sort()).toEqual(['audiobooks', 'mediaLibrary', 'mediaOverrides', 'movies', 'thumbnails']);
+    expect(Object.keys(picked).sort()).toEqual(['audiobooks', 'mediaLibrary', 'mediaOverrides', 'movies', 'thumbnails', 'watched']);
   });
 
   it('defaults missing fields to empty', () => {
@@ -99,6 +99,7 @@ describe('pickPersistedLibrary', () => {
     expect(picked.audiobooks).toBe(lib.audiobooks);
     expect(picked.mediaOverrides).toBe(lib.mediaOverrides);
     expect(picked.thumbnails).toBe(lib.thumbnails);
+    expect(picked.watched).toBe(lib.watched);
   });
 });
 
@@ -175,7 +176,7 @@ describe('LibraryStore', () => {
       expect(batch.version).toBe(String(LIBRARY_STORE_VERSION));
       expect(batch.clearShows).toBe(true);
       expect(names(batch)).toEqual(Object.keys(lib.mediaLibrary));
-      expect(batch.putKv.map(k => k.key).sort()).toEqual(['audiobooks', 'mediaOverrides', 'movies', 'thumbnails']);
+      expect(batch.putKv.map(k => k.key).sort()).toEqual(['audiobooks', 'mediaOverrides', 'movies', 'thumbnails', 'watched']);
     });
 
     it('writeAll replaces previous contents', async () => {
@@ -215,6 +216,34 @@ describe('LibraryStore', () => {
       expect(db.batches[0].putKv.map(k => k.key)).toEqual(['movies']);
       expect(db.batches[0].putShows).toEqual([]);
       stop();
+    });
+
+    it('loads a store written before watched tracking as having none, and adds the row on the next save', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.delete('watched');
+
+      const store = new LibraryStore(db);
+      const loaded = (await store.load())!;
+      expect(loaded.watched).toEqual({});
+      const stop = store.startAutoSave(makeSource(loaded), appState);
+      db.clearBatches();
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['watched']);
+      expect(db.kv.get('watched')).toBe('{}');
+      stop();
+    });
+
+    it('persists watched marks and loads them back', async () => {
+      const lib = makeLibrary();
+      await new LibraryStore(db).writeAll(lib);
+      expect((await new LibraryStore(db).load())!.watched).toEqual(lib.watched);
+    });
+
+    it('throws when the watched row has the wrong shape', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.set('watched', '[]');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
     });
 
     it('throws when a show row is corrupt', async () => {
@@ -314,6 +343,17 @@ describe('LibraryStore', () => {
       expect(db.batches[0].putShows).toEqual([]);
       expect(db.batches[0].deleteShows).toEqual(['Bluey']);
       expect(db.shows.has('Bluey')).toBe(false);
+      stop();
+    });
+
+    it('writes only the watched row when a file is marked watched', async () => {
+      const { store, source, lib, stop } = await started();
+      source.set({ ...lib, watched: { ...lib.watched, 'm/b.mkv': 1700000001000 } });
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putShows).toEqual([]);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['watched']);
+      expect(JSON.parse(db.kv.get('watched')!)).toEqual({ 'm/a.mkv': 1700000000000, 'm/b.mkv': 1700000001000 });
       stop();
     });
 

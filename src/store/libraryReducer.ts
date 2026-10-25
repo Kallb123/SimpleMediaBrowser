@@ -1,6 +1,7 @@
 import { createAction, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { Action, UnknownAction } from '@reduxjs/toolkit';
 import type { RootState } from './store';
+import { audioPartFiles } from '@/scripts/libraryUtils';
 import type { IMediaObject, dataSources } from '@/scripts/libraryUtils';
 // Type-only: LibraryStore imports types from this module, so a value import would be a cycle.
 import type { PersistedLibrary } from '@/scripts/LibraryStore';
@@ -188,6 +189,14 @@ export interface LibraryState {
    *   "episode:<path>"       – for an episode file
    */
   mediaOverrides: { [key: string]: IMediaOverride };
+  /**
+   * Files the user has watched / listened to: file `parsedPath` (the decoded SAF URI, the
+   * same identity `episode:`/`movie:` override keys use) → timestamp (`Date.now()`) it was
+   * marked. Lives beside `mediaOverrides`, not on the scanned objects, so it survives
+   * rescans (which rebuild those) and a source being temporarily unavailable. Entries
+   * for files that no longer exist are harmless and kept.
+   */
+  watched: { [key: string]: number };
 }
 
 // Define the initial state using that type
@@ -197,6 +206,7 @@ const initialState: LibraryState = {
   audiobooks: [],
   thumbnails: {},
   mediaOverrides: {},
+  watched: {},
 }
 
 export const settingsSlice = createSlice({
@@ -215,6 +225,7 @@ export const settingsSlice = createSlice({
       state.audiobooks = action.payload.audiobooks;
       state.mediaOverrides = action.payload.mediaOverrides;
       state.thumbnails = action.payload.thumbnails;
+      state.watched = action.payload.watched ?? {};
     },
     setMediaLibrary: (state, action: PayloadAction<IMediaLibrary>) => {
       state.mediaLibrary = action.payload;
@@ -350,6 +361,21 @@ export const settingsSlice = createSlice({
     },
     clearMediaOverride: (state, action: PayloadAction<string>) => {
       delete state.mediaOverrides[action.payload];
+    },
+    /** Marks files (by `parsedPath`) as watched/listened at `watchedAt`; re-marking refreshes the timestamp. */
+    markWatched: (state, action: PayloadAction<{ keys: string[]; watchedAt: number }>) => {
+      for (const key of action.payload.keys) state.watched[key] = action.payload.watchedAt;
+    },
+    /** Clears the watched mark of files (by `parsedPath`); keys that were never marked are ignored. */
+    markUnwatched: (state, action: PayloadAction<string[]>) => {
+      for (const key of action.payload) delete state.watched[key];
+    },
+    /** Folds imported watched marks into the current ones, keeping the later timestamp per file. */
+    mergeWatched: (state, action: PayloadAction<{ [key: string]: number }>) => {
+      for (const [key, at] of Object.entries(action.payload)) {
+        const existing = state.watched[key];
+        if (existing === undefined || at > existing) state.watched[key] = at;
+      }
     },
     clearShowMetadata: (state, action: PayloadAction<string>) => {
       const show = state.mediaLibrary[action.payload];
@@ -614,7 +640,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, markWatched, markUnwatched, mergeWatched, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
@@ -622,6 +648,29 @@ export const selectMovies = (state: RootState) => state.libraryReducer.movies;
 export const selectAudiobooks = (state: RootState) => state.libraryReducer.audiobooks ?? [];
 export const selectThumbnails = (state: RootState) => state.libraryReducer.thumbnails;
 export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;
+export const selectWatched = (state: RootState) => state.libraryReducer.watched;
+
+/** True when `keys` is non-empty and every key is marked watched (an empty folder is never "all watched"). */
+export function areAllWatched(watched: { [key: string]: number }, keys: readonly string[]): boolean {
+  return keys.length > 0 && keys.every((key) => watched[key] !== undefined);
+}
+
+/** Watch keys (file `parsedPath`s) of a season's episodes, skipping episodes the user hid. */
+export function getSeasonWatchKeys(season: IMediaSeason, overrides: { [key: string]: IMediaOverride } = {}): string[] {
+  return (Object.values(season.episodes) as IMediaObject[])
+    .filter((ep) => !overrides[`episode:${ep.parsedPath}`]?.hidden)
+    .map((ep) => ep.parsedPath);
+}
+
+/** Watch keys of every episode across all of a show's seasons, skipping hidden episodes. */
+export function getShowWatchKeys(show: IMediaShow, overrides: { [key: string]: IMediaOverride } = {}): string[] {
+  return (Object.values(show.seasons) as IMediaSeason[]).flatMap((season) => getSeasonWatchKeys(season, overrides));
+}
+
+/** Watch keys of an audiobook's audio parts (stray non-audio entries are not parts). */
+export function getAudiobookWatchKeys(audiobook: IMediaAudiobook): string[] {
+  return audioPartFiles(audiobook.files).map((file) => file.parsedPath);
+}
 
 /** Latest `lastOpened` timestamp among a season's episodes, or undefined if none were ever opened. */
 export function getSeasonLastOpened(season: IMediaSeason): number | undefined {
