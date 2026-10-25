@@ -5,7 +5,7 @@ import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
@@ -296,7 +296,10 @@ export default function SettingsPrompt() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
+  // Re-initialise the local draft from the saved (Redux) values. Runs on every focus as well as
+  // when a saved value changes: Settings is a drawer screen, so it stays mounted after the user
+  // leaves, and without this an unsaved edit would still be showing (and savable) on the next visit.
+  useFocusEffect(useCallback(() => {
     try {
       setLocalPassword(settingsPassword);
       setLocalTmdbApiKey(settingsTmdbApiKey);
@@ -306,6 +309,11 @@ export default function SettingsPrompt() {
       if (dataSourceRef.current && dataSourceIndex >= 0) {
         (dataSourceRef.current as any).selectIndex(dataSourceIndex);
       }
+      // selectIndex() doesn't fire onSelect, so these four drafts must be reset explicitly.
+      setLocalDataSource(settingsDataSource);
+      setLocalMediaStructure(settingsMediaStructure);
+      setLocalViewOrientation(settingsViewOrientation);
+      setLocalDefaultPage(settingsDefaultPage);
 
       const mediaStructureIndex = viewTypeOptions.findIndex(o => o.id === settingsMediaStructure);
       if (mediaStructureRef.current && mediaStructureIndex >= 0) {
@@ -377,7 +385,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsVideoPlayer, settingsAudiobookPlayer, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]);
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsVideoPlayer, settingsAudiobookPlayer, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]));
 
   const save = useCallback(() => {
     try {
