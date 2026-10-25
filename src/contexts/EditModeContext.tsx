@@ -11,10 +11,40 @@ interface EditModeContextType {
    *   "show:<showName>"      – for a TV show folder
    *   "movie:<parsedPath>"   – for a movie file
    *   "episode:<parsedPath>" – for an episode file
+   *
+   * The selection belongs to the screen that made it (`selectionOwner`, a route key).
+   * Every folder level of a media section is its own mounted screen, so each consumer must
+   * ignore a selection it doesn't own — see MediaBrowserScreen.
    */
   selectedItems: Set<string>;
-  toggleItemSelection: (key: string) => void;
-  clearItemSelection: () => void;
+  selectionOwner: string | null;
+  /** Toggles `key` for `owner`. A selection held by a different owner is discarded first. */
+  toggleItemSelection: (key: string, owner: string) => void;
+  /** Clears the selection; with `owner`, only if that owner still holds it. */
+  clearItemSelection: (owner?: string) => void;
+}
+
+export interface Selection {
+  owner: string | null;
+  items: Set<string>;
+}
+
+const EMPTY_SELECTION: Selection = { owner: null, items: new Set<string>() };
+
+/** Toggles `key` for `owner`, discarding a selection held by a different owner first. */
+export function toggleSelection(prev: Selection, key: string, owner: string): Selection {
+  const items = new Set(prev.owner === owner ? prev.items : []);
+  if (items.has(key)) {
+    items.delete(key);
+  } else {
+    items.add(key);
+  }
+  return { owner, items };
+}
+
+/** Clears the selection; with `owner`, only if that owner still holds it. */
+export function clearSelection(prev: Selection, owner?: string): Selection {
+  return owner === undefined || prev.owner === owner ? EMPTY_SELECTION : prev;
 }
 
 const EditModeContext = createContext<EditModeContextType>({
@@ -22,7 +52,8 @@ const EditModeContext = createContext<EditModeContextType>({
   setEditMode: () => {},
   drawerUnlocked: false,
   setDrawerUnlocked: () => {},
-  selectedItems: new Set<string>(),
+  selectedItems: EMPTY_SELECTION.items,
+  selectionOwner: null,
   toggleItemSelection: () => {},
   clearItemSelection: () => {},
 });
@@ -30,7 +61,7 @@ const EditModeContext = createContext<EditModeContextType>({
 export function EditModeProvider({ children }: { children: React.ReactNode }) {
   const [editMode, _setEditMode] = useState(false);
   const [drawerUnlocked, setDrawerUnlocked] = useState(false);
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
 
   // These are memoised because consumers use them as hook dependencies — notably
   // MediaBrowserScreen's navigateInto, which feeds the memo backing FlashList's `data`.
@@ -39,27 +70,22 @@ export function EditModeProvider({ children }: { children: React.ReactNode }) {
     _setEditMode(value);
     // Clear any pending selection when leaving edit mode.
     if (!value) {
-      setSelectedItems(new Set());
+      setSelection(EMPTY_SELECTION);
     }
   }, []);
 
-  const toggleItemSelection = useCallback((key: string) => {
-    setSelectedItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+  const toggleItemSelection = useCallback((key: string, owner: string) => {
+    setSelection((prev) => toggleSelection(prev, key, owner));
   }, []);
 
-  const clearItemSelection = useCallback(() => setSelectedItems(new Set()), []);
+  const clearItemSelection = useCallback((owner?: string) => {
+    setSelection((prev) => clearSelection(prev, owner));
+  }, []);
 
+  const { items: selectedItems, owner: selectionOwner } = selection;
   const value = useMemo(
-    () => ({ editMode, setEditMode, drawerUnlocked, setDrawerUnlocked, selectedItems, toggleItemSelection, clearItemSelection }),
-    [editMode, setEditMode, drawerUnlocked, selectedItems, toggleItemSelection, clearItemSelection],
+    () => ({ editMode, setEditMode, drawerUnlocked, setDrawerUnlocked, selectedItems, selectionOwner, toggleItemSelection, clearItemSelection }),
+    [editMode, setEditMode, drawerUnlocked, selectedItems, selectionOwner, toggleItemSelection, clearItemSelection],
   );
 
   return (

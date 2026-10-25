@@ -587,6 +587,13 @@ snapshot, separate from the filesystem `smb.json` export.
 `drawerUnlocked` (parent-mode gate), and `selectedItems` (a `Set` of
 namespaced override keys for multi-select bulk actions).
 
+The selection belongs to the screen that made it: the context stores the
+owning route key (`selectionOwner`) alongside the set, and every folder level
+of a media section is its own mounted screen, so `MediaBrowserScreen` treats a
+selection owned by another route as empty. Selecting on a different screen
+starts a fresh selection, and a popped screen clears its own on unmount.
+Modals pushed over the list (Edit Item, Merge Shows) leave it intact.
+
 Selection is built up with one long press followed by plain taps: while
 `selectedItems` is empty a tap navigates/opens as usual and a long press
 selects the first item, after which a tap on any *selectable* item toggles it
