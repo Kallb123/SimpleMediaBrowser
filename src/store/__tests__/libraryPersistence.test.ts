@@ -22,7 +22,7 @@ jest.mock('@/store/store', () => ({
   waitForPersistBootstrap: () => Promise.resolve(),
 }));
 
-const EMPTY = { mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {} };
+const EMPTY = { mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress: {} };
 
 const LEGACY: any = {
   mediaLibrary: { Bluey: { title: 'Bluey', seasons: {} } },
@@ -42,8 +42,9 @@ const PICKED_LEGACY: any = {
   audiobooks: LEGACY.audiobooks,
   mediaOverrides: LEGACY.mediaOverrides,
   thumbnails: LEGACY.thumbnails,
-  // The legacy persist:root blob predates watched tracking.
+  // The legacy persist:root blob predates watched tracking and listen progress.
   watched: {},
+  listenProgress: {},
 };
 
 // Records the order of side effects across the fake deps.

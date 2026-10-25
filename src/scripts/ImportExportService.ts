@@ -2,7 +2,7 @@
  * ImportExportService — import/export functionality for Zibo.
  *
  * Provides three operations:
- *  1. exportJson  – save settings, overrides, watched marks and/or matched metadata to a JSON file.
+ *  1. exportJson  – save settings, overrides, watched marks, listening progress and/or matched metadata to a JSON file.
  *  2. importJson  – restore state from a previously exported JSON file.
  *  3. exportToFilesystem – write smb.json metadata, poster images and episode thumbnails
  *                          alongside the media files in the configured SAF directories.
@@ -15,11 +15,12 @@ import {
     setMediaOverride,
     clearAllOverrides,
     mergeWatched,
+    mergeListenProgress,
     updateShowMetadata,
     updateMovieMetadata,
     updateSeasonEpisodeMetadata,
 } from '@/store/libraryReducer';
-import type { IMediaOverride, IMediaShow } from '@/store/libraryReducer';
+import type { IMediaOverride, IMediaShow, IListenProgress } from '@/store/libraryReducer';
 import {
     setDataSource,
     setMediaStructure,
@@ -35,12 +36,13 @@ import {
     setFetchEpisodeNames,
     setFetchEpisodeThumbnails,
     setAppColorScheme,
+    setAudiobookPlayer,
     setBedtimeEnabled,
     setBedtimeStart,
     setBedtimeEnd,
     setBedtimeAllowedTypes,
 } from '@/store/settingsReducer';
-import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, contentTypes } from '@/store/settingsReducer';
+import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, audiobookPlayers, contentTypes } from '@/store/settingsReducer';
 import { formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
 import { logger } from '@/scripts/Logger';
 import type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData } from '@/scripts/SmbTypes';
@@ -169,7 +171,7 @@ export interface JsonExportOptions {
     includeSettings: boolean;
     /** Include all user-defined media overrides (title, sort title, poster, etc.). */
     includeOverrides: boolean;
-    /** Include which files are marked watched / listened. */
+    /** Include which files are marked watched / listened, and where in-app audiobook listening stopped. */
     includeWatched: boolean;
     /** Include matched metadata IDs and episode names from enrichment. */
     includeMatches: boolean;
@@ -196,6 +198,8 @@ interface SmbExportJson {
     overrides?: Record<string, IMediaOverride>;
     /** Watched/listened files: file `parsedPath` → time it was marked. */
     watched?: Record<string, number>;
+    /** In-app audiobook resume points: audiobook `folderKey` → where listening stopped. */
+    listenProgress?: Record<string, IListenProgress>;
     matches?: {
         shows: Record<string, ShowMatchExport>;
         movies: MovieMatchExport[];
@@ -237,6 +241,7 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             fetchEpisodeNames: s.fetchEpisodeNames,
             fetchEpisodeThumbnails: s.fetchEpisodeThumbnails,
             appColorScheme: s.appColorScheme,
+            audiobookPlayer: s.audiobookPlayer,
             bedtimeEnabled: s.bedtimeEnabled,
             bedtimeStart: s.bedtimeStart,
             bedtimeEnd: s.bedtimeEnd,
@@ -250,6 +255,7 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
 
     if (options.includeWatched) {
         payload.watched = { ...state.libraryReducer.watched };
+        payload.listenProgress = { ...state.libraryReducer.listenProgress };
     }
 
     if (options.includeMatches) {
@@ -347,6 +353,7 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (typeof s.fetchEpisodeNames === 'boolean') store.dispatch(setFetchEpisodeNames(s.fetchEpisodeNames));
         if (typeof s.fetchEpisodeThumbnails === 'boolean') store.dispatch(setFetchEpisodeThumbnails(s.fetchEpisodeThumbnails));
         if (typeof s.appColorScheme === 'string') store.dispatch(setAppColorScheme(s.appColorScheme as appColorSchemes));
+        if (s.audiobookPlayer === 'inapp' || s.audiobookPlayer === 'external') store.dispatch(setAudiobookPlayer(s.audiobookPlayer as audiobookPlayers));
         if (typeof s.bedtimeEnabled === 'boolean') store.dispatch(setBedtimeEnabled(s.bedtimeEnabled));
         // Times and allowed types are validated: a malformed window or an empty list would
         // otherwise lock every library (or none) without the user noticing.
@@ -380,6 +387,18 @@ export async function importJson(): Promise<{ applied: string[] }> {
         }
         store.dispatch(mergeWatched(incoming));
         applied.push('watched');
+    }
+
+    if (data.listenProgress && typeof data.listenProgress === 'object' && !Array.isArray(data.listenProgress)) {
+        // Merged (later `updatedAt` wins), so importing never rewinds listening done since the export.
+        const incoming: Record<string, IListenProgress> = {};
+        for (const [folderKey, p] of Object.entries(data.listenProgress)) {
+            if (p && typeof p.partPath === 'string' && Number.isFinite(p.position) && Number.isFinite(p.duration) && Number.isFinite(p.updatedAt)) {
+                incoming[folderKey] = { partPath: p.partPath, position: p.position, duration: p.duration, updatedAt: p.updatedAt };
+            }
+        }
+        store.dispatch(mergeListenProgress(incoming));
+        applied.push('listenProgress');
     }
 
     if (data.matches && typeof data.matches === 'object') {

@@ -3,6 +3,7 @@ import libraryReducer, {
   applyLibraryActions,
   areAllWatched,
   clearAllOverrides,
+  clearListenProgress,
   clearLibraryAndMovies,
   getAudiobookWatchKeys,
   getSeasonWatchKeys,
@@ -11,7 +12,9 @@ import libraryReducer, {
   markUnwatched,
   markWatched,
   mergeEpisodeBatch,
+  mergeListenProgress,
   mergeWatched,
+  setListenProgress,
   setMediaLibrary,
   setMediaOverride,
   setMoviePoster,
@@ -19,7 +22,7 @@ import libraryReducer, {
   updateMovieMetadata,
   updateShowMetadata,
 } from '@/store/libraryReducer';
-import type { IMediaAudiobook, IMediaShow } from '@/store/libraryReducer';
+import type { IListenProgress, IMediaAudiobook, IMediaShow } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 
 const NO_IDS = () => ({ tvdb: null, imdb: null, tmdb: null });
@@ -195,6 +198,56 @@ describe('watched tracking', () => {
       expect(areAllWatched({ a: 1, b: 2 }, ['a', 'b'])).toBe(true);
       expect(areAllWatched({ a: 1 }, ['a', 'b'])).toBe(false);
       expect(areAllWatched({ a: 1 }, [])).toBe(false);
+    });
+  });
+});
+
+describe('listen progress', () => {
+  const init = () => libraryReducer(undefined, { type: '@@INIT' });
+  const progress = (updatedAt: number, position = 10): IListenProgress => ({ partPath: 'b/1.mp3', position, duration: 600, updatedAt });
+
+  it('starts empty', () => {
+    expect(init().listenProgress).toEqual({});
+  });
+
+  it('records a resume point per audiobook, replacing the previous one', () => {
+    let state = libraryReducer(init(), setListenProgress({ folderKey: 'b', progress: progress(100, 10) }));
+    state = libraryReducer(state, setListenProgress({ folderKey: 'c', progress: progress(150) }));
+    state = libraryReducer(state, setListenProgress({ folderKey: 'b', progress: progress(200, 42) }));
+    expect(state.listenProgress).toEqual({ b: progress(200, 42), c: progress(150) });
+  });
+
+  it('forgets a resume point, ignoring unknown audiobooks', () => {
+    let state = libraryReducer(init(), setListenProgress({ folderKey: 'b', progress: progress(100) }));
+    state = libraryReducer(state, setListenProgress({ folderKey: 'c', progress: progress(100) }));
+    state = libraryReducer(state, clearListenProgress('b'));
+    state = libraryReducer(state, clearListenProgress('never'));
+    expect(Object.keys(state.listenProgress)).toEqual(['c']);
+  });
+
+  it('merges imported points, keeping the later updatedAt', () => {
+    let state = libraryReducer(init(), setListenProgress({ folderKey: 'a', progress: progress(100, 1) }));
+    state = libraryReducer(state, setListenProgress({ folderKey: 'b', progress: progress(300, 2) }));
+    state = libraryReducer(state, mergeListenProgress({
+      a: progress(200, 11), // newer: wins
+      b: progress(100, 22), // older: ignored
+      c: progress(50, 33), // new audiobook: added
+    }));
+    expect(state.listenProgress).toEqual({ a: progress(200, 11), b: progress(300, 2), c: progress(50, 33) });
+  });
+
+  describe('hydrateLibrary', () => {
+    const payload = (listenProgress?: Record<string, IListenProgress>): any => ({
+      mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress,
+    });
+
+    it('restores persisted progress', () => {
+      expect(libraryReducer(init(), hydrateLibrary(payload({ b: progress(7) }))).listenProgress).toEqual({ b: progress(7) });
+    });
+
+    it('defaults to empty when the payload has none', () => {
+      const seeded = libraryReducer(init(), setListenProgress({ folderKey: 'b', progress: progress(1) }));
+      expect(libraryReducer(seeded, hydrateLibrary(payload())).listenProgress).toEqual({});
     });
   });
 });
