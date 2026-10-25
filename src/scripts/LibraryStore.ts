@@ -19,6 +19,8 @@ export interface PersistedLibrary {
     audiobooks: IMediaAudiobook[];
     mediaOverrides: { [key: string]: IMediaOverride };
     thumbnails: { [path: string]: string };
+    /** Watched/listened files: file `parsedPath` → timestamp it was marked (see `libraryReducer`). */
+    watched: { [key: string]: number };
 }
 
 export const EMPTY_PERSISTED_LIBRARY: PersistedLibrary = Object.freeze({
@@ -27,6 +29,7 @@ export const EMPTY_PERSISTED_LIBRARY: PersistedLibrary = Object.freeze({
     audiobooks: Object.freeze([]) as unknown as IMediaAudiobook[],
     mediaOverrides: Object.freeze({}),
     thumbnails: Object.freeze({}),
+    watched: Object.freeze({}),
 });
 
 /**
@@ -43,13 +46,21 @@ export function pickPersistedLibrary(state: Partial<Record<string, unknown>> | n
         audiobooks: (s.audiobooks as IMediaAudiobook[] | undefined) ?? EMPTY_PERSISTED_LIBRARY.audiobooks,
         mediaOverrides: (s.mediaOverrides as PersistedLibrary['mediaOverrides'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.mediaOverrides,
         thumbnails: (s.thumbnails as PersistedLibrary['thumbnails'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.thumbnails,
+        watched: (s.watched as PersistedLibrary['watched'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.watched,
     };
 }
 
 // ── Database abstraction ──────────────────────────────────────────────────────
 
 /** Whole-collection keys stored in the `kv` table, one JSON document each. */
-const KV_KEYS = ['movies', 'audiobooks', 'mediaOverrides', 'thumbnails'] as const;
+const KV_KEYS = ['movies', 'audiobooks', 'mediaOverrides', 'thumbnails', 'watched'] as const;
+
+/**
+ * kv keys added after the first release of this layout. Stores written by an older
+ * app lack them, which is expected (not worth a warning) and needs no version bump:
+ * the row is simply created on the next save, and older apps ignore rows they don't know.
+ */
+const KV_KEYS_ADDED_LATER: ReadonlySet<string> = new Set(['watched']);
 
 /** Everything {@link LibraryDb.readAll} returns: raw rows, parsed and validated by {@link LibraryStore.load}. */
 export interface LibraryDbContents {
@@ -179,6 +190,7 @@ interface Baseline {
     audiobooks: IMediaAudiobook[] | undefined;
     mediaOverrides: PersistedLibrary['mediaOverrides'] | undefined;
     thumbnails: PersistedLibrary['thumbnails'] | undefined;
+    watched: PersistedLibrary['watched'] | undefined;
     /** Show name → show object last written to its row. */
     showRefs: Map<string, IMediaShow>;
 }
@@ -206,6 +218,7 @@ const baselineOf = (lib: PersistedLibrary): Baseline => ({
     audiobooks: lib.audiobooks,
     mediaOverrides: lib.mediaOverrides,
     thumbnails: lib.thumbnails,
+    watched: lib.watched,
     showRefs: new Map(Object.entries(lib.mediaLibrary)),
 });
 
@@ -276,14 +289,16 @@ export class LibraryStore {
             audiobooks: [],
             mediaOverrides: {},
             thumbnails: {},
+            watched: {},
         };
         const baseline = baselineOf(lib);
         // A missing key stays "unwritten" in the baseline so the next save recreates it.
-        baseline.movies = baseline.audiobooks = baseline.mediaOverrides = baseline.thumbnails = undefined;
+        baseline.movies = baseline.audiobooks = baseline.mediaOverrides = baseline.thumbnails = baseline.watched = undefined;
         for (const key of KV_KEYS) {
             const row = contents.kv.find(r => r.key === key);
             if (!row) {
-                logger.warn(TAG, `"${key}" is missing; treating as empty`);
+                if (KV_KEYS_ADDED_LATER.has(key)) logger.log(TAG, `"${key}" is not stored yet; treating as empty`);
+                else logger.warn(TAG, `"${key}" is missing; treating as empty`);
                 continue;
             }
             const value = parseJson<unknown>(`"${key}"`, row.json);
@@ -391,7 +406,8 @@ export class LibraryStore {
             || lib.movies !== b.movies
             || lib.audiobooks !== b.audiobooks
             || lib.mediaOverrides !== b.mediaOverrides
-            || lib.thumbnails !== b.thumbnails;
+            || lib.thumbnails !== b.thumbnails
+            || lib.watched !== b.watched;
     }
 
     /**

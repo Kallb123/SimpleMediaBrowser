@@ -4,6 +4,8 @@ import { Image } from 'expo-image';
 import type { ImageLoadEventData } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { ThemedText } from '@/components/ThemedText';
+import { WatchedBadge } from '@/components/ui/WatchedBadge';
+import type { ToggleWatched } from '@/components/ui/WatchedBadge';
 import { aspectRatio, needsBackdrop } from '@/utils/posterFit';
 
 type ThumbnailSource = VideoThumbnail | string;
@@ -36,6 +38,10 @@ export type PosterBoxProps = {
   isRevealed: boolean;
   isEditable: boolean;
   isSelected?: boolean;
+  /** A file's watched key (its `parsedPath`); a folder passes `watchKeys` instead. */
+  watchKey?: string;
+  watchKeys?: () => readonly string[];
+  onToggleWatched?: ToggleWatched;
   onPress: () => void;
   onLongPress?: () => void;
   onPressOut?: () => void;
@@ -50,6 +56,9 @@ export function PosterBox({
   isRevealed,
   isEditable,
   isSelected,
+  watchKey,
+  watchKeys,
+  onToggleWatched,
   onPress,
   onLongPress,
   onPressOut,
@@ -155,6 +164,14 @@ export function PosterBox({
             <ThemedText style={styles.editOverlayIcon}>✏️</ThemedText>
           </TouchableOpacity>
         )}
+        {/* Watched tick (and, in edit mode, the manual watched toggle) */}
+        <WatchedBadge
+          variant="poster"
+          watchKey={watchKey}
+          watchKeys={watchKeys}
+          editable={editMode}
+          onToggle={onToggleWatched}
+        />
         {/* Entry count badge for show/season folders */}
         {item.kind === 'folder' && item.count !== undefined && (
           <View

@@ -10,7 +10,7 @@ import { Link, Stack, router } from 'expo-router';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder } from '@/store/settingsReducer';
-import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectMediaOverrides } from '@/store/libraryReducer';
+import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, markWatched, markUnwatched, getShowWatchKeys, getSeasonWatchKeys, getAudiobookWatchKeys, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectMediaOverrides } from '@/store/libraryReducer';
 import { selectIsScanning, selectScanProgress } from '@/store/scanReducer';
 import { store } from '@/store/store';
 import { FlashList } from '@shopify/flash-list';
@@ -41,7 +41,7 @@ export type NavLevel = {
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number }
+  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number; /** Watch keys of the files below this folder (resolved lazily; drives its tick and bulk toggle). */ watchKeys: () => readonly string[] }
   | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook'; partNumber?: number };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
@@ -226,6 +226,7 @@ function buildAudiobookRootItems(
           onPress: () => navigateInto({ label, audiobookKey: audiobook.folderKey }),
           mediaType: 'audiobook' as const,
           count: files.length,
+          watchKeys: () => getAudiobookWatchKeys(audiobook),
         };
       }
       return {
@@ -367,6 +368,7 @@ function buildBaseDisplayItems(
               onPress: () => navigateInto({ label: showName, showName }),
               mediaType: 'show' as const,
               count: episodeCount,
+              watchKeys: () => getShowWatchKeys(show, overrides),
             };
           });
         const movieItems: DisplayItem[] = movies
@@ -437,6 +439,7 @@ function buildBaseDisplayItems(
               onPress: () => navigateInto({ label, showName, seasonKey }),
               mediaType: 'season',
               count: Object.keys(season.episodes).length,
+              watchKeys: () => getSeasonWatchKeys(season, overrides),
             });
           }
         }
@@ -499,6 +502,7 @@ function buildBaseDisplayItems(
               (sum, season) => sum + Object.keys(season.episodes).length,
               0,
             ),
+            watchKeys: () => getShowWatchKeys(library[showName], overrides),
           }));
         const movieItems: DisplayItem[] = movies
           .filter((movie) => !overrides[`movie:${movie.parsedPath}`]?.hidden)
@@ -542,6 +546,7 @@ function buildBaseDisplayItems(
                 }),
               mediaType: 'season' as const,
               count: Object.keys(season.episodes).length,
+              watchKeys: () => getSeasonWatchKeys(season, overrides),
             };
           });
       }
@@ -745,6 +750,22 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       if (folderKey) dispatch(setAudiobookLastOpened({ folderKey, lastOpened: now }));
     }
   }, [dispatch, location]);
+
+  /**
+   * Marks a file watched/listened because it was just handed to the external player.
+   * Returns whether it was already marked, so a failed hand-off can undo only its own mark.
+   */
+  const recordWatched = useCallback((parsedPath: string): boolean => {
+    const watchedBefore = store.getState().libraryReducer.watched[parsedPath] !== undefined;
+    dispatch(markWatched({ keys: [parsedPath], watchedAt: Date.now() }));
+    return watchedBefore;
+  }, [dispatch]);
+
+  /** Manual watched toggle (edit mode): sets or clears every file the badge stands for in one dispatch. */
+  const handleToggleWatched = useCallback((keys: readonly string[], watched: boolean) => {
+    const list = [...keys];
+    dispatch(watched ? markWatched({ keys: list, watchedAt: Date.now() }) : markUnwatched(list));
+  }, [dispatch]);
 
   /** Open the edit screen for a given display item. */
   const openEditScreen = useCallback((item: DisplayItem) => {
@@ -1103,8 +1124,11 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                 handlePress = () => {
                   logger.log('MediaBrowserScreen', `Opening file: ${item.mediaObject.filename} (${item.mediaObject.path})`);
                   recordLastOpened(item);
+                  const watchedBefore = recordWatched(item.mediaObject.parsedPath);
                   openMediaInExternalApp(item.mediaObject.path, item.mediaObject.filename).catch((e: unknown) => {
                     logger.error('MediaBrowserScreen', `Failed to open file: ${item.mediaObject.path}`, e);
+                    // The hand-off never happened, so don't leave a tick the user didn't earn.
+                    if (!watchedBefore) dispatch(markUnwatched([item.mediaObject.parsedPath]));
                   });
                 };
               }
@@ -1123,6 +1147,9 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                     isSelected={isSelected}
                     count={item.kind === 'folder' ? item.count : undefined}
                     partNumber={item.kind === 'file' ? item.partNumber : undefined}
+                    watchKey={item.kind === 'file' ? item.mediaObject.parsedPath : undefined}
+                    watchKeys={item.kind === 'folder' ? item.watchKeys : undefined}
+                    onToggleWatched={handleToggleWatched}
                     onPress={handlePress}
                     onLongPress={toggleSelection}
                     onEditPress={onEditPress}
@@ -1158,6 +1185,9 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                   isRevealed={isRevealed}
                   isEditable={isEditable}
                   isSelected={isSelected}
+                  watchKey={item.kind === 'file' ? item.mediaObject.parsedPath : undefined}
+                  watchKeys={item.kind === 'folder' ? item.watchKeys : undefined}
+                  onToggleWatched={handleToggleWatched}
                   onPress={handlePress}
                   onLongPress={handleLongPress}
                   onPressOut={handlePressOut}

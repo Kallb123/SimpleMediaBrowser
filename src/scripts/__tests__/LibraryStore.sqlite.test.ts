@@ -131,7 +131,7 @@ describe('LibraryStore on SQLite', () => {
     it('round-trips movies, audiobooks, overrides and thumbnails as whole documents', async () => {
       const lib = makeLibrary();
       await newStore().writeAll(lib);
-      expect(sqlite.all<{ key: string }>('SELECT key FROM kv ORDER BY key').map(r => r.key)).toEqual(['audiobooks', 'mediaOverrides', 'movies', 'thumbnails']);
+      expect(sqlite.all<{ key: string }>('SELECT key FROM kv ORDER BY key').map(r => r.key)).toEqual(['audiobooks', 'mediaOverrides', 'movies', 'thumbnails', 'watched']);
       const loaded = (await newStore().load())!;
       expect(loaded.movies).toEqual(lib.movies);
       expect(loaded.audiobooks).toEqual(lib.audiobooks);

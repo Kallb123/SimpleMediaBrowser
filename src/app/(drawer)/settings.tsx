@@ -178,6 +178,7 @@ export default function SettingsPrompt() {
   const [importExportExpanded, setImportExportExpanded] = useState(false);
   const [exportIncludeSettings, setExportIncludeSettings] = useState(true);
   const [exportIncludeOverrides, setExportIncludeOverrides] = useState(true);
+  const [exportIncludeWatched, setExportIncludeWatched] = useState(true);
   const [exportIncludeMatches, setExportIncludeMatches] = useState(true);
 
   const dispatch = useDispatch();
@@ -675,9 +676,10 @@ export default function SettingsPrompt() {
       const options: JsonExportOptions = {
         includeSettings: exportIncludeSettings,
         includeOverrides: exportIncludeOverrides,
+        includeWatched: exportIncludeWatched,
         includeMatches: exportIncludeMatches,
       };
-      if (!options.includeSettings && !options.includeOverrides && !options.includeMatches) {
+      if (!options.includeSettings && !options.includeOverrides && !options.includeWatched && !options.includeMatches) {
         Alert.alert('Nothing to export', 'Please select at least one section to include in the export.');
         return;
       }
@@ -690,7 +692,7 @@ export default function SettingsPrompt() {
       }
       logger.warn('Settings', 'JSON export failed', e);
     }
-  }, [exportIncludeSettings, exportIncludeOverrides, exportIncludeMatches]);
+  }, [exportIncludeSettings, exportIncludeOverrides, exportIncludeWatched, exportIncludeMatches]);
 
   const handleImportJson = useCallback(async () => {
     try {
@@ -1228,6 +1230,10 @@ export default function SettingsPrompt() {
               <ThemedText style={styles.rowLabel}>Overrides (custom titles, sort titles)</ThemedText>
             </View>
             <View style={styles.row}>
+              <Switch value={exportIncludeWatched} onValueChange={setExportIncludeWatched} />
+              <ThemedText style={styles.rowLabel}>Watched (which files are marked watched)</ThemedText>
+            </View>
+            <View style={styles.row}>
               <Switch value={exportIncludeMatches} onValueChange={setExportIncludeMatches} />
               <ThemedText style={styles.rowLabel}>Matches (TMDB/TVDB IDs, episode names)</ThemedText>
             </View>
@@ -1237,7 +1243,7 @@ export default function SettingsPrompt() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.importExportButton} onPress={handleImportJson}>
               <ThemedText style={styles.importExportButtonText}>📥 Import app state from JSON</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Restores settings, overrides and/or matches from a previously exported JSON file.</ThemedText>
+              <ThemedText style={styles.troubleshootingButtonDesc}>Restores settings, overrides, watched marks and/or matches from a previously exported JSON file.</ThemedText>
             </TouchableOpacity>
             {/* Filesystem export */}
             <TouchableOpacity style={styles.importExportButton} onPress={handleExportToFilesystem}>
