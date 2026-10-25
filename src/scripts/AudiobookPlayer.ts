@@ -152,6 +152,17 @@ export class AudiobookPlayer {
         await this.startLoad(audiobook, start.partIndex, position);
     }
 
+    /**
+     * Pauses whatever is playing (e.g. because a video is starting). Does nothing when idle, and never
+     * creates the native player. A part that is still loading is left paused once it has loaded.
+     */
+    pause(): void {
+        const player = this.player;
+        if (!player) return;
+        if (this.pending) this.pending.autoplay = false;
+        if (this.isPlaying()) player.pause();
+    }
+
     togglePlayPause(): void {
         const now = this.snapshot;
         const player = this.player;
