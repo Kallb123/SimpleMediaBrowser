@@ -24,6 +24,8 @@ export type PosterBoxItem = {
   thumbnailUri?: ThumbnailSource;
   posterUri?: string;
   count?: number;
+  /** 1-based part number of an audiobook file; shown in place of the placeholder icon. */
+  partNumber?: number;
 };
 
 export type PosterBoxProps = {
@@ -124,9 +126,19 @@ export function PosterBox({
           </>
         ) : (
           <View style={styles.thumbnailPlaceholder}>
-            <ThemedText style={styles.placeholderIcon}>
-              {isFolder ? '📁' : '🎬'}
-            </ThemedText>
+            {/* Folder icon; audiobook parts show their part number; other files the movie icon. */}
+            {!isFolder && item.partNumber !== undefined ? (
+              <ThemedText
+                style={styles.placeholderPartNumber}
+                accessibilityLabel={`Part ${item.partNumber}`}
+              >
+                {item.partNumber}
+              </ThemedText>
+            ) : (
+              <ThemedText style={styles.placeholderIcon}>
+                {isFolder ? '📁' : '🎬'}
+              </ThemedText>
+            )}
           </View>
         )}
         {/* Selection indicator overlay – shown in edit mode when the item is selected */}
@@ -196,6 +208,11 @@ const styles = StyleSheet.create({
   },
   placeholderIcon: {
     fontSize: 32,
+  },
+  placeholderPartNumber: {
+    fontSize: 36,
+    lineHeight: 44,
+    fontWeight: '700',
   },
   cardLabel: {
     paddingHorizontal: 4,

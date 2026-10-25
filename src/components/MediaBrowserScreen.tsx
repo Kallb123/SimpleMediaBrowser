@@ -17,6 +17,7 @@ import { FlashList } from '@shopify/flash-list';
 import { FileScanner } from '@/scripts/FileScanner';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { useThumbnailVersion } from '@/hooks/useThumbnailVersion';
+import { audioPartFiles } from '@/scripts/libraryUtils';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { IMediaLibrary, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
 import type { viewTypes, sortOrders } from '@/store/settingsReducer';
@@ -41,7 +42,7 @@ type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
   | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number }
-  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook' };
+  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook'; partNumber?: number };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -212,7 +213,8 @@ function buildAudiobookRootItems(
       const label = audiobookDisplayLabel(audiobook, overrides);
       const sortKey = audiobookSortKey(audiobook, overrides);
       const posterUri = overrides[`audiobook:${audiobook.folderKey}`]?.poster || audiobook.poster || undefined;
-      if (audiobook.files.length > 1) {
+      const files = audioPartFiles(audiobook.files);
+      if (files.length > 1) {
         return {
           kind: 'folder' as const,
           label,
@@ -223,7 +225,7 @@ function buildAudiobookRootItems(
           posterUri,
           onPress: () => navigateInto({ label, audiobookKey: audiobook.folderKey }),
           mediaType: 'audiobook' as const,
-          count: audiobook.files.length,
+          count: files.length,
         };
       }
       return {
@@ -234,7 +236,7 @@ function buildAudiobookRootItems(
         firstDetected: audiobook.firstDetected,
         key: `audiobook:${audiobook.folderKey}`,
         posterUri,
-        mediaObject: makeAudiobookFileObject(audiobook.files[0] ?? { path: audiobook.path, parsedPath: audiobook.path, filename: audiobook.title }),
+        mediaObject: makeAudiobookFileObject(files[0] ?? { path: audiobook.path, parsedPath: audiobook.path, filename: audiobook.title }),
         mediaType: 'audiobook' as const,
       };
     });
@@ -260,12 +262,13 @@ function buildDisplayItems(
   if (location?.audiobookKey) {
     const audiobook = audiobooks.find((a) => a.folderKey === location.audiobookKey);
     if (!audiobook) return [];
-    return audiobook.files.map((file) => ({
+    return audioPartFiles(audiobook.files).map((file, index) => ({
       kind: 'file' as const,
       label: file.filename.replace(/\.[^.]+$/, '').replace(/[\._]+/g, ' ').trim() || file.filename,
       key: file.path,
       mediaObject: makeAudiobookFileObject(file),
       mediaType: 'audiobook' as const,
+      partNumber: index + 1,
     }));
   }
 
@@ -1119,6 +1122,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                     isEditable={isEditable}
                     isSelected={isSelected}
                     count={item.kind === 'folder' ? item.count : undefined}
+                    partNumber={item.kind === 'file' ? item.partNumber : undefined}
                     onPress={handlePress}
                     onLongPress={toggleSelection}
                     onEditPress={onEditPress}

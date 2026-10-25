@@ -9,6 +9,8 @@ export type ListItemProps = {
   isEditable: boolean;
   isSelected?: boolean;
   count?: number;
+  /** 1-based part number of an audiobook file; shown in place of the icon. */
+  partNumber?: number;
   onPress: () => void;
   onLongPress?: () => void;
   onEditPress?: () => void;
@@ -22,12 +24,15 @@ export function ListItem({
   isEditable,
   isSelected,
   count,
+  partNumber,
   onPress,
   onLongPress,
   onEditPress,
 }: ListItemProps) {
-  // Choose icon: folder icon for show/season folders; movie icon for video files.
-  const icon = kind === 'folder' ? '📁' : '🎬';
+  // Choose icon: folder icon for show/season folders; part number for audiobook parts;
+  // movie icon for other files.
+  const showPartNumber = kind === 'file' && partNumber !== undefined;
+  const icon = kind === 'folder' ? '📁' : showPartNumber ? String(partNumber) : '🎬';
 
   return (
     <TouchableOpacity
@@ -35,7 +40,12 @@ export function ListItem({
       onLongPress={onLongPress}
       style={[styles.row, { height: rowHeight }, isSelected && styles.rowSelected]}
     >
-      <ThemedText style={styles.icon}>{icon}</ThemedText>
+      <ThemedText
+        style={[styles.icon, showPartNumber && styles.iconPartNumber]}
+        accessibilityLabel={showPartNumber ? `Part ${partNumber}` : undefined}
+      >
+        {icon}
+      </ThemedText>
       <ThemedText style={styles.label} numberOfLines={1}>{label}</ThemedText>
       {kind === 'folder' && count !== undefined && (
         <View
@@ -70,6 +80,12 @@ const styles = StyleSheet.create({
   },
   icon: {
     fontSize: 20,
+  },
+  // Fixed-width centred column so labels stay aligned whatever the number of digits.
+  iconPartNumber: {
+    width: 28,
+    textAlign: 'center',
+    fontWeight: '700',
   },
   label: {
     flex: 1,
