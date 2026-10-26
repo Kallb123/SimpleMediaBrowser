@@ -24,7 +24,7 @@ src/
 │                   libraryUtils (pure helpers + IMediaObject, no imports), librarySink (injected store access),
 │                   ImportExportService, Logger, openMedia
 ├── store/          Redux Toolkit slices: settingsReducer, libraryReducer, scanReducer (transient, not persisted) (+ store.ts persistence config)
-├── contexts/       EditModeContext (edit mode / parent-lock UI state), BedtimeContext (bedtime-mode section locks)
+├── contexts/       EditModeContext (edit mode / parent-lock UI state), BedtimeContext (bedtime-mode section locks), FirstTimeSetupContext (first-run route guard)
 ├── constants/      Colors, theme tokens, AsyncStorage keys
 ├── hooks/          Theme/color-scheme hooks, typed Redux hooks
 └── utils/          Small pure helpers (e.g. viewScale)

@@ -1,8 +1,11 @@
+import type { defaultPages } from '@/store/settingsReducer';
 import {
   BEDTIME_SECTIONS,
   bedtimeRestrictedSections,
+  defaultPageSection,
   firstAllowedSection,
   formatTimeOfDay,
+  initialSection,
   isWithinBedtime,
   parseTimeOfDay,
   type BedtimeSection,
@@ -100,5 +103,35 @@ describe('firstAllowedSection', () => {
 
   it('returns null when everything is restricted', () => {
     expect(firstAllowedSection(new Set<BedtimeSection>(BEDTIME_SECTIONS))).toBeNull();
+  });
+});
+
+describe('defaultPageSection', () => {
+  it("maps 'home' to the '(home)' route and the others to themselves", () => {
+    expect(defaultPageSection('home')).toBe('(home)');
+    expect(defaultPageSection('tv')).toBe('tv');
+    expect(defaultPageSection('movies')).toBe('movies');
+    expect(defaultPageSection('audiobooks')).toBe('audiobooks');
+  });
+
+  it('falls back to home for an unknown value', () => {
+    expect(defaultPageSection('podcasts' as defaultPages)).toBe('(home)');
+  });
+});
+
+describe('initialSection', () => {
+  it("opens the default page's section when it is allowed", () => {
+    expect(initialSection('home', new Set())).toBe('(home)');
+    expect(initialSection('movies', new Set())).toBe('movies');
+    expect(initialSection('tv', bedtimeRestrictedSections(['tv', 'movie']))).toBe('tv');
+  });
+
+  it('falls back to the first allowed section when the default is restricted', () => {
+    expect(initialSection('home', bedtimeRestrictedSections(['audiobook']))).toBe('audiobooks');
+    expect(initialSection('tv', bedtimeRestrictedSections(['movie']))).toBe('movies');
+  });
+
+  it("returns the default's section when nothing is allowed", () => {
+    expect(initialSection('movies', new Set<BedtimeSection>(BEDTIME_SECTIONS))).toBe('movies');
   });
 });

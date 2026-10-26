@@ -8,6 +8,7 @@ import { StorageKeys } from '@/constants/StorageKeys';
 import { selectMediaSources } from '@/store/settingsReducer';
 import { useSelector } from 'react-redux';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
+import { useFirstTimeSetup } from '@/contexts/FirstTimeSetupContext';
 
 export default function Modal() {
     // If the page was reloaded or navigated to directly, then the modal should be presented as
@@ -15,11 +16,13 @@ export default function Modal() {
     const isPresented = router.canGoBack();
 
     const mediaSources = useSelector(selectMediaSources);
+    const { setSetupComplete } = useFirstTimeSetup();
 
     const resetFirstTime = useCallback(async () => {
         await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(true));
-        router.replace("/firsttime");
-    }, []);
+        // The root layout's guards swap the drawer for firsttime.
+        setSetupComplete(false);
+    }, [setSetupComplete]);
 
     return (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 }}>
