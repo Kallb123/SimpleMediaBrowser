@@ -1,15 +1,16 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation } from 'expo-router';
+import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { StackActions } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
 import { logger } from '@/scripts/Logger';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
-import { getVideoRequest } from '@/scripts/VideoPlayback';
+import { resolveVideoRequest } from '@/scripts/VideoPlayback';
 import type { VideoRequest } from '@/scripts/VideoPlayback';
 import { VideoProgressTracker } from '@/scripts/VideoProgressTracker';
+import { useAppStore } from '@/hooks/useRedux';
 
 const TAG = 'VideoPlayerScreen';
 
@@ -29,13 +30,21 @@ function useCloseScreen() {
 }
 
 /**
- * The in-app video player: a full-screen modal playing what `MediaBrowserScreen` queued with
- * `setVideoRequest`. Unlike the audiobook player it owns its player, so closing the screen stops
- * playback (no background playback or Picture-in-Picture yet).
+ * The in-app video player: a full-screen modal playing the file its route params name. The params
+ * carry only the library key (`parsedPath`) and the start time; the file URI, filename and title
+ * are looked up in the library, so the screen depends on nothing but its params. Unlike the
+ * audiobook player it owns its player, so closing the screen stops playback (no background
+ * playback or Picture-in-Picture yet).
  */
 export default function VideoPlayerScreen() {
-  // Read once: a later request is for the next screen instance.
-  const [request] = useState(getVideoRequest);
+  const { parsedPath, startAt } = useLocalSearchParams<{ parsedPath?: string; startAt?: string }>();
+  const store = useAppStore();
+  // Resolved once: a rescan while playing must not reload the player.
+  const [request] = useState(() => {
+    const resolved = resolveVideoRequest(store.getState().libraryReducer, parsedPath, startAt);
+    if (!resolved) logger.warn(TAG, `Nothing to play for parsedPath=${parsedPath} startAt=${startAt}`);
+    return resolved;
+  });
   if (!request) return <NothingPlaying />;
   return <VideoPlayback request={request} />;
 }

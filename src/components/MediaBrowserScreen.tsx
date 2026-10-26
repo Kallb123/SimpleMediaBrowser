@@ -17,7 +17,7 @@ import { store } from '@/store/store';
 import { FlashList } from '@shopify/flash-list';
 import { FileScanner } from '@/scripts/FileScanner';
 import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
-import { setVideoRequest } from '@/scripts/VideoPlayback';
+import { showDisplayLabel, episodeDisplayLabel, movieDisplayLabel } from '@/scripts/mediaLabels';
 import { resumePosition } from '@/scripts/videoProgress';
 import { formatClock } from '@/utils/formatClock';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
@@ -67,11 +67,6 @@ function pickShowThumbnail(
 }
 
 // ── Helper: build items to display from library + nav state ──────────────────
-
-/** Returns the effective display label for a show, applying overrides if present. */
-function showDisplayLabel(showName: string, overrides: { [key: string]: IMediaOverride }): string {
-  return overrides[`show:${showName}`]?.title ?? showName;
-}
 
 /** Returns the effective sort key for a show (sortTitle > title > showName). */
 function showSortKey(showName: string, overrides: { [key: string]: IMediaOverride }): string {
@@ -151,22 +146,6 @@ function applySortOrder(items: DisplayItem[], sortOrder: sortOrders): DisplayIte
     default:
       return sorted.sort(compareItemLabels);
   }
-}
-
-/** Returns the effective display label for an episode, applying overrides to the title portion. */
-function episodeDisplayLabel(ep: IMediaObject, overrides: { [key: string]: IMediaOverride }, prefix: string): string {
-  const override = overrides[`episode:${ep.parsedPath}`];
-  // Priority: user override > provider-resolved title > scanned (local) title
-  const title = override?.title ?? ep.resolvedTitle ?? ep.title;
-  if (prefix) {
-    return title ? `${prefix} - ${title}` : prefix;
-  }
-  return title || ep.filename;
-}
-
-/** Returns the effective display label for a movie, applying overrides if present. */
-function movieDisplayLabel(movie: IMediaObject, overrides: { [key: string]: IMediaOverride }): string {
-  return overrides[`movie:${movie.parsedPath}`]?.title ?? movie.title ?? movie.filename;
 }
 
 /** Returns the effective poster URI for an episode: user override > provider-resolved still > none. */
@@ -805,8 +784,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     const resumeAt = resumePosition(store.getState().libraryReducer.watchProgress[parsedPath]);
     const play = (startAt: number) => {
       logger.log('MediaBrowserScreen', `Playing video in-app: ${filename} (${path}) from ${Math.round(startAt)}s`);
-      setVideoRequest({ path, parsedPath, filename, title: item.label, startAt });
-      router.push('/videoplayer');
+      router.push({ pathname: '/videoplayer', params: { parsedPath, startAt: String(startAt) } });
     };
     if (resumeAt > 0) {
       Alert.alert(

@@ -103,7 +103,8 @@ SimpleMediaBrowser/
     │   ├── Logger.ts                # In-memory + on-disk logger, singleton, used everywhere via `logger`
     │   ├── openMedia.ts             # Hands a media file off to an external player via Android intent
     │   ├── AudiobookPlayer.ts       # In-app audiobook playback singleton (expo-audio): resume, part advance, progress saving
-    │   ├── VideoPlayback.ts         # Holds the next VideoRequest for the /videoplayer screen (no route params)
+    │   ├── VideoPlayback.ts         # VideoRequest + resolveVideoRequest(): rebuilds what /videoplayer plays from its route params (parsedPath, startAt) and the library
+    │   ├── mediaLabels.ts           # Pure display-label helpers (show / episode / movie) shared by the browse screen and the video player; type-only imports
     │   ├── VideoProgressTracker.ts  # Saves video resume points, marks a video watched at 90% / end
     │   ├── videoProgress.ts         # Pure helpers: watched threshold, resume position
     │   ├── audiobookProgress.ts     # Pure helpers: resume start point, whole-book / per-part progress fractions
@@ -754,11 +755,15 @@ episode in `MediaBrowserScreen` runs `playVideoInApp`:
   `resumePosition` (`videoProgress.ts`) says there is something to resume (at least 10 s in,
   not past the watched threshold), asks with a native `Alert` ("Resume from 23:41?", buttons
   "Start over" / "Resume"; dismissing it does nothing). Otherwise it plays from 0 straight
-  away. The chosen start goes into `setVideoRequest` (`VideoPlayback.ts`, a module variable:
-  `{ path, parsedPath, filename, title, startAt }`) and the `/videoplayer` screen is pushed.
-  The request is not a route param so a `content://` URI never goes through URL encoding;
-  it also means a screen restored after the process died (nothing in the variable) shows
-  "Nothing playing" with a Close button.
+  away. The `/videoplayer` screen is pushed with route params `{ parsedPath, startAt }`: the
+  library key and the start in seconds. The `content://` URI is not a param, so it never goes
+  through URL encoding. The screen resolves them once on mount with `resolveVideoRequest`
+  (`VideoPlayback.ts`), looking `parsedPath` up in `movies` and then in every episode of
+  `mediaLibrary` to get `{ path, parsedPath, filename, title, startAt }`. The title is built
+  with the `mediaLabels.ts` helpers, so it matches the flat browse view ("Show S01E02 - Title").
+  Resolving once is intentional: a rescan while playing must not reload the player. A screen
+  restored from its params works like any other; only a key the library no longer has (logged
+  as a warning) shows "Nothing playing" with a Close button.
 - **Screen** (`app/videoplayer.tsx`). A `fullScreenModal` (falls back to `modal` on Android)
   with `animation: 'fade'` and no header, status bar hidden. It owns its player
   (`useVideoPlayer`, `timeUpdateEventInterval = 1`, `keepScreenOnWhilePlaying`) and shows it
