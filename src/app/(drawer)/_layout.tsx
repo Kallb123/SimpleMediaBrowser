@@ -7,9 +7,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { useBedtime } from '@/contexts/BedtimeContext';
 import { useDispatch, useSelector } from 'react-redux';
-import { selectPassword, selectMediaSources, selectRescanOnStartup, selectDefaultPage, selectShowSidebarSort, selectSortOrder, setSortOrder, type sortOrders } from '@/store/settingsReducer';
+import { selectPassword, selectMediaSources, selectRescanOnStartup, selectDefaultPage, selectShowSidebarSort, selectSortOrder, setSortOrder } from '@/store/settingsReducer';
 import { sortOrderOptions } from '@/constants/sortOrderOptions';
-import SelectDropdown from 'react-native-select-dropdown';
+import { Dropdown } from '@/components/Dropdown';
 import { useState, useEffect } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { PasswordPromptModal } from '@/components/PasswordPromptModal';
@@ -48,8 +48,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
   const colorScheme = useColorScheme() ?? 'light';
 
   const currentRouteName = props.state.routes[props.state.index]?.name;
-  const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
-  const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
   const textColor = Colors[colorScheme].text;
 
   // Navigating to a guarded route is silently dropped (and not replayed), so after a bedtime
@@ -186,32 +184,16 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
       {showSidebarSort && (
         <View style={styles.sortRow}>
           <Text style={[styles.sortLabel, { color: textColor }]}>Sort by</Text>
-          <SelectDropdown
-            // Remount when the saved value changes elsewhere (Settings, import) so the shown label follows it.
-            key={sortOrder}
-            data={sortOrderOptions}
-            defaultValue={sortOrderOptions.find((o) => o.id === sortOrder)}
-            onSelect={(selectedItem) => {
-              const next = selectedItem.id as sortOrders;
+          <Dropdown
+            options={sortOrderOptions}
+            value={sortOrder}
+            onChange={(next) => {
               if (next === sortOrder) return;
               logger.log('Drawer', `Sort order changed ${sortOrder} → ${next}`);
               reduxDispatch(setSortOrder(next));
             }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.sortButton, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.sortButtonText, { color: textColor }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? '🔼' : '🔽'}</Text>
-              </View>
-            )}
-            renderItem={(item, _index, isSelected) => (
-              <View style={[styles.sortItem, { backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg }]}>
-                <Text style={[styles.sortItemText, { color: textColor }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.sortMenu, { backgroundColor: dropdownBg }]}
+            buttonStyle={styles.sortButton}
+            accessibilityLabel="Sort by"
           />
         </View>
       )}
@@ -365,28 +347,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   sortButton: {
-    height: 40,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  sortButtonText: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  sortMenu: {
-    borderRadius: 8,
-  },
-  sortItem: {
     width: '100%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  sortItemText: {
-    fontSize: 15,
-    fontWeight: '500',
+    height: 40,
   },
   editModeActiveLabel: {
     color: '#E55',

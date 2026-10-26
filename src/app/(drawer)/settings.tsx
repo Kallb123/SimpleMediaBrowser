@@ -1,5 +1,6 @@
-import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, Alert } from 'react-native';
-import { useHeaderHeight } from '@react-navigation/elements';
+import { Alert, BackHandler, Button, ScrollView, StyleSheet, Switch, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { HeaderBackButton, useHeaderHeight } from '@react-navigation/elements';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -9,12 +10,13 @@ import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes, videoAutoPlayNextModes, selectVideoShowProgressBar, setVideoShowProgressBar, selectVideoTrackPickerEnabled, setVideoTrackPickerEnabled, selectVideoSpeedControlEnabled, setVideoSpeedControlEnabled, selectVideoAutoPlayNext, setVideoAutoPlayNext, selectShowSidebarSort, setShowSidebarSort } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
-import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useTheme } from '@/hooks/use-theme';
 import { Colors } from '@/constants/Colors';
 import { sortOrderOptions } from '@/constants/sortOrderOptions';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
+import { Dropdown } from '@/components/Dropdown';
 import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
@@ -29,7 +31,29 @@ import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, POR
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
 const DESTRUCTIVE_COLOR = '#E55';
 
-const dataSourceOptions = [
+// Below this window width (or on a phone held sideways) the category list and a category's page
+// are shown one at a time; on tablets they sit side by side, like Android's and iPadOS's own Settings.
+const TWO_PANE_MIN_WIDTH = 720;
+const TWO_PANE_MIN_SHORT_SIDE = 600;
+const LIST_PANE_WIDTH = 320;
+
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+
+type SectionId = 'library' | 'metadata' | 'appearance' | 'browsing' | 'video' | 'audiobook' | 'parental' | 'backup' | 'troubleshooting';
+
+const sections: { id: SectionId; title: string; icon: IoniconName }[] = [
+  {id: 'library', title: 'Media folders', icon: 'folder-open-outline'},
+  {id: 'metadata', title: 'Metadata', icon: 'cloud-download-outline'},
+  {id: 'appearance', title: 'Appearance', icon: 'color-palette-outline'},
+  {id: 'browsing', title: 'Browsing', icon: 'albums-outline'},
+  {id: 'video', title: 'Video player', icon: 'film-outline'},
+  {id: 'audiobook', title: 'Audiobook player', icon: 'headset-outline'},
+  {id: 'parental', title: 'Parental controls', icon: 'lock-closed-outline'},
+  {id: 'backup', title: 'Backup & restore', icon: 'swap-vertical-outline'},
+  {id: 'troubleshooting', title: 'Troubleshooting', icon: 'construct-outline'},
+];
+
+const dataSourceOptions: { id: dataSources; label: string }[] = [
   {id: 'tmdb', label: 'TMDB'},
   {id: 'tvdb', label: 'TheTVDB'},
 ];
@@ -40,19 +64,19 @@ const metadataSourceOptions: { id: dataSources | 'auto'; label: string }[] = [
   { id: 'tvdb', label: 'TheTVDB' },
 ];
 
-const viewTypeOptions = [
+const viewTypeOptions: { id: viewTypes; label: string; title: string }[] = [
   {id: 'flat', label: 'Flat', title: 'All episodes of all shows visible in one list'},
   {id: 'show', label: 'Show', title: 'A folder for each show, with all episodes of that show then visible in each folder'},
   {id: 'show+season', label: 'Show + Season', title: 'A folder for each show and season, with the episodes of that season in the folder'},
   {id: 'show/season', label: 'Show/Season', title: 'A folder for each show, with a further folder for each season, with episodes then visible within'},
 ];
 
-const uiTypeOptions = [
+const uiTypeOptions: { id: viewOrientations; label: string }[] = [
   {id: 'poster', label: 'Poster'},
   {id: 'list', label: 'List'},
 ];
 
-const defaultPageOptions = [
+const defaultPageOptions: { id: defaultPages; label: string }[] = [
   {id: 'home', label: 'Home (All)'},
   {id: 'tv', label: 'TV'},
   {id: 'movies', label: 'Movies'},
@@ -91,7 +115,7 @@ const audiobookRewindOptions: { id: number; label: string }[] = [
 
 const videoAutoPlayNextOptions: { id: videoAutoPlayNextModes; label: string }[] = [
   {id: 'off', label: 'Off'},
-  {id: 'prompt', label: 'Show "Up next"'},
+  {id: 'prompt', label: 'Up next'},
   {id: 'countdown', label: 'Countdown'},
 ];
 
@@ -127,6 +151,9 @@ const buildBedtimeTimeOptions = (...stored: string[]): { id: string; label: stri
 const canonicalBedtimeTypes = (types: readonly contentTypes[]): contentTypes[] =>
   bedtimeTypeOptions.map(o => o.id).filter(id => types.includes(id));
 
+const labelFor = <T,>(options: readonly { id: T; label: string }[], id: T): string =>
+  options.find(o => o.id === id)?.label ?? '';
+
 class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -146,8 +173,8 @@ class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode 
       return (
         <ThemedView style={styles.crashContainer}>
           <ThemedText type="title">Settings failed to load</ThemedText>
-          <ThemedText style={styles.emptyText}>Error: {this.state.message}</ThemedText>
-          <ThemedText style={styles.emptyText}>Open Debug Logs for stack details.</ThemedText>
+          <ThemedText style={styles.hintText}>Error: {this.state.message}</ThemedText>
+          <ThemedText style={styles.hintText}>Open Debug Logs for stack details.</ThemedText>
         </ThemedView>
       );
     }
@@ -156,9 +183,63 @@ class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode 
   }
 }
 
+/** One preference: a label (with an optional explanation under it) and its control on the right. */
+function SettingRow({ label, description, disabled, children }: {
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.settingRow}>
+      <View style={[styles.settingText, disabled && styles.disabled]}>
+        <ThemedText style={styles.settingLabel}>{label}</ThemedText>
+        {description ? <ThemedText style={styles.settingDescription}>{description}</ThemedText> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function SwitchRow({ label, description, value, onValueChange, disabled }: {
+  label: string;
+  description?: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <SettingRow label={label} description={description} disabled={disabled}>
+      <Switch value={value} onValueChange={onValueChange} disabled={disabled} />
+    </SettingRow>
+  );
+}
+
+/** A small heading that splits a page into groups (like an Android preference category). */
+function GroupHeading({ children }: { children: string }) {
+  const tint = useTheme().textSecondary;
+  return <ThemedText style={[styles.groupHeading, { color: tint }]} accessibilityRole="header">{children}</ThemedText>;
+}
+
+/** A tappable row for a one-off action (export, clear a cache...). */
+function ActionRow({ title, description, onPress, destructive }: {
+  title: string;
+  description: string;
+  onPress: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <TouchableOpacity style={styles.actionRow} onPress={onPress} accessibilityRole="button">
+      <ThemedText style={[styles.actionTitle, destructive && styles.destructiveText]}>{title}</ThemedText>
+      <ThemedText style={styles.settingDescription}>{description}</ThemedText>
+    </TouchableOpacity>
+  );
+}
+
 export default function SettingsPrompt() {
   const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const theme = Colors[colorScheme];
+  const surfaces = useTheme();
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
   const insets = useSafeAreaInsets();
   // See edititem.tsx for why we use the real header height here instead of
@@ -166,9 +247,17 @@ export default function SettingsPrompt() {
   const headerHeight = useHeaderHeight();
   const keyboard = useKeyboardAwareScroll();
   const { handleInputFocus, handleInputBlur } = keyboard;
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const twoPane = windowWidth >= TWO_PANE_MIN_WIDTH && Math.min(windowWidth, windowHeight) >= TWO_PANE_MIN_SHORT_SIDE;
 
-  const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
-  const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
+  // The category whose page is open. On a phone null means the category list is showing; in the
+  // two-pane layout one page is always shown, so null falls back to the first category.
+  const [activeSection, setActiveSection] = useState(null as SectionId | null);
+  const shownSection: SectionId | null = activeSection ?? (twoPane ? sections[0].id : null);
+  const shownSectionTitle = sections.find(s => s.id === shownSection)?.title ?? 'Settings';
+  // Phone layout with a category page open: the header shows the category and a back arrow.
+  const onSectionPage = !twoPane && shownSection !== null;
+
   const containerStyle = useMemo(
     () => [styles.container, { backgroundColor: theme.background }],
     [theme.background],
@@ -180,7 +269,6 @@ export default function SettingsPrompt() {
   const [tvdbPin, setLocalTvdbPin] = useState(null as string | null);
   const [dataSource, setLocalDataSource] = useState("" as dataSources);
   const [mediaStructure, setLocalMediaStructure] = useState("" as viewTypes);
-  const [structureDescription, setStructureDescription] = useState("");
   const [viewOrientation, setLocalViewOrientation] = useState("" as viewOrientations);
   const [viewScale, setLocalViewScale] = useState(2);
   const [defaultPage, setLocalDefaultPage] = useState("home" as defaultPages);
@@ -206,8 +294,6 @@ export default function SettingsPrompt() {
   const [bedtimeAllowedTypes, setLocalBedtimeAllowedTypes] = useState(['audiobook'] as contentTypes[]);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
-  const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
-  const [importExportExpanded, setImportExportExpanded] = useState(false);
   const [exportIncludeSettings, setExportIncludeSettings] = useState(true);
   const [exportIncludeOverrides, setExportIncludeOverrides] = useState(true);
   const [exportIncludeWatched, setExportIncludeWatched] = useState(true);
@@ -244,20 +330,6 @@ export default function SettingsPrompt() {
   const settingsBedtimeStart = useSelector(selectBedtimeStart);
   const settingsBedtimeEnd = useSelector(selectBedtimeEnd);
   const settingsBedtimeAllowedTypes = useSelector(selectBedtimeAllowedTypes);
-
-  const dataSourceRef = useRef(null);
-  const mediaStructureRef = useRef(null);
-  const viewOrientationRef = useRef(null);
-  const defaultPageRef = useRef(null);
-  const appColorSchemeRef = useRef(null);
-  const sortOrderRef = useRef(null);
-  const videoPlayerRef = useRef(null);
-  const videoAutoPlayNextRef = useRef(null);
-  const audiobookPlayerRef = useRef(null);
-  const keyboardHandlingRef = useRef(null);
-  const audiobookRewindRef = useRef(null);
-  const bedtimeStartRef = useRef(null);
-  const bedtimeEndRef = useRef(null);
 
   const bedtimeTimeOptions = useMemo(
     () => buildBedtimeTimeOptions(settingsBedtimeStart, settingsBedtimeEnd),
@@ -309,109 +381,55 @@ export default function SettingsPrompt() {
   // Re-initialise the local draft from the saved (Redux) values. Runs on every focus as well as
   // when a saved value changes: Settings is a drawer screen, so it stays mounted after the user
   // leaves, and without this an unsaved edit would still be showing (and savable) on the next visit.
+  // The dropdowns follow their draft value, so resetting the draft resets them too.
   useFocusEffect(useCallback(() => {
     try {
       setLocalPassword(settingsPassword);
       setLocalTmdbApiKey(settingsTmdbApiKey);
       setLocalTvdbApiKey(settingsTvdbApiKey);
       setLocalTvdbPin(settingsTvdbPin);
-      const dataSourceIndex = dataSourceOptions.findIndex(o => o.id === settingsDataSource);
-      if (dataSourceRef.current && dataSourceIndex >= 0) {
-        (dataSourceRef.current as any).selectIndex(dataSourceIndex);
-      }
-      // selectIndex() doesn't fire onSelect, so these four drafts must be reset explicitly.
       setLocalDataSource(settingsDataSource);
       setLocalMediaStructure(settingsMediaStructure);
       setLocalViewOrientation(settingsViewOrientation);
       setLocalDefaultPage(settingsDefaultPage);
-
-      const mediaStructureIndex = viewTypeOptions.findIndex(o => o.id === settingsMediaStructure);
-      if (mediaStructureRef.current && mediaStructureIndex >= 0) {
-        (mediaStructureRef.current as any).selectIndex(mediaStructureIndex);
-      }
-
-      const viewOrientationIndex = uiTypeOptions.findIndex(o => o.id === settingsViewOrientation);
-      if (viewOrientationRef.current && viewOrientationIndex >= 0) {
-        (viewOrientationRef.current as any).selectIndex(viewOrientationIndex);
-      }
-
-      const defaultPageIndex = defaultPageOptions.findIndex(o => o.id === settingsDefaultPage);
-      if (defaultPageRef.current && defaultPageIndex >= 0) {
-        (defaultPageRef.current as any).selectIndex(defaultPageIndex);
-      }
-
       setLocalViewScale(settingsViewScale);
       setLocalEnablePosterFetching(settingsEnablePosterFetching);
       setLocalEnableThumbnailGeneration(settingsEnableThumbnailGeneration);
       setLocalRescanOnStartup(settingsRescanOnStartup);
       setLocalFetchEpisodeNames(settingsFetchEpisodeNames);
       setLocalFetchEpisodeThumbnails(settingsFetchEpisodeThumbnails);
-
-      const appColorSchemeIndex = appColorSchemeOptions.findIndex(o => o.id === settingsAppColorScheme);
-      if (appColorSchemeRef.current && appColorSchemeIndex >= 0) {
-        (appColorSchemeRef.current as any).selectIndex(appColorSchemeIndex);
-      }
       setLocalAppColorScheme(settingsAppColorScheme);
-      setStructureDescription(viewTypeOptions.find(o => o.id === settingsMediaStructure)?.title ?? "");
-
-      const sortOrderIndex = sortOrderOptions.findIndex(o => o.id === settingsSortOrder);
-      if (sortOrderRef.current && sortOrderIndex >= 0) {
-        (sortOrderRef.current as any).selectIndex(sortOrderIndex);
-      }
       setLocalSortOrder(settingsSortOrder);
       setLocalShowSidebarSort(settingsShowSidebarSort);
-
-      const videoPlayerIndex = videoPlayerOptions.findIndex(o => o.id === settingsVideoPlayer);
-      if (videoPlayerRef.current && videoPlayerIndex >= 0) {
-        (videoPlayerRef.current as any).selectIndex(videoPlayerIndex);
-      }
       setLocalVideoPlayer(settingsVideoPlayer);
       setLocalVideoShowProgressBar(settingsVideoShowProgressBar);
       setLocalVideoTrackPickerEnabled(settingsVideoTrackPickerEnabled);
       setLocalVideoSpeedControlEnabled(settingsVideoSpeedControlEnabled);
-
-      const videoAutoPlayNextIndex = videoAutoPlayNextOptions.findIndex(o => o.id === settingsVideoAutoPlayNext);
-      if (videoAutoPlayNextRef.current && videoAutoPlayNextIndex >= 0) {
-        (videoAutoPlayNextRef.current as any).selectIndex(videoAutoPlayNextIndex);
-      }
       setLocalVideoAutoPlayNext(settingsVideoAutoPlayNext);
-
-      const audiobookPlayerIndex = audiobookPlayerOptions.findIndex(o => o.id === settingsAudiobookPlayer);
-      if (audiobookPlayerRef.current && audiobookPlayerIndex >= 0) {
-        (audiobookPlayerRef.current as any).selectIndex(audiobookPlayerIndex);
-      }
       setLocalAudiobookPlayer(settingsAudiobookPlayer);
-
-      const keyboardHandlingIndex = keyboardHandlingOptions.findIndex(o => o.id === settingsKeyboardHandling);
-      if (keyboardHandlingRef.current && keyboardHandlingIndex >= 0) {
-        (keyboardHandlingRef.current as any).selectIndex(keyboardHandlingIndex);
-      }
       setLocalKeyboardHandling(settingsKeyboardHandling);
-
-      const audiobookRewindIndex = audiobookRewindOptions.findIndex(o => o.id === settingsAudiobookRewindSeconds);
-      if (audiobookRewindRef.current && audiobookRewindIndex >= 0) {
-        (audiobookRewindRef.current as any).selectIndex(audiobookRewindIndex);
-      }
       setLocalAudiobookRewindSeconds(settingsAudiobookRewindSeconds);
-
       setLocalBedtimeEnabled(settingsBedtimeEnabled);
-      const normalisedBedtimeStart = normaliseBedtimeTime(settingsBedtimeStart);
-      const normalisedBedtimeEnd = normaliseBedtimeTime(settingsBedtimeEnd);
-      const bedtimeStartIndex = bedtimeTimeOptions.findIndex(o => o.id === normalisedBedtimeStart);
-      if (bedtimeStartRef.current && bedtimeStartIndex >= 0) {
-        (bedtimeStartRef.current as any).selectIndex(bedtimeStartIndex);
-      }
-      setLocalBedtimeStart(normalisedBedtimeStart);
-      const bedtimeEndIndex = bedtimeTimeOptions.findIndex(o => o.id === normalisedBedtimeEnd);
-      if (bedtimeEndRef.current && bedtimeEndIndex >= 0) {
-        (bedtimeEndRef.current as any).selectIndex(bedtimeEndIndex);
-      }
-      setLocalBedtimeEnd(normalisedBedtimeEnd);
+      setLocalBedtimeStart(normaliseBedtimeTime(settingsBedtimeStart));
+      setLocalBedtimeEnd(normaliseBedtimeTime(settingsBedtimeEnd));
       setLocalBedtimeAllowedTypes(canonicalBedtimeTypes(settingsBedtimeAllowedTypes));
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsShowSidebarSort, settingsVideoPlayer, settingsVideoShowProgressBar, settingsVideoTrackPickerEnabled, settingsVideoSpeedControlEnabled, settingsVideoAutoPlayNext, settingsAudiobookPlayer, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]));
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsShowSidebarSort, settingsVideoPlayer, settingsVideoShowProgressBar, settingsVideoTrackPickerEnabled, settingsVideoSpeedControlEnabled, settingsVideoAutoPlayNext, settingsAudiobookPlayer, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes]));
+
+  // Leaving Settings closes any open category, so the next visit starts at the category list.
+  useFocusEffect(useCallback(() => () => setActiveSection(null), []));
+
+  // On a phone, the hardware back button closes the open category before it leaves Settings.
+  useFocusEffect(useCallback(() => {
+    if (!onSectionPage) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setActiveSection(null);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [onSectionPage]));
 
   const save = useCallback(() => {
     try {
@@ -575,9 +593,16 @@ export default function SettingsPrompt() {
   useEffect(() => { saveRef.current = save; }, [save]);
   useLayoutEffect(() => {
     navigation.setOptions({
+      title: onSectionPage ? shownSectionTitle : 'Settings',
+      // undefined puts the drawer's own menu button back.
+      headerLeft: onSectionPage
+        ? ({ tintColor }: { tintColor?: string }) => (
+          <HeaderBackButton tintColor={tintColor} onPress={() => setActiveSection(null)} />
+        )
+        : undefined,
       headerRight: () => <Button title="Save" onPress={() => saveRef.current()} />,
     });
-  }, [navigation]);
+  }, [navigation, onSectionPage, shownSectionTitle]);
 
   const deleteSource = useCallback((uri: string) => {
     try {
@@ -758,42 +783,6 @@ export default function SettingsPrompt() {
     }
   }, []);
 
-  const renderBedtimeTimeDropdown = (
-    ref: React.RefObject<null>,
-    storedValue: string,
-    onSelect: (value: string) => void,
-    errorMessage: string,
-  ) => (
-    <SelectDropdown
-      ref={ref}
-      data={bedtimeTimeOptions}
-      defaultValue={bedtimeTimeOptions.find(o => o.id === normaliseBedtimeTime(storedValue))}
-      disabled={!bedtimeEnabled}
-      onSelect={(selectedItem) => {
-        try {
-          onSelect(selectedItem.id);
-        } catch (e) {
-          logger.error('Settings', errorMessage, e as Error);
-        }
-      }}
-      renderButton={(selectedItem, isOpened) => (
-        <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }, !bedtimeEnabled && styles.bedtimeDisabled]}>
-          <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-            {(selectedItem && selectedItem.label) || 'Please select...'}
-          </Text>
-          <Text>{isOpened ? "🔼" : "🔽"}</Text>
-        </View>
-      )}
-      renderItem={(item, index, isSelected) => (
-        <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-          <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-        </View>
-      )}
-      showsVerticalScrollIndicator={false}
-      dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-    />
-  );
-
   const bedtimeStartsEqualEnd = parseTimeOfDay(bedtimeStart) !== null && parseTimeOfDay(bedtimeStart) === parseTimeOfDay(bedtimeEnd);
 
   const handleExportJson = useCallback(async () => {
@@ -851,800 +840,462 @@ export default function SettingsPrompt() {
     }
   }, [safeMediaSources]);
 
-  return (
-    <SettingsErrorBoundary>
+  // One-line summary under each category in the list, built from the (possibly unsaved) drafts.
+  const sectionSummary = (id: SectionId): string => {
+    switch (id) {
+      case 'library': {
+        const count = safeMediaSources.length;
+        if (count === 0) return 'No folders added yet';
+        return `${count} folder${count === 1 ? '' : 's'}${rescanOnStartup ? ' · rescans on startup' : ''}`;
+      }
+      case 'metadata': {
+        const key = dataSource === 'tvdb' ? tvdbApiKey : tmdbApiKey;
+        return `${labelFor(dataSourceOptions, dataSource)}${key ? '' : ' · no API key set'}`;
+      }
+      case 'appearance':
+        return `${labelFor(appColorSchemeOptions, appColorScheme)} theme · ${labelFor(uiTypeOptions, viewOrientation)} view`;
+      case 'browsing':
+        return `Opens ${labelFor(defaultPageOptions, defaultPage)} · ${labelFor(sortOrderOptions, sortOrder)}`;
+      case 'video':
+        return videoPlayer === 'external' ? 'External app' : 'In-app player';
+      case 'audiobook':
+        if (audiobookPlayer === 'external') return 'External app';
+        return `In-app player${audiobookRewindSeconds > 0 ? ` · rewinds ${audiobookRewindSeconds} s on resume` : ''}`;
+      case 'parental':
+        return `${password ? 'Password set' : 'No password'} · ${bedtimeEnabled ? `bedtime ${bedtimeStart}–${bedtimeEnd}` : 'bedtime off'}`;
+      case 'backup':
+        return 'Export or restore settings and metadata';
+      case 'troubleshooting':
+        return 'Clear caches and reset library data';
+    }
+  };
+
+  const renderSectionList = () => (
+    <>
+      {sections.map(section => {
+        const selected = twoPane && section.id === shownSection;
+        return (
+          <TouchableOpacity
+            key={section.id}
+            style={[styles.navRow, selected && { backgroundColor: surfaces.backgroundSelected }]}
+            onPress={() => setActiveSection(section.id)}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+          >
+            <Ionicons name={section.icon} size={24} color={theme.icon} />
+            <View style={styles.navText}>
+              <ThemedText style={styles.navTitle}>{section.title}</ThemedText>
+              <ThemedText style={styles.navSummary} numberOfLines={1}>{sectionSummary(section.id)}</ThemedText>
+            </View>
+            {!twoPane && <Ionicons name="chevron-forward" size={18} color={theme.icon} />}
+          </TouchableOpacity>
+        );
+      })}
+      <View style={styles.footerContainer}>
+        <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
+      </View>
+    </>
+  );
+
+  const renderSection = (id: SectionId) => {
+    switch (id) {
+      case 'library':
+        return (
+          <>
+            <GroupHeading>Folders</GroupHeading>
+            {safeMediaSources.length === 0 && (
+              <ThemedText style={styles.hintText}>No folders added yet. Pick a type and choose a folder below.</ThemedText>
+            )}
+            {safeMediaSources.map((source, index) => (
+              <View key={source.uri} style={styles.sourceRow}>
+                <View style={styles.sourceInfo}>
+                  <ThemedText style={styles.sourceType}>
+                    {`Library ${index + 1} · ${source.contentType === 'tv' ? '📺 TV' : source.contentType === 'audiobook' ? '🎧 Audiobooks' : '🎬 Movies'}`}
+                  </ThemedText>
+                  <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
+                </View>
+                {source.contentType !== 'audiobook' && (
+                  <Dropdown
+                    compact
+                    options={metadataSourceOptions}
+                    value={source.metadataSource ?? 'auto'}
+                    onChange={(value) => {
+                      try {
+                        dispatch(updateMediaSourceMetadata({
+                          uri: source.uri,
+                          metadataSource: value === 'auto' ? undefined : value,
+                        }));
+                      } catch (e) {
+                        logger.error('Settings', 'Exception while updating media source metadata source', e as Error);
+                      }
+                    }}
+                  />
+                )}
+                <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton} accessibilityLabel="Remove folder">
+                  <Ionicons name="close" size={20} color={DESTRUCTIVE_COLOR} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            <AddMediaSource />
+            <ThemedText style={styles.hintText}>Folder changes take effect straight away; they don&apos;t need Save.</ThemedText>
+
+            <GroupHeading>Scanning</GroupHeading>
+            <View style={styles.settingRow}>
+              <Button title={scanning ? 'Scanning…' : 'Rescan now'} onPress={scanNow} disabled={scanning} />
+              {!scanning && scanComplete && <ThemedText style={styles.scanStatus}>✓ Scan complete</ThemedText>}
+            </View>
+            <SwitchRow
+              label="Rescan on startup"
+              description="Rescan the library each time the app starts. Turn off to keep the existing library until you rescan manually."
+              value={rescanOnStartup}
+              onValueChange={setLocalRescanOnStartup}
+            />
+          </>
+        );
+
+      case 'metadata':
+        return (
+          <>
+            <GroupHeading>Provider</GroupHeading>
+            <SettingRow label="Data source" description="Used for folders set to Auto.">
+              <Dropdown options={dataSourceOptions} value={dataSource} onChange={setLocalDataSource} />
+            </SettingRow>
+
+            <GroupHeading>API keys</GroupHeading>
+            <ThemedText style={styles.settingLabel}>TMDB API key</ThemedText>
+            <ThemedTextInput
+              onChangeText={setLocalTmdbApiKey}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
+              value={tmdbApiKey ?? ""}
+              placeholder="Paste your TMDB API key"
+              keyboardType="default"
+              secureTextEntry={false}
+            />
+            <ThemedText style={styles.settingDescription}>
+              Register for a free key at themoviedb.org. Posters are downloaded and cached locally for offline use.
+            </ThemedText>
+
+            <ThemedText style={styles.settingLabel}>TheTVDB API key</ThemedText>
+            <ThemedTextInput
+              onChangeText={setLocalTvdbApiKey}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
+              value={tvdbApiKey ?? ""}
+              placeholder="Paste your TVDB API key"
+              keyboardType="default"
+              secureTextEntry={false}
+            />
+            <ThemedText style={styles.settingDescription}>
+              Optional. Register for a free key at thetvdb.com. Used for TV show metadata when TheTVDB is the data source.
+            </ThemedText>
+
+            <ThemedText style={styles.settingLabel}>TheTVDB subscriber PIN</ThemedText>
+            <ThemedTextInput
+              onChangeText={setLocalTvdbPin}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
+              value={tvdbPin ?? ""}
+              placeholder="Optional subscriber PIN"
+              keyboardType="default"
+              secureTextEntry={false}
+            />
+            <ThemedText style={styles.settingDescription}>
+              Optional. Only needed by subscribers for extended metadata on thetvdb.com.
+            </ThemedText>
+
+            <GroupHeading>During scans</GroupHeading>
+            <SwitchRow
+              label="Fetch posters"
+              description="When off, scans skip poster fetching even if an API key is set."
+              value={enablePosterFetching}
+              onValueChange={setLocalEnablePosterFetching}
+            />
+            <SwitchRow
+              label="Fetch episode names"
+              description="Show the provider's episode names in place of the file names."
+              value={fetchEpisodeNames}
+              onValueChange={setLocalFetchEpisodeNames}
+            />
+            <SwitchRow
+              label="Fetch episode thumbnails"
+              description="Use the provider's episode stills as episode artwork."
+              value={fetchEpisodeThumbnails}
+              onValueChange={setLocalFetchEpisodeThumbnails}
+            />
+            <SwitchRow
+              label="Generate video thumbnails"
+              description="Make thumbnails from the video files themselves. Off by default."
+              value={enableThumbnailGeneration}
+              onValueChange={setLocalEnableThumbnailGeneration}
+            />
+          </>
+        );
+
+      case 'appearance':
+        return (
+          <>
+            <SettingRow label="Color scheme">
+              <Dropdown options={appColorSchemeOptions} value={appColorScheme} onChange={setLocalAppColorScheme} />
+            </SettingRow>
+            <SettingRow label="Interface type" description="Poster grid or a compact list.">
+              <Dropdown options={uiTypeOptions} value={viewOrientation} onChange={setLocalViewOrientation} />
+            </SettingRow>
+            <SettingRow
+              label="UI scale"
+              description={`Poster view shows about ${mapScaleToColumns(viewScale, PORTRAIT_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS)} columns in portrait and ${mapScaleToColumns(viewScale, LANDSCAPE_MIN_COLUMNS, LANDSCAPE_MAX_COLUMNS)} in landscape.`}
+            />
+            <Slider
+              style={styles.slider}
+              minimumValue={1}
+              maximumValue={10}
+              step={1}
+              value={11-viewScale}
+              onSlidingComplete={handleUIScaleChange}
+              minimumTrackTintColor={colorScheme === 'dark' ? '#ECEDEE' : '#11181C'}
+              maximumTrackTintColor={colorScheme === 'dark' ? '#687076' : '#9BA1A6'}
+            />
+          </>
+        );
+
+      case 'browsing':
+        return (
+          <>
+            <SettingRow label="Default page" description="The library shown when the app opens.">
+              <Dropdown options={defaultPageOptions} value={defaultPage} onChange={setLocalDefaultPage} />
+            </SettingRow>
+            <SettingRow label="Sorting">
+              <Dropdown options={sortOrderOptions} value={sortOrder} onChange={setLocalSortOrder} />
+            </SettingRow>
+            <SwitchRow
+              label="Sort menu in sidebar"
+              description="Adds a sort selector to the sidebar for quick switching."
+              value={showSidebarSort}
+              onValueChange={setLocalShowSidebarSort}
+            />
+            <SettingRow label="TV show structure" description={viewTypeOptions.find(o => o.id === mediaStructure)?.title}>
+              <Dropdown options={viewTypeOptions} value={mediaStructure} onChange={setLocalMediaStructure} />
+            </SettingRow>
+          </>
+        );
+
+      case 'video': {
+        const inAppOnly = videoPlayer === 'external';
+        return (
+          <>
+            <SettingRow label="Play videos with" description="In-app plays videos here and remembers your place. External app hands them to another app.">
+              <Dropdown options={videoPlayerOptions} value={videoPlayer} onChange={setLocalVideoPlayer} />
+            </SettingRow>
+            <SwitchRow
+              label="Show progress bars on tiles"
+              description="Applies to the library with either player."
+              value={videoShowProgressBar}
+              onValueChange={setLocalVideoShowProgressBar}
+            />
+
+            <GroupHeading>In-app player</GroupHeading>
+            {inAppOnly && (
+              <ThemedText style={styles.hintText}>These only apply to the in-app player.</ThemedText>
+            )}
+            <SwitchRow
+              label="Subtitle & audio track picker"
+              value={videoTrackPickerEnabled}
+              onValueChange={setLocalVideoTrackPickerEnabled}
+              disabled={inAppOnly}
+            />
+            <SwitchRow
+              label="Playback speed control"
+              value={videoSpeedControlEnabled}
+              onValueChange={setLocalVideoSpeedControlEnabled}
+              disabled={inAppOnly}
+            />
+            <SettingRow
+              label="Auto-play next episode"
+              description="Up next shows a card when an episode ends; Countdown also starts the next one after 10 seconds."
+              disabled={inAppOnly}
+            >
+              <Dropdown options={videoAutoPlayNextOptions} value={videoAutoPlayNext} onChange={setLocalVideoAutoPlayNext} disabled={inAppOnly} />
+            </SettingRow>
+          </>
+        );
+      }
+
+      case 'audiobook': {
+        const inAppOnly = audiobookPlayer === 'external';
+        return (
+          <>
+            <SettingRow label="Play audiobooks with" description="In-app remembers your place in each book and keeps playing in the background. External app hands the files to another app.">
+              <Dropdown options={audiobookPlayerOptions} value={audiobookPlayer} onChange={setLocalAudiobookPlayer} />
+            </SettingRow>
+
+            <GroupHeading>In-app player</GroupHeading>
+            {inAppOnly && (
+              <ThemedText style={styles.hintText}>These only apply to the in-app player.</ThemedText>
+            )}
+            <SettingRow
+              label="Rewind on resume"
+              description="Steps back a little when you come back after a pause."
+              disabled={inAppOnly}
+            >
+              <Dropdown options={audiobookRewindOptions} value={audiobookRewindSeconds} onChange={setLocalAudiobookRewindSeconds} disabled={inAppOnly} />
+            </SettingRow>
+            <ThemedText style={styles.hintText}>Playback speed and the sleep timer are set from the player itself.</ThemedText>
+          </>
+        );
+      }
+
+      case 'parental':
+        return (
+          <>
+            <GroupHeading>Password</GroupHeading>
+            <ThemedText style={styles.settingLabel}>Settings password</ThemedText>
+            <ThemedTextInput
+              onChangeText={setLocalPassword}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
+              value={password ?? ""}
+              placeholder="Settings password"
+              keyboardType="default"
+              secureTextEntry={true}
+            />
+            <ThemedText style={styles.settingDescription}>
+              Needed to open Settings, Debug Logs and edit mode, and to unlock libraries during bedtime. Leave empty for no password.
+            </ThemedText>
+
+            <GroupHeading>Bedtime</GroupHeading>
+            <SwitchRow
+              label="Bedtime mode"
+              description="During bedtime only the libraries chosen below can be opened freely; the rest need the settings password. Checked each time the app is opened."
+              value={bedtimeEnabled}
+              onValueChange={setLocalBedtimeEnabled}
+            />
+            {bedtimeEnabled && !password && (
+              <ThemedText style={styles.warningText}>
+                No settings password is set, so anyone can unlock the bedtime libraries. Set one above.
+              </ThemedText>
+            )}
+            <SettingRow label="Start time" disabled={!bedtimeEnabled}>
+              <Dropdown options={bedtimeTimeOptions} value={bedtimeStart} onChange={setLocalBedtimeStart} disabled={!bedtimeEnabled} />
+            </SettingRow>
+            <SettingRow label="End time" description="An end before the start runs overnight (for example 19:00 to 07:00)." disabled={!bedtimeEnabled}>
+              <Dropdown options={bedtimeTimeOptions} value={bedtimeEnd} onChange={setLocalBedtimeEnd} disabled={!bedtimeEnabled} />
+            </SettingRow>
+            {bedtimeStartsEqualEnd && (
+              <ThemedText style={styles.warningText}>
+                Start and end time are the same, so bedtime will never apply.
+              </ThemedText>
+            )}
+            <ThemedText style={[styles.settingLabel, !bedtimeEnabled && styles.disabled]}>Available during bedtime</ThemedText>
+            {bedtimeTypeOptions.map(option => {
+              const checked = bedtimeAllowedTypes.includes(option.id);
+              const isLastChecked = checked && bedtimeAllowedTypes.length === 1;
+              return (
+                <SettingRow key={option.id} label={option.label} disabled={!bedtimeEnabled}>
+                  <Switch
+                    value={checked}
+                    disabled={!bedtimeEnabled || isLastChecked}
+                    onValueChange={(value) => toggleBedtimeType(option.id, value)}
+                  />
+                </SettingRow>
+              );
+            })}
+            <ThemedText style={styles.hintText}>
+              At least one library must stay available during bedtime.
+            </ThemedText>
+          </>
+        );
+
+      case 'backup':
+        return (
+          <>
+            <GroupHeading>Export to a JSON file</GroupHeading>
+            <ThemedText style={styles.settingDescription}>Choose what to include:</ThemedText>
+            <SwitchRow label="Settings" description="API keys, view options" value={exportIncludeSettings} onValueChange={setExportIncludeSettings} />
+            <SwitchRow label="Overrides" description="Custom titles, sort titles" value={exportIncludeOverrides} onValueChange={setExportIncludeOverrides} />
+            <SwitchRow label="Watched marks & playback progress" value={exportIncludeWatched} onValueChange={setExportIncludeWatched} />
+            <SwitchRow label="Matches" description="TMDB/TVDB IDs, episode names" value={exportIncludeMatches} onValueChange={setExportIncludeMatches} />
+            <ActionRow
+              title="📤 Export app state to JSON"
+              description="Saves the selected data to a JSON file in a folder you choose."
+              onPress={handleExportJson}
+            />
+
+            <GroupHeading>Restore</GroupHeading>
+            <ActionRow
+              title="📥 Import app state from JSON"
+              description="Restores settings, overrides, watched marks, playback progress and/or matches from a previously exported JSON file."
+              onPress={handleImportJson}
+            />
+
+            <GroupHeading>Media folders</GroupHeading>
+            <ActionRow
+              title="💾 Export metadata to media folders"
+              description="Writes smb.json, poster.jpg and episode thumbnails alongside your media files. These are picked up automatically during the next library scan."
+              onPress={handleExportToFilesystem}
+            />
+          </>
+        );
+
+      case 'troubleshooting':
+        return (
+          <>
+            <GroupHeading>Experimental</GroupHeading>
+            <SettingRow
+              label="Keyboard handling"
+              description="Testing a replacement for how screens scroll inputs above the keyboard (issue 244). Switch back if text boxes end up hidden."
+            >
+              <Dropdown options={keyboardHandlingOptions} value={keyboardHandling} onChange={setLocalKeyboardHandling} />
+            </SettingRow>
+
+            <GroupHeading>Clear data</GroupHeading>
+            <ActionRow destructive title="🗑 Clear thumbnail cache" description="Deletes all generated video thumbnails from disk." onPress={clearThumbnailCache} />
+            <ActionRow destructive title="🖼 Clear TMDB poster cache" description="Deletes all TMDB-sourced posters and episode thumbnails, and resets poster overrides." onPress={clearPosterCache} />
+            <ActionRow destructive title="🖼 Clear TVDB poster cache" description="Deletes all TheTVDB-sourced posters and episode thumbnails." onPress={clearTvdbCache} />
+            <ActionRow destructive title="📂 Clear scanned data" description="Removes all scanned TV and movie data from memory." onPress={clearScannedData} />
+            <ActionRow destructive title="🔄 Clear all overrides" description="Removes all custom overrides such as sort titles, display titles, poster selections, and TMDB rematch results." onPress={clearAllOverridesAction} />
+          </>
+        );
+    }
+  };
+
+  const sectionPage = shownSection && (
     <KeyboardAwareForm
+      // Remount per category so each page opens scrolled to the top.
+      key={shownSection}
       keyboard={keyboard}
       keyboardVerticalOffset={headerHeight}
       avoidingViewStyle={styles.container}
       style={containerStyle}
-      contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]}
+      contentContainerStyle={[styles.pageContent, { paddingBottom: 20 + insets.bottom }]}
       keyboardShouldPersistTaps="handled"
     >
-
-      {/* Access */}
-      <View style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Access</ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Password for settings:</ThemedText>
-          <ThemedTextInput
-            onChangeText={setLocalPassword}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
-            value={password ?? ""}
-            placeholder="Settings password"
-            keyboardType="default"
-            secureTextEntry={true}
-          />
-        </View>
-      </View>
-
-      {/* Bedtime */}
-      <View style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Bedtime</ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Enable bedtime mode:</ThemedText>
-          <Switch
-            value={bedtimeEnabled}
-            onValueChange={(value) => {
-              try {
-                setLocalBedtimeEnabled(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling bedtime mode', e as Error);
-              }
-            }}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          During bedtime only the libraries chosen below can be opened freely. Home and the other libraries are marked with a bed icon in the menu and need the settings password to open. Bedtime is checked each time the app is opened.
-        </ThemedText>
-        {bedtimeEnabled && !password && (
-          <ThemedText style={styles.warningText}>
-            No settings password is set, so anyone can unlock the bedtime libraries. Set a password under Access.
-          </ThemedText>
-        )}
-        <View style={styles.row}>
-          <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>Start time:</ThemedText>
-          {renderBedtimeTimeDropdown(bedtimeStartRef, settingsBedtimeStart, setLocalBedtimeStart, 'Exception while selecting bedtime start')}
-        </View>
-        <View style={styles.row}>
-          <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>End time:</ThemedText>
-          {renderBedtimeTimeDropdown(bedtimeEndRef, settingsBedtimeEnd, setLocalBedtimeEnd, 'Exception while selecting bedtime end')}
-        </View>
-        <ThemedText style={styles.emptyText}>
-          If the end time is earlier than the start time, bedtime runs overnight (for example 19:00 to 07:00).
-        </ThemedText>
-        {bedtimeStartsEqualEnd && (
-          <ThemedText style={styles.warningText}>
-            Start and end time are the same, so bedtime will never apply.
-          </ThemedText>
-        )}
-        <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>Available during bedtime:</ThemedText>
-        {bedtimeTypeOptions.map(option => {
-          const checked = bedtimeAllowedTypes.includes(option.id);
-          const isLastChecked = checked && bedtimeAllowedTypes.length === 1;
-          return (
-            <View key={option.id} style={styles.row}>
-              <ThemedText style={[styles.rowLabel, !bedtimeEnabled && styles.bedtimeDisabled]}>{option.label}</ThemedText>
-              <Switch
-                value={checked}
-                disabled={!bedtimeEnabled || isLastChecked}
-                onValueChange={(value) => toggleBedtimeType(option.id, value)}
-              />
-            </View>
-          );
-        })}
-        <ThemedText style={styles.emptyText}>
-          At least one library must stay available during bedtime.
-        </ThemedText>
-      </View>
-
-      {/* Media Sources */}
-      <View style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Media Sources</ThemedText>
-        {safeMediaSources.length === 0 && (
-          <ThemedText style={styles.emptyText}>No sources added yet.</ThemedText>
-        )}
-        {safeMediaSources.map((source, index) => (
-          <View key={source.uri} style={styles.sourceRow}>
-            <View style={styles.sourceInfo}>
-              <ThemedText style={styles.sourceType}>
-                {`Library ${index + 1} · ${source.contentType === 'tv' ? '📺 TV' : source.contentType === 'audiobook' ? '🎧 Audiobooks' : '🎬 Movies'}`}
-              </ThemedText>
-              <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
-            </View>
-            {source.contentType !== 'audiobook' && (
-            <SelectDropdown
-              data={metadataSourceOptions}
-              defaultValue={metadataSourceOptions.find(o => o.id === (source.metadataSource ?? 'auto'))}
-              onSelect={(item) => {
-                try {
-                  dispatch(updateMediaSourceMetadata({
-                    uri: source.uri,
-                    metadataSource: item.id === 'auto' ? undefined : item.id as dataSources,
-                  }));
-                } catch (e) {
-                  logger.error('Settings', 'Exception while updating media source metadata source', e as Error);
-                }
-              }}
-              renderButton={(selectedItem, isOpened) => (
-                <View style={[styles.sourceMetaDropdownButton, { backgroundColor: dropdownBg }]}>
-                  <Text style={[styles.sourceMetaDropdownText, { color: theme.text }]}>
-                    {selectedItem ? selectedItem.label : '🌐 Auto'}
-                  </Text>
-                  <Text>{isOpened ? '🔼' : '🔽'}</Text>
-                </View>
-              )}
-              renderItem={(item, _index, isSelected) => (
-                <View style={[styles.sourceMetaDropdownItem, { backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg }]}>
-                  <Text style={[styles.sourceMetaDropdownItemText, { color: theme.text }]}>{item.label}</Text>
-                </View>
-              )}
-              showsVerticalScrollIndicator={false}
-              dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-            />
-            )}
-            <TouchableOpacity onPress={() => deleteSource(source.uri)} style={styles.deleteButton}>
-              <ThemedText style={styles.deleteButtonText}>✕</ThemedText>
-            </TouchableOpacity>
-          </View>
-        ))}
-        <AddMediaSource />
-        <View style={styles.row}>
-          <Button title={scanning ? 'Scanning…' : 'Rescan now'} onPress={scanNow} disabled={scanning} />
-          {!scanning && scanComplete && <ThemedText style={styles.scanStatus}>✓ Scan complete</ThemedText>}
-        </View>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Rescan on startup:</ThemedText>
-          <Switch
-            value={rescanOnStartup}
-            onValueChange={(value) => {
-              try {
-                setLocalRescanOnStartup(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling rescan on startup', e as Error);
-              }
-            }}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          When on, the library is automatically rescanned each time the app starts. Turn off to keep the existing library until you rescan manually.
-        </ThemedText>
-      </View>
-
-      {/* Metadata */}
-      <View style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Media Metadata</ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Data source:</ThemedText>
-          <SelectDropdown
-            ref={dataSourceRef}
-            data={dataSourceOptions}
-            defaultValue={dataSourceOptions.find(o => o.id === settingsDataSource)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalDataSource(selectedItem.id);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting data source', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <ThemedText style={styles.rowLabel}>TMDB API Key:</ThemedText>
-        <ThemedTextInput
-          onChangeText={setLocalTmdbApiKey}
-          onFocus={handleInputFocus}
-          onBlur={handleInputBlur}
-          value={tmdbApiKey ?? ""}
-          placeholder="Paste your TMDB API key"
-          keyboardType="default"
-          secureTextEntry={false}
-        />
-        <ThemedText style={styles.emptyText}>
-          Register for a free key at themoviedb.org. Posters are downloaded and cached locally for offline use.
-        </ThemedText>
-
-        <ThemedText style={styles.rowLabel}>TheTVDB API Key:</ThemedText>
-        <ThemedTextInput
-          onChangeText={setLocalTvdbApiKey}
-          onFocus={handleInputFocus}
-          onBlur={handleInputBlur}
-          value={tvdbApiKey ?? ""}
-          placeholder="Paste your TVDB API key"
-          keyboardType="default"
-          secureTextEntry={false}
-        />
-        <ThemedText style={styles.emptyText}>
-          Optional. Register for a free key at thetvdb.com. Used for TV show metadata when TheTVDB is selected as the data source.
-        </ThemedText>
-        <ThemedText style={styles.rowLabel}>TheTVDB Subscriber PIN:</ThemedText>
-        <ThemedTextInput
-          onChangeText={setLocalTvdbPin}
-          onFocus={handleInputFocus}
-          onBlur={handleInputBlur}
-          value={tvdbPin ?? ""}
-          placeholder="Optional subscriber PIN"
-          keyboardType="default"
-          secureTextEntry={false}
-        />
-        <ThemedText style={styles.emptyText}>
-          Optional. Required only for subscribers accessing extended metadata on thetvdb.com.
-        </ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Fetch posters during scan:</ThemedText>
-          <Switch
-            value={enablePosterFetching}
-            onValueChange={(value) => {
-              try {
-                setLocalEnablePosterFetching(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling poster fetching', e as Error);
-              }
-            }}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          Enabled by default. When off, scans skip metadata poster fetching even if an API key is configured.
-        </ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Fetch episode names:</ThemedText>
-          <Switch
-            value={fetchEpisodeNames}
-            onValueChange={(value) => {
-              try {
-                setLocalFetchEpisodeNames(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling fetch episode names', e as Error);
-              }
-            }}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          Enabled by default. When on, episode names are fetched from TMDB and displayed in place of locally-scanned titles.
-        </ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Fetch episode thumbnails:</ThemedText>
-          <Switch
-            value={fetchEpisodeThumbnails}
-            onValueChange={(value) => {
-              try {
-                setLocalFetchEpisodeThumbnails(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling fetch episode thumbnails', e as Error);
-              }
-            }}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          Enabled by default. When on, episode still images are fetched from TMDB and used as episode artwork in the grid.
-        </ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Generate video thumbnails:</ThemedText>
-          <Switch
-            value={enableThumbnailGeneration}
-            onValueChange={(value) => {
-              try {
-                setLocalEnableThumbnailGeneration(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling thumbnail generation', e as Error);
-              }
-            }}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          Disabled by default. When off, scans skip thumbnail generation. When on, scans generate thumbnails from the local video files.
-        </ThemedText>
-      </View>
-
-      {/* Appearance */}
-      <View style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Appearance and Layout</ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Color scheme:</ThemedText>
-          <SelectDropdown
-            ref={appColorSchemeRef}
-            data={appColorSchemeOptions}
-            defaultValue={appColorSchemeOptions.find(o => o.id === settingsAppColorScheme)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalAppColorScheme(selectedItem.id as appColorSchemes);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting color scheme', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Sorting:</ThemedText>
-          <SelectDropdown
-            ref={sortOrderRef}
-            data={sortOrderOptions}
-            defaultValue={sortOrderOptions.find(o => o.id === settingsSortOrder)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalSortOrder(selectedItem.id as sortOrders);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting sort order', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Sort menu in sidebar</ThemedText>
-          <Switch
-            value={showSidebarSort}
-            onValueChange={(value) => {
-              try {
-                setLocalShowSidebarSort(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling sidebar sort', e as Error);
-              }
-            }}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          Adds a sort selector to the sidebar for quick switching.
-        </ThemedText>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>TV Show Navigation Structure:</ThemedText>
-          <SelectDropdown
-            ref={mediaStructureRef}
-            data={viewTypeOptions}
-            defaultValue={viewTypeOptions.find(o => o.id === settingsMediaStructure)}
-            onSelect={(selectedItem) => {
-              try {
-                if (selectedItem.title) setStructureDescription(selectedItem.title);
-                setLocalMediaStructure(selectedItem.id);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting media structure', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-        {structureDescription && (
-          <ThemedText style={styles.emptyText}>{structureDescription}</ThemedText>
-        )}
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Interface type:</ThemedText>
-          <SelectDropdown
-            ref={viewOrientationRef}
-            data={uiTypeOptions}
-            defaultValue={uiTypeOptions.find(o => o.id === settingsViewOrientation)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalViewOrientation(selectedItem.id);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting view orientation', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>UI scale:</ThemedText>
-          <Slider
-            style={styles.slider}
-            minimumValue={1}
-            maximumValue={10}
-            step={1}
-            value={11-viewScale}
-            onSlidingComplete={handleUIScaleChange}
-            minimumTrackTintColor={colorScheme === 'dark' ? '#ECEDEE' : '#11181C'}
-            maximumTrackTintColor={colorScheme === 'dark' ? '#687076' : '#9BA1A6'}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          {`Poster view will show about ${mapScaleToColumns(viewScale, PORTRAIT_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS)} columns in portrait and ${mapScaleToColumns(viewScale, LANDSCAPE_MIN_COLUMNS, LANDSCAPE_MAX_COLUMNS)} columns in landscape.`}
-        </ThemedText>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Default page:</ThemedText>
-          <SelectDropdown
-            ref={defaultPageRef}
-            data={defaultPageOptions}
-            defaultValue={defaultPageOptions.find(o => o.id === settingsDefaultPage)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalDefaultPage(selectedItem.id as defaultPages);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting default page', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Audiobook player:</ThemedText>
-          <SelectDropdown
-            ref={audiobookPlayerRef}
-            data={audiobookPlayerOptions}
-            defaultValue={audiobookPlayerOptions.find(o => o.id === settingsAudiobookPlayer)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalAudiobookPlayer(selectedItem.id as audiobookPlayers);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting audiobook player', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Rewind on resume:</ThemedText>
-          <SelectDropdown
-            ref={audiobookRewindRef}
-            data={audiobookRewindOptions}
-            defaultValue={audiobookRewindOptions.find(o => o.id === settingsAudiobookRewindSeconds)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalAudiobookRewindSeconds(selectedItem.id);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting audiobook rewind', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          In-app remembers your place in each audiobook and keeps playing in the background. External app hands the files to another app. Rewind on resume steps back a few seconds when you come back after a pause.
-        </ThemedText>
-      </View>
-
-      {/* Video player */}
-      <View style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Video Player</ThemedText>
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Video player:</ThemedText>
-          <SelectDropdown
-            ref={videoPlayerRef}
-            data={videoPlayerOptions}
-            defaultValue={videoPlayerOptions.find(o => o.id === settingsVideoPlayer)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalVideoPlayer(selectedItem.id as videoPlayers);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting video player', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Show progress bars on tiles</ThemedText>
-          <Switch
-            value={videoShowProgressBar}
-            onValueChange={(value) => {
-              try {
-                setLocalVideoShowProgressBar(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling video progress bars', e as Error);
-              }
-            }}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Subtitle & audio track picker</ThemedText>
-          <Switch
-            value={videoTrackPickerEnabled}
-            onValueChange={(value) => {
-              try {
-                setLocalVideoTrackPickerEnabled(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling video track picker', e as Error);
-              }
-            }}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Playback speed control</ThemedText>
-          <Switch
-            value={videoSpeedControlEnabled}
-            onValueChange={(value) => {
-              try {
-                setLocalVideoSpeedControlEnabled(value);
-              } catch (e) {
-                logger.error('Settings', 'Exception while toggling video speed control', e as Error);
-              }
-            }}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Auto-play next episode:</ThemedText>
-          <SelectDropdown
-            ref={videoAutoPlayNextRef}
-            data={videoAutoPlayNextOptions}
-            defaultValue={videoAutoPlayNextOptions.find(o => o.id === settingsVideoAutoPlayNext)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalVideoAutoPlayNext(selectedItem.id as videoAutoPlayNextModes);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting auto-play next', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-        <ThemedText style={styles.emptyText}>
-          In-app plays videos here and remembers your place; External app hands them to another app. The track picker, speed control and auto-play options only affect the in-app player; progress bars apply to the library tiles either way. Countdown starts the next episode automatically 10 seconds after one ends.
-        </ThemedText>
-      </View>
-
-      {/* Import / Export */}
-      <View style={styles.section}>
-        <TouchableOpacity
-          style={styles.troubleshootingHeader}
-          onPress={() => setImportExportExpanded(prev => !prev)}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: importExportExpanded }}
-        >
-          <ThemedText type="subtitle" style={styles.sectionTitle}>Import / Export</ThemedText>
-          <ThemedText style={styles.troubleshootingChevron}>{importExportExpanded ? '▲' : '▼'}</ThemedText>
-        </TouchableOpacity>
-        {importExportExpanded && (
-          <View style={styles.troubleshootingContent}>
-            {/* JSON export options */}
-            <ThemedText style={styles.importExportLabel}>Export to JSON file: select what to include:</ThemedText>
-            <View style={styles.row}>
-              <Switch value={exportIncludeSettings} onValueChange={setExportIncludeSettings} />
-              <ThemedText style={styles.rowLabel}>Settings (API keys, view options)</ThemedText>
-            </View>
-            <View style={styles.row}>
-              <Switch value={exportIncludeOverrides} onValueChange={setExportIncludeOverrides} />
-              <ThemedText style={styles.rowLabel}>Overrides (custom titles, sort titles)</ThemedText>
-            </View>
-            <View style={styles.row}>
-              <Switch value={exportIncludeWatched} onValueChange={setExportIncludeWatched} />
-              <ThemedText style={styles.rowLabel}>Watched marks & playback progress</ThemedText>
-            </View>
-            <View style={styles.row}>
-              <Switch value={exportIncludeMatches} onValueChange={setExportIncludeMatches} />
-              <ThemedText style={styles.rowLabel}>Matches (TMDB/TVDB IDs, episode names)</ThemedText>
-            </View>
-            <TouchableOpacity style={styles.importExportButton} onPress={handleExportJson}>
-              <ThemedText style={styles.importExportButtonText}>📤 Export app state to JSON</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Saves selected data to a JSON file in a folder you choose.</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.importExportButton} onPress={handleImportJson}>
-              <ThemedText style={styles.importExportButtonText}>📥 Import app state from JSON</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Restores settings, overrides, watched marks, playback progress and/or matches from a previously exported JSON file.</ThemedText>
-            </TouchableOpacity>
-            {/* Filesystem export */}
-            <TouchableOpacity style={styles.importExportButton} onPress={handleExportToFilesystem}>
-              <ThemedText style={styles.importExportButtonText}>💾 Export metadata to media folders</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Writes smb.json, poster.jpg and episode thumbnails alongside your media files. These are picked up automatically during the next library scan.</ThemedText>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      {/* Troubleshooting */}
-      <View style={styles.section}>
-        <TouchableOpacity
-          style={styles.troubleshootingHeader}
-          onPress={() => setTroubleshootingExpanded(prev => !prev)}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: troubleshootingExpanded }}
-        >
-          <ThemedText type="subtitle" style={styles.sectionTitle}>Troubleshooting</ThemedText>
-          <ThemedText style={styles.troubleshootingChevron}>{troubleshootingExpanded ? '▲' : '▼'}</ThemedText>
-        </TouchableOpacity>
-        {troubleshootingExpanded && (
-          <View style={styles.troubleshootingContent}>
-            <View style={styles.row}>
-              <ThemedText style={styles.rowLabel}>Keyboard handling (experimental):</ThemedText>
-              <SelectDropdown
-                ref={keyboardHandlingRef}
-                data={keyboardHandlingOptions}
-                defaultValue={keyboardHandlingOptions.find(o => o.id === keyboardHandling)}
-                onSelect={(selectedItem) => {
-                  try {
-                    setLocalKeyboardHandling(selectedItem.id as keyboardHandlingModes);
-                  } catch (e) {
-                    logger.error('Settings', 'Exception while selecting keyboard handling', e as Error);
-                  }
-                }}
-                renderButton={(selectedItem, isOpened) => (
-                  <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                    <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                      {(selectedItem && selectedItem.label) || 'Please select...'}
-                    </Text>
-                    <Text>{isOpened ? "🔼" : "🔽"}</Text>
-                  </View>
-                )}
-                renderItem={(item, index, isSelected) => (
-                  <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                    <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-                  </View>
-                )}
-                showsVerticalScrollIndicator={false}
-                dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-              />
-            </View>
-            <ThemedText style={styles.troubleshootingButtonDesc}>Testing a replacement for how screens scroll inputs above the keyboard (issue 244). Switch back if text boxes end up hidden.</ThemedText>
-            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearThumbnailCache}>
-              <ThemedText style={styles.troubleshootingButtonText}>🗑 Clear thumbnail cache</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all generated video thumbnails from disk.</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearPosterCache}>
-              <ThemedText style={styles.troubleshootingButtonText}>🖼 Clear TMDB poster cache</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all TMDB-sourced posters and episode thumbnails, and resets poster overrides.</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearTvdbCache}>
-              <ThemedText style={styles.troubleshootingButtonText}>🖼 Clear TVDB poster cache</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all TheTVDB-sourced posters and episode thumbnails.</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearScannedData}>
-              <ThemedText style={styles.troubleshootingButtonText}>📂 Clear scanned data</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Removes all scanned TV and movie data from memory.</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.troubleshootingButton} onPress={clearAllOverridesAction}>
-              <ThemedText style={styles.troubleshootingButtonText}>🔄 Clear all overrides</ThemedText>
-              <ThemedText style={styles.troubleshootingButtonDesc}>Removes all custom overrides such as sort titles, display titles, poster selections, and TMDB rematch results.</ThemedText>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.footerContainer}>
-        <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
-      </View>
+      {twoPane && <ThemedText type="subtitle" style={styles.pageTitle}>{shownSectionTitle}</ThemedText>}
+      {renderSection(shownSection)}
     </KeyboardAwareForm>
+  );
+
+  return (
+    <SettingsErrorBoundary>
+      {twoPane ? (
+        <View style={[styles.twoPane, { backgroundColor: theme.background }]}>
+          <ScrollView
+            style={[styles.listPane, { borderRightColor: DIVIDER_COLOR }]}
+            contentContainerStyle={[styles.listContent, { paddingBottom: 8 + insets.bottom }]}
+          >
+            {renderSectionList()}
+          </ScrollView>
+          <View style={styles.container}>{sectionPage}</View>
+        </View>
+      ) : onSectionPage ? (
+        sectionPage
+      ) : (
+        <ScrollView
+          style={containerStyle}
+          contentContainerStyle={[styles.listContent, { paddingBottom: 8 + insets.bottom }]}
+        >
+          {renderSectionList()}
+        </ScrollView>
+      )}
     </SettingsErrorBoundary>
   );
 }
@@ -1653,9 +1304,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  content: {
+  twoPane: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  listPane: {
+    width: LIST_PANE_WIDTH,
+    flexGrow: 0,
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
+  listContent: {
+    paddingVertical: 8,
+  },
+  pageContent: {
     padding: 20,
-    gap: 0,
+    gap: 12,
+    // Keeps lines readable when a tablet's detail pane is very wide.
+    maxWidth: 760,
+  },
+  pageTitle: {
+    marginBottom: 4,
   },
   crashContainer: {
     flex: 1,
@@ -1664,33 +1332,61 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 8,
   },
-  section: {
-    gap: 12,
-    paddingTop: 20,
-    paddingBottom: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: DIVIDER_COLOR,
-  },
-  sectionTitle: {
-    marginBottom: 2,
-  },
-  row: {
+  navRow: {
     flexDirection: 'row',
-    gap: 8,
     alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    minHeight: 64,
   },
-  rowLabel: {
+  navText: {
     flex: 1,
+    gap: 2,
   },
-  emptyText: {
+  navTitle: {
+    fontSize: 17,
+    fontWeight: '500',
+  },
+  navSummary: {
+    fontSize: 13,
+    opacity: 0.6,
+  },
+  groupHeading: {
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 12,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    minHeight: 48,
+  },
+  settingText: {
+    flex: 1,
+    gap: 2,
+  },
+  settingLabel: {
+    fontSize: 16,
+  },
+  settingDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    opacity: 0.6,
+  },
+  hintText: {
     opacity: 0.5,
     fontStyle: 'italic',
+    fontSize: 13,
   },
   warningText: {
     color: DESTRUCTIVE_COLOR,
     fontSize: 13,
   },
-  bedtimeDisabled: {
+  disabled: {
     opacity: 0.4,
   },
   scanStatus: {
@@ -1719,72 +1415,8 @@ const styles = StyleSheet.create({
   deleteButton: {
     padding: 8,
   },
-  deleteButtonText: {
-    fontSize: 16,
-    color: DESTRUCTIVE_COLOR,
-  },
-  sourceMetaDropdownButton: {
-    height: 36,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    gap: 4,
-  },
-  sourceMetaDropdownText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  sourceMetaDropdownItem: {
-    width: '100%',
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  sourceMetaDropdownItemText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  dropdownButtonStyle: {
-    width: 220,
-    height: 50,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  dropdownButtonTxtStyle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '500',
-  },
-  dropdownButtonArrowStyle: {
-    fontSize: 28,
-  },
-  dropdownButtonIconStyle: {
-    fontSize: 28,
-    marginRight: 8,
-  },
-  dropdownMenuStyle: {
-    borderRadius: 8,
-  },
-  dropdownItemStyle: {
-    width: '100%',
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  dropdownItemTxtStyle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '500',
-  },
   footerContainer: {
-    marginTop: 24,
+    marginTop: 16,
     marginBottom: 8,
     alignItems: 'center',
   },
@@ -1793,54 +1425,22 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   slider: {
-    width: 200,
+    alignSelf: 'stretch',
     height: 40,
   },
-  troubleshootingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  troubleshootingChevron: {
-    fontSize: 14,
-    opacity: 0.6,
-  },
-  troubleshootingContent: {
-    gap: 12,
-  },
-  troubleshootingButton: {
+  actionRow: {
     gap: 2,
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: DIVIDER_COLOR,
   },
-  troubleshootingButtonText: {
+  actionTitle: {
     fontSize: 15,
     fontWeight: '500',
+  },
+  destructiveText: {
     color: DESTRUCTIVE_COLOR,
-  },
-  troubleshootingButtonDesc: {
-    fontSize: 12,
-    opacity: 0.55,
-    fontStyle: 'italic',
-  },
-  importExportButton: {
-    gap: 2,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: DIVIDER_COLOR,
-  },
-  importExportButtonText: {
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  importExportLabel: {
-    fontSize: 13,
-    opacity: 0.7,
-    fontStyle: 'italic',
   },
 });
