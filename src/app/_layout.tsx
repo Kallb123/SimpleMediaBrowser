@@ -151,6 +151,20 @@ function AppRoot() {
                 }}
               />
               <Stack.Screen
+                name="editposter"
+                options={{
+                  presentation: 'modal',
+                  title: 'Choose Poster',
+                }}
+              />
+              <Stack.Screen
+                name="editrematch"
+                options={{
+                  presentation: 'modal',
+                  title: 'Re-match Metadata',
+                }}
+              />
+              <Stack.Screen
                 name="mergeshows"
                 options={{
                   presentation: 'modal',
