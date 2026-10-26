@@ -1,11 +1,9 @@
-import { Button, StyleSheet, Text, View } from 'react-native';
-import { useCallback, useRef, useState } from 'react';
+import { Button, StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
 import { StorageAccessFramework } from 'expo-file-system/legacy';
-import SelectDropdown from 'react-native-select-dropdown';
+import { Dropdown } from '@/components/Dropdown';
 import { useDispatch } from 'react-redux';
 import { addMediaSource, contentTypes, dataSources, IMediaSource } from '@/store/settingsReducer';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { Colors } from '@/constants/Colors';
 import { logger } from '@/scripts/Logger';
 
 const MEDIA_TYPE_OPTIONS: { id: contentTypes; label: string }[] = [
@@ -36,15 +34,8 @@ export interface AddMediaSourceProps {
  * calls `onAdded`.
  */
 export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
-  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const theme = Colors[colorScheme];
-  const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
-  const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
-
   const [selectedType, setSelectedType] = useState<contentTypes>('tv');
   const [selectedMetadataSource, setSelectedMetadataSource] = useState<dataSources | 'auto'>('auto');
-  const dropdownRef = useRef(null);
-  const metadataDropdownRef = useRef(null);
   const dispatch = useDispatch();
 
   const pickDirectory = useCallback(async () => {
@@ -69,57 +60,19 @@ export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        <SelectDropdown
-          ref={dropdownRef}
-          data={MEDIA_TYPE_OPTIONS}
-          defaultValue={MEDIA_TYPE_OPTIONS[0]}
-          onSelect={(item) => setSelectedType(item.id)}
-          renderButton={(selectedItem, isOpened) => (
-            <View style={[styles.dropdownButton, { backgroundColor: dropdownBg }]}>
-              <Text style={[styles.dropdownButtonText, { color: theme.text }]}>
-                {selectedItem ? selectedItem.label : 'Type…'}
-              </Text>
-              <Text>{isOpened ? '🔼' : '🔽'}</Text>
-            </View>
-          )}
-          renderItem={(item, _index, isSelected) => (
-            <View
-              style={[
-                styles.dropdownItem,
-                { backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg },
-              ]}
-            >
-              <Text style={[styles.dropdownItemText, { color: theme.text }]}>{item.label}</Text>
-            </View>
-          )}
-          showsVerticalScrollIndicator={false}
-          dropdownStyle={[styles.dropdownMenu, { backgroundColor: dropdownBg }]}
+        <Dropdown
+          compact
+          options={MEDIA_TYPE_OPTIONS}
+          value={selectedType}
+          onChange={setSelectedType}
+          accessibilityLabel="Folder type"
         />
-        <SelectDropdown
-          ref={metadataDropdownRef}
-          data={METADATA_SOURCE_OPTIONS}
-          defaultValue={METADATA_SOURCE_OPTIONS[0]}
-          onSelect={(item) => setSelectedMetadataSource(item.id)}
-          renderButton={(selectedItem, isOpened) => (
-            <View style={[styles.dropdownButton, { backgroundColor: dropdownBg }]}>
-              <Text style={[styles.dropdownButtonText, { color: theme.text }]}>
-                {selectedItem ? selectedItem.label : 'Source…'}
-              </Text>
-              <Text>{isOpened ? '🔼' : '🔽'}</Text>
-            </View>
-          )}
-          renderItem={(item, _index, isSelected) => (
-            <View
-              style={[
-                styles.dropdownItem,
-                { backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg },
-              ]}
-            >
-              <Text style={[styles.dropdownItemText, { color: theme.text }]}>{item.label}</Text>
-            </View>
-          )}
-          showsVerticalScrollIndicator={false}
-          dropdownStyle={[styles.dropdownMenu, { backgroundColor: dropdownBg }]}
+        <Dropdown
+          compact
+          options={METADATA_SOURCE_OPTIONS}
+          value={selectedMetadataSource}
+          onChange={setSelectedMetadataSource}
+          accessibilityLabel="Metadata source"
         />
         <Button title="Add Source" onPress={pickDirectory} accessibilityLabel="Add media source directory" />
       </View>
@@ -136,35 +89,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flexWrap: 'wrap',
-  },
-  dropdownButton: {
-    width: 120,
-    height: 50,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  dropdownButtonText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  dropdownMenu: {
-    borderRadius: 8,
-  },
-  dropdownItem: {
-    width: '100%',
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  dropdownItemText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '500',
   },
 });

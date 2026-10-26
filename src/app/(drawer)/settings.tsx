@@ -1,4 +1,4 @@
-import { Alert, BackHandler, Button, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, BackHandler, Button, ScrollView, StyleSheet, Switch, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { HeaderBackButton, useHeaderHeight } from '@react-navigation/elements';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
@@ -10,13 +10,13 @@ import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes, videoAutoPlayNextModes, selectVideoShowProgressBar, setVideoShowProgressBar, selectVideoTrackPickerEnabled, setVideoTrackPickerEnabled, selectVideoSpeedControlEnabled, setVideoSpeedControlEnabled, selectVideoAutoPlayNext, setVideoAutoPlayNext, selectShowSidebarSort, setShowSidebarSort } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
-import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTheme } from '@/hooks/use-theme';
 import { Colors } from '@/constants/Colors';
 import { sortOrderOptions } from '@/constants/sortOrderOptions';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
+import { Dropdown } from '@/components/Dropdown';
 import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
@@ -181,48 +181,6 @@ class SettingsErrorBoundary extends React.Component<{ children: React.ReactNode 
 
     return this.props.children;
   }
-}
-
-/**
- * A pick-one dropdown that follows `value`: the library re-selects whenever `defaultValue` changes,
- * so passing the current draft keeps it in step when the draft is reset or the page is re-entered.
- */
-function SettingsDropdown<T extends string | number>({ options, value, onChange, disabled, compact }: {
-  options: readonly { id: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
-  disabled?: boolean;
-  compact?: boolean;
-}) {
-  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const textColor = Colors[colorScheme].text;
-  const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
-  const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
-
-  return (
-    <SelectDropdown
-      data={options as { id: T; label: string }[]}
-      defaultValue={options.find(o => o.id === value)}
-      disabled={disabled}
-      onSelect={(selectedItem: { id: T; label: string }) => onChange(selectedItem.id)}
-      renderButton={(selectedItem, isOpened) => (
-        <View style={[compact ? styles.compactDropdownButton : styles.dropdownButton, { backgroundColor: dropdownBg }, disabled && styles.disabled]}>
-          <Text style={[compact ? styles.compactDropdownText : styles.dropdownButtonText, { color: textColor }]} numberOfLines={1}>
-            {(selectedItem && selectedItem.label) || 'Please select...'}
-          </Text>
-          <Ionicons name={isOpened ? 'chevron-up' : 'chevron-down'} size={16} color={textColor} />
-        </View>
-      )}
-      renderItem={(item, _index, isSelected) => (
-        <View style={[styles.dropdownItem, { backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg }]}>
-          <Text style={[compact ? styles.compactDropdownText : styles.dropdownItemText, { color: textColor }]}>{item.label}</Text>
-        </View>
-      )}
-      showsVerticalScrollIndicator={false}
-      // Must be a plain object: the library spreads it into the menu's style, which drops an array.
-      dropdownStyle={{ ...styles.dropdownMenu, backgroundColor: dropdownBg }}
-    />
-  );
 }
 
 /** One preference: a label (with an optional explanation under it) and its control on the right. */
@@ -957,7 +915,7 @@ export default function SettingsPrompt() {
                   <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
                 </View>
                 {source.contentType !== 'audiobook' && (
-                  <SettingsDropdown
+                  <Dropdown
                     compact
                     options={metadataSourceOptions}
                     value={source.metadataSource ?? 'auto'}
@@ -1000,7 +958,7 @@ export default function SettingsPrompt() {
           <>
             <GroupHeading>Provider</GroupHeading>
             <SettingRow label="Data source" description="Used for folders set to Auto.">
-              <SettingsDropdown options={dataSourceOptions} value={dataSource} onChange={setLocalDataSource} />
+              <Dropdown options={dataSourceOptions} value={dataSource} onChange={setLocalDataSource} />
             </SettingRow>
 
             <GroupHeading>API keys</GroupHeading>
@@ -1078,10 +1036,10 @@ export default function SettingsPrompt() {
         return (
           <>
             <SettingRow label="Color scheme">
-              <SettingsDropdown options={appColorSchemeOptions} value={appColorScheme} onChange={setLocalAppColorScheme} />
+              <Dropdown options={appColorSchemeOptions} value={appColorScheme} onChange={setLocalAppColorScheme} />
             </SettingRow>
             <SettingRow label="Interface type" description="Poster grid or a compact list.">
-              <SettingsDropdown options={uiTypeOptions} value={viewOrientation} onChange={setLocalViewOrientation} />
+              <Dropdown options={uiTypeOptions} value={viewOrientation} onChange={setLocalViewOrientation} />
             </SettingRow>
             <SettingRow
               label="UI scale"
@@ -1104,10 +1062,10 @@ export default function SettingsPrompt() {
         return (
           <>
             <SettingRow label="Default page" description="The library shown when the app opens.">
-              <SettingsDropdown options={defaultPageOptions} value={defaultPage} onChange={setLocalDefaultPage} />
+              <Dropdown options={defaultPageOptions} value={defaultPage} onChange={setLocalDefaultPage} />
             </SettingRow>
             <SettingRow label="Sorting">
-              <SettingsDropdown options={sortOrderOptions} value={sortOrder} onChange={setLocalSortOrder} />
+              <Dropdown options={sortOrderOptions} value={sortOrder} onChange={setLocalSortOrder} />
             </SettingRow>
             <SwitchRow
               label="Sort menu in sidebar"
@@ -1116,7 +1074,7 @@ export default function SettingsPrompt() {
               onValueChange={setLocalShowSidebarSort}
             />
             <SettingRow label="TV show structure" description={viewTypeOptions.find(o => o.id === mediaStructure)?.title}>
-              <SettingsDropdown options={viewTypeOptions} value={mediaStructure} onChange={setLocalMediaStructure} />
+              <Dropdown options={viewTypeOptions} value={mediaStructure} onChange={setLocalMediaStructure} />
             </SettingRow>
           </>
         );
@@ -1126,7 +1084,7 @@ export default function SettingsPrompt() {
         return (
           <>
             <SettingRow label="Play videos with" description="In-app plays videos here and remembers your place. External app hands them to another app.">
-              <SettingsDropdown options={videoPlayerOptions} value={videoPlayer} onChange={setLocalVideoPlayer} />
+              <Dropdown options={videoPlayerOptions} value={videoPlayer} onChange={setLocalVideoPlayer} />
             </SettingRow>
             <SwitchRow
               label="Show progress bars on tiles"
@@ -1156,7 +1114,7 @@ export default function SettingsPrompt() {
               description="Up next shows a card when an episode ends; Countdown also starts the next one after 10 seconds."
               disabled={inAppOnly}
             >
-              <SettingsDropdown options={videoAutoPlayNextOptions} value={videoAutoPlayNext} onChange={setLocalVideoAutoPlayNext} disabled={inAppOnly} />
+              <Dropdown options={videoAutoPlayNextOptions} value={videoAutoPlayNext} onChange={setLocalVideoAutoPlayNext} disabled={inAppOnly} />
             </SettingRow>
           </>
         );
@@ -1167,7 +1125,7 @@ export default function SettingsPrompt() {
         return (
           <>
             <SettingRow label="Play audiobooks with" description="In-app remembers your place in each book and keeps playing in the background. External app hands the files to another app.">
-              <SettingsDropdown options={audiobookPlayerOptions} value={audiobookPlayer} onChange={setLocalAudiobookPlayer} />
+              <Dropdown options={audiobookPlayerOptions} value={audiobookPlayer} onChange={setLocalAudiobookPlayer} />
             </SettingRow>
 
             <GroupHeading>In-app player</GroupHeading>
@@ -1179,7 +1137,7 @@ export default function SettingsPrompt() {
               description="Steps back a little when you come back after a pause."
               disabled={inAppOnly}
             >
-              <SettingsDropdown options={audiobookRewindOptions} value={audiobookRewindSeconds} onChange={setLocalAudiobookRewindSeconds} disabled={inAppOnly} />
+              <Dropdown options={audiobookRewindOptions} value={audiobookRewindSeconds} onChange={setLocalAudiobookRewindSeconds} disabled={inAppOnly} />
             </SettingRow>
             <ThemedText style={styles.hintText}>Playback speed and the sleep timer are set from the player itself.</ThemedText>
           </>
@@ -1217,10 +1175,10 @@ export default function SettingsPrompt() {
               </ThemedText>
             )}
             <SettingRow label="Start time" disabled={!bedtimeEnabled}>
-              <SettingsDropdown options={bedtimeTimeOptions} value={bedtimeStart} onChange={setLocalBedtimeStart} disabled={!bedtimeEnabled} />
+              <Dropdown options={bedtimeTimeOptions} value={bedtimeStart} onChange={setLocalBedtimeStart} disabled={!bedtimeEnabled} />
             </SettingRow>
             <SettingRow label="End time" description="An end before the start runs overnight (for example 19:00 to 07:00)." disabled={!bedtimeEnabled}>
-              <SettingsDropdown options={bedtimeTimeOptions} value={bedtimeEnd} onChange={setLocalBedtimeEnd} disabled={!bedtimeEnabled} />
+              <Dropdown options={bedtimeTimeOptions} value={bedtimeEnd} onChange={setLocalBedtimeEnd} disabled={!bedtimeEnabled} />
             </SettingRow>
             {bedtimeStartsEqualEnd && (
               <ThemedText style={styles.warningText}>
@@ -1286,7 +1244,7 @@ export default function SettingsPrompt() {
               label="Keyboard handling"
               description="Testing a replacement for how screens scroll inputs above the keyboard (issue 244). Switch back if text boxes end up hidden."
             >
-              <SettingsDropdown options={keyboardHandlingOptions} value={keyboardHandling} onChange={setLocalKeyboardHandling} />
+              <Dropdown options={keyboardHandlingOptions} value={keyboardHandling} onChange={setLocalKeyboardHandling} />
             </SettingRow>
 
             <GroupHeading>Clear data</GroupHeading>
@@ -1456,47 +1414,6 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     padding: 8,
-  },
-  dropdownButton: {
-    width: 150,
-    height: 44,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    gap: 6,
-  },
-  dropdownButtonText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  compactDropdownButton: {
-    height: 36,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    gap: 4,
-  },
-  compactDropdownText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  dropdownMenu: {
-    borderRadius: 8,
-  },
-  dropdownItem: {
-    width: '100%',
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  dropdownItemText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '500',
   },
   footerContainer: {
     marginTop: 16,

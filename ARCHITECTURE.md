@@ -80,6 +80,7 @@ SimpleMediaBrowser/
     │   ├── MediaBrowserScreen.tsx   # THE core browsing UI: one folder level's grid/list, FlashList rendering, thumbnails
     │   ├── MediaSectionStack.tsx    # Shared native-stack layout for the four media sections (+ the mini-player bar)
     │   ├── MiniPlayer.tsx           # "Now playing" bar under the browse screens; tap opens the /player modal
+    │   ├── Dropdown.tsx             # The app's one pick-one dropdown (Settings, Add folder, sidebar sort); follows its value
     │   ├── OptionSheet.tsx          # Small modal option list (player speed / sleep-timer pickers)
     │   ├── VideoTrackPicker.tsx     # Subtitle / audio track sheet over the in-app video player
     │   ├── ui/                      # PosterBox, ListItem, WatchedBadge, Listen/WatchProgressBar (+ ProgressStrip), MediaItem, DirectoryLink, FileLink, AddMediaSource
