@@ -37,22 +37,32 @@ import {
     setFetchEpisodeNames,
     setFetchEpisodeThumbnails,
     setAppColorScheme,
+    setSortOrder,
+    setShowSidebarSort,
     setVideoPlayer,
     setAudiobookPlayer,
     setAudiobookPlaybackRate,
     setAudiobookRewindSeconds,
     setVideoSubtitleLanguage,
     setVideoAudioLanguage,
+    setVideoShowProgressBar,
+    setVideoTrackPickerEnabled,
+    setVideoSpeedControlEnabled,
+    setVideoPlaybackRate,
+    setVideoAutoPlayNext,
     setBedtimeEnabled,
     setBedtimeStart,
     setBedtimeEnd,
     setBedtimeAllowedTypes,
 } from '@/store/settingsReducer';
-import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, videoPlayers, audiobookPlayers, contentTypes } from '@/store/settingsReducer';
+import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, videoPlayers, audiobookPlayers, contentTypes, sortOrders, videoAutoPlayNextModes } from '@/store/settingsReducer';
 import { formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
 import { logger } from '@/scripts/Logger';
 import type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData } from '@/scripts/SmbTypes';
 import { smbThumbFilename } from '@/scripts/SmbTypes';
+
+// Mirrors the `sortOrders` union so an import can reject unknown values.
+const SORT_ORDERS: readonly sortOrders[] = ['alphabetical', 'reverseAlphabetical', 'lastOpened', 'reverseLastOpened', 'recentlyAdded'];
 
 // Re-export smb.json types so callers can import them from this module.
 export type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData };
@@ -249,12 +259,19 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             fetchEpisodeNames: s.fetchEpisodeNames,
             fetchEpisodeThumbnails: s.fetchEpisodeThumbnails,
             appColorScheme: s.appColorScheme,
+            sortOrder: s.sortOrder,
+            showSidebarSort: s.showSidebarSort,
             videoPlayer: s.videoPlayer,
             audiobookPlayer: s.audiobookPlayer,
             audiobookPlaybackRate: s.audiobookPlaybackRate,
             audiobookRewindSeconds: s.audiobookRewindSeconds,
             videoSubtitleLanguage: s.videoSubtitleLanguage,
             videoAudioLanguage: s.videoAudioLanguage,
+            videoShowProgressBar: s.videoShowProgressBar,
+            videoTrackPickerEnabled: s.videoTrackPickerEnabled,
+            videoSpeedControlEnabled: s.videoSpeedControlEnabled,
+            videoPlaybackRate: s.videoPlaybackRate,
+            videoAutoPlayNext: s.videoAutoPlayNext,
             bedtimeEnabled: s.bedtimeEnabled,
             bedtimeStart: s.bedtimeStart,
             bedtimeEnd: s.bedtimeEnd,
@@ -367,12 +384,19 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (typeof s.fetchEpisodeNames === 'boolean') store.dispatch(setFetchEpisodeNames(s.fetchEpisodeNames));
         if (typeof s.fetchEpisodeThumbnails === 'boolean') store.dispatch(setFetchEpisodeThumbnails(s.fetchEpisodeThumbnails));
         if (typeof s.appColorScheme === 'string') store.dispatch(setAppColorScheme(s.appColorScheme as appColorSchemes));
+        if (typeof s.sortOrder === 'string' && SORT_ORDERS.includes(s.sortOrder as sortOrders)) store.dispatch(setSortOrder(s.sortOrder as sortOrders));
+        if (typeof s.showSidebarSort === 'boolean') store.dispatch(setShowSidebarSort(s.showSidebarSort));
         if (s.videoPlayer === 'inapp' || s.videoPlayer === 'external') store.dispatch(setVideoPlayer(s.videoPlayer as videoPlayers));
         if (s.audiobookPlayer === 'inapp' || s.audiobookPlayer === 'external') store.dispatch(setAudiobookPlayer(s.audiobookPlayer as audiobookPlayers));
         if (typeof s.audiobookPlaybackRate === 'number' && Number.isFinite(s.audiobookPlaybackRate)) store.dispatch(setAudiobookPlaybackRate(s.audiobookPlaybackRate));
         if (typeof s.audiobookRewindSeconds === 'number' && Number.isFinite(s.audiobookRewindSeconds)) store.dispatch(setAudiobookRewindSeconds(s.audiobookRewindSeconds));
         if (s.videoSubtitleLanguage === null || (typeof s.videoSubtitleLanguage === 'string' && s.videoSubtitleLanguage)) store.dispatch(setVideoSubtitleLanguage(s.videoSubtitleLanguage as string | null));
         if (s.videoAudioLanguage === null || (typeof s.videoAudioLanguage === 'string' && s.videoAudioLanguage)) store.dispatch(setVideoAudioLanguage(s.videoAudioLanguage as string | null));
+        if (typeof s.videoShowProgressBar === 'boolean') store.dispatch(setVideoShowProgressBar(s.videoShowProgressBar));
+        if (typeof s.videoTrackPickerEnabled === 'boolean') store.dispatch(setVideoTrackPickerEnabled(s.videoTrackPickerEnabled));
+        if (typeof s.videoSpeedControlEnabled === 'boolean') store.dispatch(setVideoSpeedControlEnabled(s.videoSpeedControlEnabled));
+        if (typeof s.videoPlaybackRate === 'number' && Number.isFinite(s.videoPlaybackRate)) store.dispatch(setVideoPlaybackRate(s.videoPlaybackRate));
+        if (s.videoAutoPlayNext === 'off' || s.videoAutoPlayNext === 'prompt' || s.videoAutoPlayNext === 'countdown') store.dispatch(setVideoAutoPlayNext(s.videoAutoPlayNext as videoAutoPlayNextModes));
         if (typeof s.bedtimeEnabled === 'boolean') store.dispatch(setBedtimeEnabled(s.bedtimeEnabled));
         // Times and allowed types are validated: a malformed window or an empty list would
         // otherwise lock every library (or none) without the user noticing.
