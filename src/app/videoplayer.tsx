@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { StackActions } from '@react-navigation/native';
@@ -7,14 +7,33 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
 import { logger } from '@/scripts/Logger';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
-import { resolveVideoRequest } from '@/scripts/VideoPlayback';
+import { resolveVideoRequest, unsupportedVideoTrack } from '@/scripts/VideoPlayback';
 import type { VideoRequest } from '@/scripts/VideoPlayback';
 import { VideoProgressTracker } from '@/scripts/VideoProgressTracker';
 import { useAppStore } from '@/hooks/useRedux';
 
 const TAG = 'VideoPlayerScreen';
 
-const ERROR_MESSAGE = 'This file could not be played.';
+/** How long the player may take to become ready before the user is offered the external player. */
+const LOAD_TIMEOUT_MS = 30_000;
+
+/**
+ * Why playback is not (or may not be) working, shown as an overlay. `error` is the player's own
+ * error status; the others are failures it never reports: a video track the device cannot decode
+ * (the sound plays over a black screen) and a load that never finishes.
+ */
+type Problem = { kind: 'error' } | { kind: 'unsupported'; mimeType: string } | { kind: 'slow' };
+
+const problemMessage = (problem: Problem) => {
+  switch (problem.kind) {
+    case 'error': return 'This file could not be played.';
+    case 'unsupported': return `This device can't show the picture in this file (${problem.mimeType}).`;
+    case 'slow': return 'This file is taking a long time to load.';
+  }
+};
+
+/** The button that dismisses the overlay and carries on; the error has none. */
+const DISMISS_LABELS = { unsupported: 'Play anyway', slow: 'Keep waiting' } as const;
 
 /**
  * Closes the player, or goes home when it was opened without anything under it. "Home" is the
@@ -62,7 +81,9 @@ function NothingPlaying() {
 
 function VideoPlayback({ request }: { request: VideoRequest }) {
   const { path, parsedPath, filename, title, startAt } = request;
-  const [failed, setFailed] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  // Set while the unsupported-picture overlay is up, so a late `readyToPlay` does not start the sound.
+  const holdPlayback = useRef(false);
   const closeScreen = useCloseScreen();
 
   const player = useVideoPlayer(path, (p) => {
@@ -79,31 +100,61 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
   }, [player, parsedPath]);
 
   // Once the video is ready, jump to the resume point and start. Not on later `readyToPlay`s
-  // (those follow every rebuffer), which must not pull the position back.
+  // (those follow every rebuffer), which must not pull the position back. The same effect watches
+  // for the failures that come without an `error` status. An `error` always wins over the others.
   useEffect(() => {
     let started = false;
+    let tracksChecked = false;
+    // Not ready in time (slow or unreachable storage, a container the extractor chokes on).
+    const slowTimer = setTimeout(() => {
+      logger.warn(TAG, `${path} not ready after ${LOAD_TIMEOUT_MS / 1000}s`);
+      setProblem((prev) => prev ?? { kind: 'slow' });
+    }, LOAD_TIMEOUT_MS);
     const onReady = () => {
       if (started) return;
       started = true;
+      clearTimeout(slowTimer);
+      // The load finished after all, so the "taking a long time" notice no longer applies.
+      setProblem((prev) => (prev?.kind === 'slow' ? null : prev));
       // A video must not play over an audiobook that was still going.
       AudiobookPlayer.getInstance().pause();
       if (startAt > 0 && !(player.duration > 0 && startAt >= player.duration)) player.currentTime = startAt;
       logger.log(TAG, `Playing "${title}" (${parsedPath}) from ${Math.round(startAt)}s`);
-      player.play();
+      if (!holdPlayback.current) player.play();
     };
     const onError = (error?: { message?: string }) => {
+      clearTimeout(slowTimer);
       logger.error(TAG, `Failed to play ${path}`, error?.message ?? error);
-      setFailed(true);
+      setProblem({ kind: 'error' });
+    };
+    // ExoPlayer skips a video track the device cannot decode and plays the sound over a black screen.
+    // Only the first look at a non-empty track list counts.
+    const checkTracks = (tracks: Parameters<typeof unsupportedVideoTrack>[0]) => {
+      if (tracksChecked || tracks.length === 0) return;
+      tracksChecked = true;
+      const mimeType = unsupportedVideoTrack(tracks);
+      if (!mimeType) return;
+      logger.warn(TAG, `No supported video track in ${path} (${mimeType})`);
+      holdPlayback.current = true;
+      player.pause();
+      setProblem((prev) => (prev?.kind === 'error' ? prev : { kind: 'unsupported', mimeType }));
     };
 
-    const subscription = player.addListener('statusChange', ({ status, error }) => {
+    const statusSubscription = player.addListener('statusChange', ({ status, error }) => {
       if (status === 'readyToPlay') onReady();
       else if (status === 'error') onError(error);
     });
+    const loadSubscription = player.addListener('sourceLoad', ({ availableVideoTracks }) => checkTracks(availableVideoTracks));
     // The player starts loading when it is created, so it may be ahead of this subscription.
-    if (player.status === 'readyToPlay') onReady();
-    else if (player.status === 'error') onError();
-    return () => subscription.remove();
+    if (player.status === 'readyToPlay') {
+      checkTracks(player.availableVideoTracks);
+      onReady();
+    } else if (player.status === 'error') onError();
+    return () => {
+      clearTimeout(slowTimer);
+      statusSubscription.remove();
+      loadSubscription.remove();
+    };
   }, [player, path, parsedPath, title, startAt]);
 
   const openExternally = () => {
@@ -112,6 +163,14 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
       logger.error(TAG, `Failed to open file: ${path}`, e);
     });
     closeScreen();
+  };
+
+  const dismissProblem = () => {
+    if (problem?.kind === 'unsupported') {
+      holdPlayback.current = false;
+      player.play();
+    }
+    setProblem(null);
   };
 
   return (
@@ -124,11 +183,12 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
         contentFit="contain"
         fullscreenOptions={{ enable: false }}
       />
-      {failed && (
+      {problem && (
         <View style={[StyleSheet.absoluteFill, styles.center, styles.overlay]}>
           <Text style={styles.title} numberOfLines={2}>{title}</Text>
-          <Text style={styles.message}>{ERROR_MESSAGE}</Text>
+          <Text style={styles.message}>{problemMessage(problem)}</Text>
           <OverlayButton label="Open in external player" onPress={openExternally} />
+          {problem.kind !== 'error' && <OverlayButton label={DISMISS_LABELS[problem.kind]} onPress={dismissProblem} />}
           <OverlayButton label="Close" onPress={closeScreen} />
         </View>
       )}

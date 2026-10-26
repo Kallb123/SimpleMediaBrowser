@@ -1,4 +1,4 @@
-import { resolveVideoRequest } from '../VideoPlayback';
+import { resolveVideoRequest, unsupportedVideoTrack } from '../VideoPlayback';
 import type { IMediaObject } from '../libraryUtils';
 import type { LibraryState } from '@/store/libraryReducer';
 
@@ -105,5 +105,31 @@ describe('resolveVideoRequest', () => {
       expect(startFor('-5')).toBe(0);
       expect(startFor(undefined)).toBe(0);
     });
+  });
+});
+
+describe('unsupportedVideoTrack', () => {
+  const track = (isSupported: boolean | undefined, mimeType: string | null = 'video/hevc') =>
+    ({ isSupported, mimeType }) as Parameters<typeof unsupportedVideoTrack>[0][number];
+
+  it('is not a problem without any tracks', () => {
+    expect(unsupportedVideoTrack([])).toBeNull();
+  });
+
+  it('is not a problem when one track is supported', () => {
+    expect(unsupportedVideoTrack([track(false), track(true, 'video/avc')])).toBeNull();
+  });
+
+  it('returns the first mime type when every track is unsupported', () => {
+    expect(unsupportedVideoTrack([track(false, 'video/hevc'), track(false, 'video/mpeg2')])).toBe('video/hevc');
+  });
+
+  it('falls back to "unknown" without a mime type', () => {
+    expect(unsupportedVideoTrack([track(false, null)])).toBe('unknown');
+  });
+
+  it('treats an undefined isSupported (not Android) as supported', () => {
+    expect(unsupportedVideoTrack([track(undefined)])).toBeNull();
+    expect(unsupportedVideoTrack([track(false), track(undefined)])).toBeNull();
   });
 });

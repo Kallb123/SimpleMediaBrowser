@@ -706,7 +706,8 @@ Redux only through `librarySink`. Behaviour:
   `isLoaded` → `seekTo(saved position)` → `play()`. Android emits no load-error event, so
   a part that reports `buffering` and then falls back to `idle` is treated as failed. An
   early `idle` that `setMediaSource` emits before `prepare` is ignored. The error is shown
-  on the player screen, and pressing play retries.
+  on the player screen with an "Open in external player" button (the current part via
+  `openMediaInExternalApp`; it marks nothing listened), and pressing play retries.
 - **Progress saving** (`setListenProgress`): at most every 10 s while playing, plus
   immediately on pause (including from the lock screen), seek, part load, part change,
   switching books, and the app leaving the foreground. It is not saved on every status
@@ -772,9 +773,24 @@ episode in `MediaBrowserScreen` runs `playVideoInApp`:
   (`AudiobookPlayer.pause()`, so the two never play over each other), seeks to `startAt` and
   plays. There is no background playback and no Picture-in-Picture: expo-video pauses when
   the app is backgrounded, and closing the screen releases the player.
-- **Errors.** A `statusChange` to `error` is logged and covers the video with "This file
-  could not be played." and two buttons: "Open in external player" (`openMediaInExternalApp`,
-  then closes the screen; it does not mark the file watched) and "Close".
+- **Errors.** Three problems cover the video with an overlay (the screen's `Problem` state);
+  each offers "Open in external player" (`openMediaInExternalApp`, then closes the screen; it
+  does not mark the file watched) and "Close". An `error` always replaces the other two.
+  - `error`: a `statusChange` to `error` is logged and shows "This file could not be played."
+    with just those two buttons.
+  - `unsupported`: ExoPlayer skips a video track the device cannot decode (e.g. HEVC 10-bit,
+    some MPEG-2/VC-1) without raising an error, so the sound would play over a black screen.
+    On the first `sourceLoad` (or `player.availableVideoTracks` if the player was already
+    ready when the screen subscribed), `unsupportedVideoTrack` (`VideoPlayback.ts`) checks
+    whether every track has `isSupported === false`; `isSupported` is Android-only, so only an
+    explicit `false` counts. The player is paused and a ref keeps the ready handler from
+    calling `play()` (it still seeks to `startAt`). The overlay adds "Play anyway", which
+    dismisses it and plays the sound only. An unsupported *audio* codec (a silent video) is not
+    detected: expo-video's `AudioTrack` has no support flag.
+  - `slow`: a `LOAD_TIMEOUT_MS` (30 s) timer starts when the screen mounts and is cleared by the
+    first `readyToPlay` or an `error`. If it fires first, "This file is taking a long time to
+    load." appears with "Keep waiting" (dismisses it; the timer is not re-armed). If the video
+    becomes ready while it is showing, it is cleared and playback starts normally.
 - **Progress and watched** (`VideoProgressTracker.ts`, created by the screen once the player
   exists; reaches Redux only through `librarySink`). Resume points go to
   `watchProgress[parsedPath]` (`setWatchProgress`): at most every 10 s from `timeUpdate`,

@@ -2,6 +2,7 @@ import { episodeDisplayLabel, movieDisplayLabel, showDisplayLabel } from '@/scri
 // Type-only imports, so this module (and the tests that load it) never pulls in the store.
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { LibraryState } from '@/store/libraryReducer';
+import type { VideoTrack } from 'expo-video';
 
 /** What the video player screen should play. */
 export interface VideoRequest {
@@ -54,4 +55,16 @@ export function resolveVideoRequest(
         }
     }
     return null;
+}
+
+/**
+ * Whether the device can show none of a loaded video's pictures. ExoPlayer then skips the video
+ * track without raising an error, so the file plays as sound over a black screen. Returns the
+ * first track's mime type ('unknown' when it has none), or null when there is no problem.
+ * `isSupported` is Android-only, so only an explicit `false` counts, and an empty list (nothing
+ * known yet, or an audio-only file) is not a problem.
+ */
+export function unsupportedVideoTrack(tracks: readonly Pick<VideoTrack, 'isSupported' | 'mimeType'>[]): string | null {
+    if (tracks.length === 0 || !tracks.every((t) => t.isSupported === false)) return null;
+    return tracks[0].mimeType ?? 'unknown';
 }

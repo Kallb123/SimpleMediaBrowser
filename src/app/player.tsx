@@ -14,11 +14,14 @@ import { useAppSelector } from '@/hooks/useRedux';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { AudiobookPlayer, PLAYBACK_RATES, SKIP_INTERVAL_SECONDS, SLEEP_TIMER_MINUTES } from '@/scripts/AudiobookPlayer';
 import { audioPartFiles } from '@/scripts/libraryUtils';
+import { logger } from '@/scripts/Logger';
+import { openMediaInExternalApp } from '@/scripts/openMedia';
 import { selectAudiobookPlaybackRate } from '@/store/settingsReducer';
 import { formatClock } from '@/utils/formatClock';
 
 const COVER_MAX_SIZE = 360;
 const ERROR_COLOR = '#d9534f';
+const TAG = 'PlayerScreen';
 
 /** 1 -> "1×", 1.5 -> "1.5×", 0.75 -> "0.75×". */
 const formatRate = (rate: number) => `${parseFloat(rate.toFixed(2))}×`;
@@ -65,7 +68,8 @@ export default function PlayerScreen() {
   }
 
   const { audiobook, partIndex, title, poster, finished, error } = nowPlaying;
-  const partCount = audioPartFiles(audiobook.files).length;
+  const partFiles = audioPartFiles(audiobook.files);
+  const partCount = partFiles.length;
   const isLastPart = partIndex + 1 >= partCount;
   const loading = !error && !finished && !status.isLoaded && !status.playing;
 
@@ -112,6 +116,16 @@ export default function PlayerScreen() {
     service.setPlaybackRate(Number(key));
   };
 
+  // Like the video fallback, this marks nothing listened.
+  const handleOpenExternally = () => {
+    const part = partFiles[partIndex];
+    if (!part) return;
+    logger.log(TAG, `Falling back to the external player for ${part.path}`);
+    openMediaInExternalApp(part.path, part.filename).catch((e: unknown) => {
+      logger.error(TAG, `Failed to open file: ${part.path}`, e);
+    });
+  };
+
   const statusLine = error ?? (finished ? 'Finished' : partCount > 1 ? `Part ${partIndex + 1} of ${partCount}` : null);
 
   return (
@@ -140,6 +154,17 @@ export default function PlayerScreen() {
             <ThemedText style={[styles.centered, styles.statusLine, { color: error ? ERROR_COLOR : theme.textSecondary }]}>
               {statusLine}
             </ThemedText>
+          ) : null}
+          {error ? (
+            <TouchableOpacity
+              onPress={handleOpenExternally}
+              style={[styles.pill, styles.errorAction, { backgroundColor: theme.backgroundElement }]}
+              accessibilityRole="button"
+              accessibilityLabel="Open in external player"
+            >
+              <Ionicons name="open-outline" size={18} color={text} />
+              <ThemedText style={styles.pillText}>Open in external player</ThemedText>
+            </TouchableOpacity>
           ) : null}
 
           <Slider
@@ -334,6 +359,10 @@ const styles = StyleSheet.create({
     minHeight: 40,
     paddingHorizontal: 16,
     borderRadius: 20,
+  },
+  errorAction: {
+    alignSelf: 'center',
+    marginTop: 8,
   },
   pillText: {
     fontSize: 15,
