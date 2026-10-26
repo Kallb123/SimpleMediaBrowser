@@ -11,6 +11,8 @@ import { resolveVideoRequest, unsupportedVideoTrack } from '@/scripts/VideoPlayb
 import type { VideoRequest } from '@/scripts/VideoPlayback';
 import { VideoProgressTracker } from '@/scripts/VideoProgressTracker';
 import { useAppStore } from '@/hooks/useRedux';
+import { useVideoTracks } from '@/hooks/useVideoTracks';
+import { VideoTrackPicker } from '@/components/VideoTrackPicker';
 
 const TAG = 'VideoPlayerScreen';
 
@@ -84,6 +86,7 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
   const [problem, setProblem] = useState<Problem | null>(null);
   // Set while the unsupported-picture overlay is up, so a late `readyToPlay` does not start the sound.
   const holdPlayback = useRef(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const closeScreen = useCloseScreen();
 
   const player = useVideoPlayer(path, (p) => {
@@ -91,6 +94,7 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
     p.timeUpdateEventInterval = 1;
     p.keepScreenOnWhilePlaying = true;
   });
+  const tracks = useVideoTracks(player);
 
   // A layout effect on purpose: on unmount its cleanup runs before the passive cleanup in which
   // `useVideoPlayer` releases the player, so the tracker can still read the final position.
@@ -183,6 +187,28 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
         contentFit="contain"
         fullscreenOptions={{ enable: false }}
       />
+      {/* A small corner button rather than a touch layer, so the native controls keep every other tap. */}
+      {tracks.hasChoices && tracks.buttonVisible && !problem && !pickerOpen && (
+        <TouchableOpacity
+          style={styles.trackButton}
+          onPress={() => setPickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Subtitles and audio"
+        >
+          <Text style={styles.buttonText}>CC</Text>
+        </TouchableOpacity>
+      )}
+      {pickerOpen && !problem && (
+        <VideoTrackPicker
+          subtitleTracks={tracks.subtitleTracks}
+          subtitleTrack={tracks.subtitleTrack}
+          audioTracks={tracks.audioTracks}
+          audioTrack={tracks.audioTrack}
+          onSelectSubtitle={(track) => { tracks.selectSubtitle(track); setPickerOpen(false); }}
+          onSelectAudio={(track) => { tracks.selectAudio(track); setPickerOpen(false); }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
       {problem && (
         <View style={[StyleSheet.absoluteFill, styles.center, styles.overlay]}>
           <Text style={styles.title} numberOfLines={2}>{title}</Text>
@@ -212,4 +238,5 @@ const styles = StyleSheet.create({
   message: { color: '#ccc', fontSize: 16, textAlign: 'center' },
   button: { minWidth: 220, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, backgroundColor: '#333', alignItems: 'center' },
   buttonText: { color: '#fff', fontSize: 16 },
+  trackButton: { position: 'absolute', top: 16, right: 16, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: 'rgba(0, 0, 0, 0.6)' },
 });

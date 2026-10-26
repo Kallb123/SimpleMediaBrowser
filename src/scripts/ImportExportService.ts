@@ -41,6 +41,8 @@ import {
     setAudiobookPlayer,
     setAudiobookPlaybackRate,
     setAudiobookRewindSeconds,
+    setVideoSubtitleLanguage,
+    setVideoAudioLanguage,
     setBedtimeEnabled,
     setBedtimeStart,
     setBedtimeEnd,
@@ -251,6 +253,8 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             audiobookPlayer: s.audiobookPlayer,
             audiobookPlaybackRate: s.audiobookPlaybackRate,
             audiobookRewindSeconds: s.audiobookRewindSeconds,
+            videoSubtitleLanguage: s.videoSubtitleLanguage,
+            videoAudioLanguage: s.videoAudioLanguage,
             bedtimeEnabled: s.bedtimeEnabled,
             bedtimeStart: s.bedtimeStart,
             bedtimeEnd: s.bedtimeEnd,
@@ -367,6 +371,8 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (s.audiobookPlayer === 'inapp' || s.audiobookPlayer === 'external') store.dispatch(setAudiobookPlayer(s.audiobookPlayer as audiobookPlayers));
         if (typeof s.audiobookPlaybackRate === 'number' && Number.isFinite(s.audiobookPlaybackRate)) store.dispatch(setAudiobookPlaybackRate(s.audiobookPlaybackRate));
         if (typeof s.audiobookRewindSeconds === 'number' && Number.isFinite(s.audiobookRewindSeconds)) store.dispatch(setAudiobookRewindSeconds(s.audiobookRewindSeconds));
+        if (s.videoSubtitleLanguage === null || (typeof s.videoSubtitleLanguage === 'string' && s.videoSubtitleLanguage)) store.dispatch(setVideoSubtitleLanguage(s.videoSubtitleLanguage as string | null));
+        if (s.videoAudioLanguage === null || (typeof s.videoAudioLanguage === 'string' && s.videoAudioLanguage)) store.dispatch(setVideoAudioLanguage(s.videoAudioLanguage as string | null));
         if (typeof s.bedtimeEnabled === 'boolean') store.dispatch(setBedtimeEnabled(s.bedtimeEnabled));
         // Times and allowed types are validated: a malformed window or an empty list would
         // otherwise lock every library (or none) without the user noticing.
