@@ -57,7 +57,9 @@ SimpleMediaBrowser/
     ├── app/                     # Expo Router file-based routes (screens)
     │   ├── _layout.tsx          # Root layout: Redux Provider, theme, first-time-setup redirect, Stack screens; imports store/wireServices
     │   ├── firsttime.tsx        # First-run onboarding (add a media source, pick defaults)
-    │   ├── edititem.tsx         # Modal: edit/override title, poster, provider match for a show/movie/episode
+    │   ├── edititem.tsx         # Modal: "Edit details" — title/sort title (audiobook year) saved with Save + discard prompt; links to the two screens below
+    │   ├── editposter.tsx       # Modal: choose a poster/cover (provider gallery, Google Images, local file, iTunes for audiobooks); applies immediately
+    │   ├── editrematch.tsx      # Modal: re-match a show/movie to a different TMDB/TVDB entry; applies immediately
     │   ├── mergeshows.tsx       # Modal: merge two show entries that scanning didn't auto-merge
     │   ├── player.tsx           # Modal: in-app audiobook player ("Now Playing"), observes AudiobookPlayer
     │   ├── videoplayer.tsx      # Full-screen modal: in-app video player (expo-video), owns its player + VideoProgressTracker
@@ -164,8 +166,8 @@ turns it into `extra.router.root`, which both the dev server and
    - Otherwise → redirect to the user's configured `defaultPage`
      (`(drawer)/(home)`, `(drawer)/tv`, `(drawer)/movies`, or `(drawer)/audiobooks`).
 4. Renders a `Stack` with screens: `firsttime`, `(drawer)`, `+not-found`,
-   `modal` (presentation: modal), `edititem` (presentation: modal),
-   `mergeshows` (presentation: modal), `player` (presentation: modal),
+   `modal` (presentation: modal), `edititem`, `editposter` and `editrematch`
+   (all presentation: modal), `mergeshows` (presentation: modal), `player` (presentation: modal),
    `videoplayer` (presentation: fullScreenModal, no header).
 
 **Real navigation lives entirely under `(drawer)`.** `(drawer)/_layout.tsx`
@@ -616,8 +618,13 @@ Edit Mode toggle behind `drawerUnlocked`, which requires the
 `settingsPassword` (if set in settings) to unlock. This "parent mode" lets a
 primary user restrict a shared/kid device to just browsing and playing
 media. `edititem.tsx` (opened from `MediaBrowserScreen` while in edit mode)
-lets the user override title/poster/provider match for a single item or
-rematch it against a provider; `mergeshows.tsx` handles the case where two
+edits the title/sort title (and audiobook year) of a single item; those drafts
+are written on Save, and leaving with unsaved edits asks for confirmation
+(`usePreventRemove`). The poster and the provider match live on two screens
+pushed from it — `editposter.tsx` and `editrematch.tsx` — which apply their
+change immediately and go back, so they are not part of Save. They share
+`scripts/posterSources.ts` (TMDB/TVDB search, poster galleries, downloads) and
+the `useEditTarget` / `useProviderSearch` hooks; `mergeshows.tsx` handles the case where two
 distinct show folders should be one library entry but weren't auto-merged
 by the fuzzy-key pass.
 

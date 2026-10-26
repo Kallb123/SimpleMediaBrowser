@@ -13,6 +13,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useDispatch } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { ProviderToggle } from '@/components/edit/ProviderToggle';
@@ -61,6 +62,7 @@ export default function EditPosterScreen() {
   }>();
 
   const dispatch = useDispatch();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const {
     override,
@@ -134,7 +136,8 @@ export default function EditPosterScreen() {
       const localUri = await copyPickedPoster(result.assets[0].uri, itemKey);
       applyPoster(localUri);
       logger.log('EditItem', `Custom poster saved: ${localUri}`);
-      router.back();
+      // The user may have backed out while this was awaiting; don't pop the details screen too.
+      if (navigation.isFocused()) router.back();
     } catch (e) {
       logger.error('EditItem', 'Browse locally failed', e);
       setLocalError(`Failed to apply ${noun}.`);
@@ -191,7 +194,8 @@ export default function EditPosterScreen() {
         dispatch(setMediaOverride({ key: itemKey, override: { year: result.year } }));
       }
       logger.log('EditItem', `Audiobook cover applied from iTunes ID ${result.id}`);
-      router.back();
+      // The user may have backed out while this was awaiting; don't pop the details screen too.
+      if (navigation.isFocused()) router.back();
     } catch (e) {
       logger.error('EditItem', 'Failed to apply audiobook cover', e);
       setAudiobookError('Failed to apply cover.');
@@ -248,7 +252,8 @@ export default function EditPosterScreen() {
       const localUri = await downloadProviderPoster(result.provider, result.id, poster.ref);
       applyPoster(localUri);
       logger.log('EditItem', `Poster-only applied from ${result.provider.toUpperCase()} ID ${result.id}, ref=${poster.ref}`);
-      router.back();
+      // The user may have backed out while this was awaiting; don't pop the details screen too.
+      if (navigation.isFocused()) router.back();
     } catch (e) {
       logger.error('EditItem', `Failed to apply ${result.provider.toUpperCase()} poster`, e);
       setSearchError('Failed to apply poster.');
