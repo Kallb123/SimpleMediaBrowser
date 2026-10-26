@@ -1,7 +1,6 @@
 import { useLocalSearchParams, router } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +12,7 @@ import { ProviderToggle } from '@/components/edit/ProviderToggle';
 import { ResultRow } from '@/components/edit/ResultRow';
 import { SearchBar } from '@/components/edit/SearchBar';
 import { useEditTarget, type EditItemType } from '@/hooks/useEditTarget';
+import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { useProviderSearch } from '@/hooks/useProviderSearch';
 import { selectMovies, setMediaOverride, updateMovieMetadata, updateShowMetadata } from '@/store/libraryReducer';
@@ -35,7 +35,8 @@ export default function EditRematchScreen() {
   // See edititem.tsx: the native header is outside this component's layout tree,
   // so KeyboardAvoidingView needs the real header height from React Navigation.
   const headerHeight = useHeaderHeight();
-  const { scrollViewProps, extraBottomSpace, handleInputFocus, handleInputBlur } = useKeyboardAwareScroll();
+  const keyboard = useKeyboardAwareScroll();
+  const { handleInputFocus, handleInputBlur } = keyboard;
 
   const { override, currentTmdbId, currentTvdbId, resolvedProvider, hasProviderSupport, credentials, applyPoster } =
     useEditTarget(itemType, itemKey ?? '');
@@ -136,13 +137,14 @@ export default function EditRematchScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerHeight}>
-        <ScrollView
-          {...scrollViewProps}
-          style={styles.screen}
-          contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom + extraBottomSpace }]}
-          keyboardShouldPersistTaps="handled"
-        >
+      <KeyboardAwareForm
+        keyboard={keyboard}
+        keyboardVerticalOffset={headerHeight}
+        avoidingViewStyle={styles.screen}
+        style={styles.screen}
+        contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}
+        keyboardShouldPersistTaps="handled"
+      >
           <View style={styles.header}>
             <ThemedText type="subtitle">Re-match Metadata</ThemedText>
             <ThemedText style={styles.subtitle} numberOfLines={2}>{currentTitle}</ThemedText>
@@ -197,8 +199,7 @@ export default function EditRematchScreen() {
               />
             );
           })}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareForm>
     </ThemedView>
   );
 }

@@ -1,5 +1,4 @@
-import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, ScrollView, Alert } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { Button, StyleSheet, Text, View, TouchableOpacity, Switch, Alert } from 'react-native';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { ThemedText } from '@/components/ThemedText';
@@ -8,13 +7,14 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { router, useFocusEffect } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
+import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
@@ -67,6 +67,11 @@ const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
 const videoPlayerOptions: { id: videoPlayers; label: string }[] = [
   {id: 'inapp', label: 'In-app'},
   {id: 'external', label: 'External app'},
+];
+
+const keyboardHandlingOptions: { id: keyboardHandlingModes; label: string }[] = [
+  {id: 'legacy', label: 'Built-in (current)'},
+  {id: 'library', label: 'Keyboard-controller library'},
 ];
 
 const audiobookPlayerOptions: { id: audiobookPlayers; label: string }[] = [
@@ -159,7 +164,8 @@ export default function SettingsPrompt() {
   // See edititem.tsx for why we use the real header height here instead of
   // KeyboardAvoidingView's automaticOffset heuristic.
   const headerHeight = useHeaderHeight();
-  const { scrollViewProps, extraBottomSpace, handleInputFocus, handleInputBlur } = useKeyboardAwareScroll();
+  const keyboard = useKeyboardAwareScroll();
+  const { handleInputFocus, handleInputBlur } = keyboard;
 
   const dropdownBg = colorScheme === 'dark' ? '#353636' : '#E9ECEF';
   const dropdownSelectedBg = colorScheme === 'dark' ? '#4A4A4A' : '#D2D9DF';
@@ -187,6 +193,7 @@ export default function SettingsPrompt() {
   const [sortOrder, setLocalSortOrder] = useState('alphabetical' as sortOrders);
   const [videoPlayer, setLocalVideoPlayer] = useState('inapp' as videoPlayers);
   const [audiobookPlayer, setLocalAudiobookPlayer] = useState('inapp' as audiobookPlayers);
+  const [keyboardHandling, setLocalKeyboardHandling] = useState('legacy' as keyboardHandlingModes);
   const [audiobookRewindSeconds, setLocalAudiobookRewindSeconds] = useState(10);
   const [bedtimeEnabled, setLocalBedtimeEnabled] = useState(false);
   const [bedtimeStart, setLocalBedtimeStart] = useState('19:00');
@@ -221,6 +228,7 @@ export default function SettingsPrompt() {
   const settingsSortOrder = useSelector(selectSortOrder);
   const settingsVideoPlayer = useSelector(selectVideoPlayer);
   const settingsAudiobookPlayer = useSelector(selectAudiobookPlayer);
+  const settingsKeyboardHandling = useSelector(selectKeyboardHandling);
   const settingsAudiobookRewindSeconds = useSelector(selectAudiobookRewindSeconds);
   const settingsBedtimeEnabled = useSelector(selectBedtimeEnabled);
   const settingsBedtimeStart = useSelector(selectBedtimeStart);
@@ -235,6 +243,7 @@ export default function SettingsPrompt() {
   const sortOrderRef = useRef(null);
   const videoPlayerRef = useRef(null);
   const audiobookPlayerRef = useRef(null);
+  const keyboardHandlingRef = useRef(null);
   const audiobookRewindRef = useRef(null);
   const bedtimeStartRef = useRef(null);
   const bedtimeEndRef = useRef(null);
@@ -352,6 +361,12 @@ export default function SettingsPrompt() {
       }
       setLocalAudiobookPlayer(settingsAudiobookPlayer);
 
+      const keyboardHandlingIndex = keyboardHandlingOptions.findIndex(o => o.id === settingsKeyboardHandling);
+      if (keyboardHandlingRef.current && keyboardHandlingIndex >= 0) {
+        (keyboardHandlingRef.current as any).selectIndex(keyboardHandlingIndex);
+      }
+      setLocalKeyboardHandling(settingsKeyboardHandling);
+
       const audiobookRewindIndex = audiobookRewindOptions.findIndex(o => o.id === settingsAudiobookRewindSeconds);
       if (audiobookRewindRef.current && audiobookRewindIndex >= 0) {
         (audiobookRewindRef.current as any).selectIndex(audiobookRewindIndex);
@@ -375,7 +390,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsVideoPlayer, settingsAudiobookPlayer, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]));
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsVideoPlayer, settingsAudiobookPlayer, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]));
 
   const save = useCallback(() => {
     try {
@@ -472,6 +487,11 @@ export default function SettingsPrompt() {
         dispatch(setAudiobookPlayer(audiobookPlayer));
         changeCount++;
       }
+      if (keyboardHandling && keyboardHandling !== settingsKeyboardHandling) {
+        logger.log('Settings', `Persisting: keyboardHandling changed ${settingsKeyboardHandling} → ${keyboardHandling}`);
+        dispatch(setKeyboardHandling(keyboardHandling));
+        changeCount++;
+      }
       if (audiobookRewindSeconds !== settingsAudiobookRewindSeconds) {
         logger.log('Settings', `Persisting: audiobookRewindSeconds changed ${settingsAudiobookRewindSeconds} → ${audiobookRewindSeconds}`);
         dispatch(setAudiobookRewindSeconds(audiobookRewindSeconds));
@@ -502,7 +522,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, videoPlayer, settingsVideoPlayer, audiobookPlayer, settingsAudiobookPlayer, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, videoPlayer, settingsVideoPlayer, audiobookPlayer, settingsAudiobookPlayer, keyboardHandling, settingsKeyboardHandling, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
@@ -787,11 +807,12 @@ export default function SettingsPrompt() {
 
   return (
     <SettingsErrorBoundary>
-    <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={headerHeight}>
-    <ScrollView
-      {...scrollViewProps}
+    <KeyboardAwareForm
+      keyboard={keyboard}
+      keyboardVerticalOffset={headerHeight}
+      avoidingViewStyle={styles.container}
       style={containerStyle}
-      contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom + extraBottomSpace }]}
+      contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]}
       keyboardShouldPersistTaps="handled"
     >
 
@@ -1422,6 +1443,37 @@ export default function SettingsPrompt() {
         </TouchableOpacity>
         {troubleshootingExpanded && (
           <View style={styles.troubleshootingContent}>
+            <View style={styles.row}>
+              <ThemedText style={styles.rowLabel}>Keyboard handling (experimental):</ThemedText>
+              <SelectDropdown
+                ref={keyboardHandlingRef}
+                data={keyboardHandlingOptions}
+                defaultValue={keyboardHandlingOptions.find(o => o.id === keyboardHandling)}
+                onSelect={(selectedItem) => {
+                  try {
+                    setLocalKeyboardHandling(selectedItem.id as keyboardHandlingModes);
+                  } catch (e) {
+                    logger.error('Settings', 'Exception while selecting keyboard handling', e as Error);
+                  }
+                }}
+                renderButton={(selectedItem, isOpened) => (
+                  <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                    <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                      {(selectedItem && selectedItem.label) || 'Please select...'}
+                    </Text>
+                    <Text>{isOpened ? "🔼" : "🔽"}</Text>
+                  </View>
+                )}
+                renderItem={(item, index, isSelected) => (
+                  <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                    <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+                  </View>
+                )}
+                showsVerticalScrollIndicator={false}
+                dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+              />
+            </View>
+            <ThemedText style={styles.troubleshootingButtonDesc}>Testing a replacement for how screens scroll inputs above the keyboard (issue 244). Switch back if text boxes end up hidden.</ThemedText>
             <TouchableOpacity style={styles.troubleshootingButton} onPress={clearThumbnailCache}>
               <ThemedText style={styles.troubleshootingButtonText}>🗑 Clear thumbnail cache</ThemedText>
               <ThemedText style={styles.troubleshootingButtonDesc}>Deletes all generated video thumbnails from disk.</ThemedText>
@@ -1449,8 +1501,7 @@ export default function SettingsPrompt() {
       <View style={styles.footerContainer}>
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
       </View>
-    </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareForm>
     </SettingsErrorBoundary>
   );
 }

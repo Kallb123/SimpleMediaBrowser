@@ -11,6 +11,12 @@ export type appColorSchemes = 'light' | 'dark' | 'system';
 export type audiobookPlayers = 'inapp' | 'external';
 /** How movies and episodes are played: in the app's own player (with resume) or handed to an external app. */
 export type videoPlayers = 'inapp' | 'external';
+/**
+ * Temporary experiment switch for issue 244. 'legacy' keeps focused inputs clear of the keyboard with
+ * `useKeyboardAwareScroll` + `KeyboardAvoidingView`; 'library' uses react-native-keyboard-controller's
+ * `KeyboardAwareScrollView` instead.
+ */
+export type keyboardHandlingModes = 'legacy' | 'library';
 export type sortOrders = 'alphabetical' | 'reverseAlphabetical' | 'lastOpened' | 'reverseLastOpened' | 'recentlyAdded';
 
 export interface IMediaSource {
@@ -51,6 +57,7 @@ interface SettingsState {
   bedtimeAllowedTypes: contentTypes[]
   videoPlayer: videoPlayers
   audiobookPlayer: audiobookPlayers
+  keyboardHandling: keyboardHandlingModes
   /** In-app audiobook playback speed (1 = normal). */
   audiobookPlaybackRate: number
   /** Seconds the in-app audiobook player steps back when resuming after a pause; 0 = off. */
@@ -89,6 +96,7 @@ const initialState: SettingsState = {
   bedtimeAllowedTypes: ['audiobook'],
   videoPlayer: 'inapp',
   audiobookPlayer: 'inapp',
+  keyboardHandling: 'legacy',
   audiobookPlaybackRate: 1,
   audiobookRewindSeconds: 10,
   videoSubtitleLanguage: null,
@@ -183,6 +191,9 @@ export const settingsSlice = createSlice({
     setAudiobookPlayer: (state, action: PayloadAction<audiobookPlayers>) => {
       state.audiobookPlayer = action.payload;
     },
+    setKeyboardHandling: (state, action: PayloadAction<keyboardHandlingModes>) => {
+      state.keyboardHandling = action.payload;
+    },
     setAudiobookPlaybackRate: (state, action: PayloadAction<number>) => {
       if (!Number.isFinite(action.payload)) return;
       state.audiobookPlaybackRate = Math.min(2, Math.max(0.5, action.payload));
@@ -200,7 +211,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setKeyboardHandling, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -228,6 +239,9 @@ export const selectSortOrder = (state: RootState): sortOrders =>
   (state.settingsReducer.sortOrder ?? 'alphabetical') as sortOrders;
 export const selectVideoPlayer = (state: RootState): videoPlayers => state.settingsReducer.videoPlayer ?? 'inapp';
 export const selectAudiobookPlayer = (state: RootState): audiobookPlayers => state.settingsReducer.audiobookPlayer ?? 'inapp';
+// Anything but 'library' (missing, or a stale/corrupt persisted value) means the existing behaviour.
+export const selectKeyboardHandling = (state: RootState): keyboardHandlingModes =>
+  state.settingsReducer.keyboardHandling === 'library' ? 'library' : 'legacy';
 export const selectAudiobookPlaybackRate = (state: RootState): number => state.settingsReducer.audiobookPlaybackRate ?? 1;
 export const selectAudiobookRewindSeconds = (state: RootState): number => state.settingsReducer.audiobookRewindSeconds ?? 10;
 export const selectVideoSubtitleLanguage = (state: RootState): string | null => state.settingsReducer.videoSubtitleLanguage ?? null;

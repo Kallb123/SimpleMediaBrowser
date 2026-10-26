@@ -1,8 +1,7 @@
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { usePreventRemove, useNavigation } from '@react-navigation/native';
-import { Alert, Button, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { Alert, Button, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
@@ -12,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { setMediaOverride } from '@/store/libraryReducer';
 import { useEditTarget, itemTypeLabel, type EditItemType } from '@/hooks/useEditTarget';
+import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,7 +35,8 @@ export default function EditItemScreen() {
   // roughly the header's height on-device. useHeaderHeight() reads the
   // actual rendered header height from React Navigation directly.
   const headerHeight = useHeaderHeight();
-  const { scrollViewProps, extraBottomSpace, handleInputFocus, handleInputBlur } = useKeyboardAwareScroll();
+  const keyboard = useKeyboardAwareScroll();
+  const { handleInputFocus, handleInputBlur } = keyboard;
 
   const { override: existingOverride, currentPoster, currentTmdbId, currentTvdbId, hasProviderSupport } =
     useEditTarget(itemType, itemKey);
@@ -118,11 +119,12 @@ export default function EditItemScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={headerHeight}>
-      <ScrollView
-        {...scrollViewProps}
+      <KeyboardAwareForm
+        keyboard={keyboard}
+        keyboardVerticalOffset={headerHeight}
+        avoidingViewStyle={styles.container}
         style={styles.container}
-        contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom + extraBottomSpace }]}
+        contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}
         keyboardShouldPersistTaps="handled"
       >
         <Stack.Screen options={{ headerRight: () => <Button title="Save" onPress={handleSave} /> }} />
@@ -229,8 +231,7 @@ export default function EditItemScreen() {
             </ThemedText>
           </View>
         )}
-      </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareForm>
     </ThemedView>
   );
 }
