@@ -5,6 +5,7 @@ import type { ImageLoadEventData } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { ThemedText } from '@/components/ThemedText';
 import { ListenProgressBar } from '@/components/ui/ListenProgressBar';
+import { WatchProgressBar } from '@/components/ui/WatchProgressBar';
 import { WatchedBadge } from '@/components/ui/WatchedBadge';
 import type { ToggleWatched } from '@/components/ui/WatchedBadge';
 import type { IMediaAudiobook } from '@/store/libraryReducer';
@@ -180,7 +181,9 @@ export function PosterBox({
           editable={editMode}
           onToggle={onToggleWatched}
         />
-        {audiobook && <ListenProgressBar audiobook={audiobook} partPath={audiobookPartPath} />}
+        {audiobook
+          ? <ListenProgressBar audiobook={audiobook} partPath={audiobookPartPath} />
+          : <WatchProgressBar watchKey={watchKey} watchKeys={watchKeys} />}
         {/* Entry count badge for show/season folders */}
         {item.kind === 'folder' && item.count !== undefined && (
           <View

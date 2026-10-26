@@ -1,6 +1,6 @@
 import { memo } from 'react';
-import { StyleSheet, View } from 'react-native';
 import { useSelector } from 'react-redux';
+import { ProgressStrip } from '@/components/ui/ProgressStrip';
 import { selectListenProgress } from '@/store/libraryReducer';
 import type { IMediaAudiobook } from '@/store/libraryReducer';
 import type { RootState } from '@/store/store';
@@ -28,31 +28,5 @@ export const ListenProgressBar = memo(function ListenProgressBar({ audiobook, pa
 
   if (!fraction) return null;
 
-  return (
-    <View
-      style={styles.track}
-      pointerEvents="none"
-      accessibilityRole="progressbar"
-      accessibilityLabel="Listening progress"
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(fraction * 100) }}
-    >
-      <View style={[styles.fill, { width: `${fraction * 100}%` }]} />
-    </View>
-  );
-});
-
-const styles = StyleSheet.create({
-  // Overlays the bottom edge of the cell (the poster box clips it to its rounded corners).
-  track: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 4,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  fill: {
-    height: '100%',
-    backgroundColor: '#0a7ea4',
-  },
+  return <ProgressStrip fraction={fraction} accessibilityLabel="Listening progress" />;
 });
