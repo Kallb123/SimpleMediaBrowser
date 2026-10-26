@@ -1,20 +1,42 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { StackActions } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
+import type { VideoPlayer } from 'expo-video';
+import { AudiobookPlayer, PLAYBACK_RATES } from '@/scripts/AudiobookPlayer';
 import { logger } from '@/scripts/Logger';
 import { openMediaInExternalApp } from '@/scripts/openMedia';
-import { resolveVideoRequest, unsupportedVideoTrack } from '@/scripts/VideoPlayback';
-import type { VideoRequest } from '@/scripts/VideoPlayback';
+import { nextEpisode, resolveVideoRequest, unsupportedVideoTrack } from '@/scripts/VideoPlayback';
+import type { NextEpisode, VideoRequest } from '@/scripts/VideoPlayback';
 import { VideoProgressTracker } from '@/scripts/VideoProgressTracker';
-import { useAppStore } from '@/hooks/useRedux';
-import { useVideoTracks } from '@/hooks/useVideoTracks';
+import { isWatchedPosition, resumePosition } from '@/scripts/videoProgress';
+import { setEpisodeLastOpened } from '@/store/libraryReducer';
+import {
+  selectVideoAutoPlayNext,
+  selectVideoPlaybackRate,
+  selectVideoSpeedControlEnabled,
+  selectVideoTrackPickerEnabled,
+  setVideoPlaybackRate,
+} from '@/store/settingsReducer';
+import type { videoAutoPlayNextModes } from '@/store/settingsReducer';
+import { useBedtime } from '@/contexts/BedtimeContext';
+import { useAppDispatch, useAppStore } from '@/hooks/useRedux';
+import { useControlsVisible, useVideoTracks } from '@/hooks/useVideoTracks';
+import { OptionSheet } from '@/components/OptionSheet';
+import { UpNextCard } from '@/components/UpNextCard';
 import { VideoTrackPicker } from '@/components/VideoTrackPicker';
 
 const TAG = 'VideoPlayerScreen';
+
+/** How long the "Up next" card counts down after the video ends, in `countdown` mode. */
+const COUNTDOWN_SECONDS = 10;
+
+/** Speeds the picker offers: the audiobook player's, plus 0.5× for slowing a video down. */
+const VIDEO_PLAYBACK_RATES: readonly number[] = [0.5, ...PLAYBACK_RATES];
+
+const formatRate = (rate: number) => `${parseFloat(rate.toFixed(2))}×`;
 
 /** How long the player may take to become ready before the user is offered the external player. */
 const LOAD_TIMEOUT_MS = 30_000;
@@ -81,20 +103,129 @@ function NothingPlaying() {
   );
 }
 
+/**
+ * Drives the "Up next" card for `next` (null = nothing to offer). It is offered once playback is
+ * past the watched threshold or has ended, unless dismissed, which lasts for this video. Seeking
+ * back before the threshold hides it again. In `countdown` mode a video that has played to its end
+ * also counts down and then calls `onAutoPlay`. `suspended` (an overlay is up) hides the card and
+ * holds the countdown where it is.
+ */
+function useUpNext(player: VideoPlayer, next: NextEpisode | null, mode: videoAutoPlayNextModes, suspended: boolean, onAutoPlay: () => void) {
+  const [pastThreshold, setPastThreshold] = useState(false);
+  const [ended, setEnded] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
+  // After `playToEnd` a player may rewind to 0 and tick; that must not hide the card.
+  const endedRef = useRef(false);
+  const autoPlayFired = useRef(false);
+  const latestAutoPlay = useRef(onAutoPlay);
+  latestAutoPlay.current = onAutoPlay;
+
+  useEffect(() => {
+    if (!next) return;
+    const subscriptions = [
+      player.addListener('timeUpdate', ({ currentTime }) => {
+        if (!endedRef.current) setPastThreshold(isWatchedPosition(currentTime, player.duration));
+      }),
+      player.addListener('playToEnd', () => {
+        endedRef.current = true;
+        setPastThreshold(true);
+        setEnded(true);
+      }),
+      // Playing again after the end (a replay) cancels the countdown.
+      player.addListener('playingChange', ({ isPlaying }) => {
+        if (!isPlaying || !endedRef.current) return;
+        endedRef.current = false;
+        setEnded(false);
+        setSecondsLeft(COUNTDOWN_SECONDS);
+      }),
+    ];
+    return () => subscriptions.forEach((s) => s.remove());
+  }, [player, next]);
+
+  const offered = next !== null && !dismissed && (pastThreshold || ended);
+  const counting = offered && ended && mode === 'countdown' && !suspended;
+
+  useEffect(() => {
+    if (offered && next) logger.log(TAG, `Offering next episode "${next.title}" (${mode})`);
+  }, [offered, next, mode]);
+
+  useEffect(() => {
+    if (!counting) return;
+    const timer = setInterval(() => setSecondsLeft((s) => s - 1), 1000);
+    return () => clearInterval(timer);
+  }, [counting]);
+
+  useEffect(() => {
+    if (!counting || secondsLeft > 0 || autoPlayFired.current) return;
+    autoPlayFired.current = true;
+    latestAutoPlay.current();
+  }, [counting, secondsLeft]);
+
+  return {
+    visible: offered && !suspended,
+    /** Null while the card waits for a tap. */
+    secondsLeft: offered && ended && mode === 'countdown' ? Math.max(0, secondsLeft) : null,
+    dismiss: () => setDismissed(true),
+  };
+}
+
 function VideoPlayback({ request }: { request: VideoRequest }) {
   const { path, parsedPath, filename, title, startAt } = request;
+  const store = useAppStore();
+  const dispatch = useAppDispatch();
+  // Read once, like the request: changing a setting mid-video does not rearrange the player.
+  const [settings] = useState(() => {
+    const state = store.getState();
+    const autoPlayNext = selectVideoAutoPlayNext(state);
+    const speedControl = selectVideoSpeedControlEnabled(state);
+    return {
+      trackPicker: selectVideoTrackPickerEnabled(state),
+      speedControl,
+      // With the control off the video always plays at normal speed, whatever was remembered.
+      playbackRate: speedControl ? selectVideoPlaybackRate(state) : 1,
+      autoPlayNext,
+      next: autoPlayNext === 'off' ? null : nextEpisode(state.libraryReducer, parsedPath),
+    };
+  });
   const [problem, setProblem] = useState<Problem | null>(null);
   // Set while the unsupported-picture overlay is up, so a late `readyToPlay` does not start the sound.
   const holdPlayback = useRef(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(settings.playbackRate);
   const closeScreen = useCloseScreen();
+  // Bedtime locking TV must also stop the player from chaining into the next episode.
+  const { restrictedSections } = useBedtime();
+  const next = restrictedSections.has('tv') ? null : settings.next;
 
   const player = useVideoPlayer(path, (p) => {
     // One tick a second is plenty for the progress tracker.
     p.timeUpdateEventInterval = 1;
     p.keepScreenOnWhilePlaying = true;
   });
-  const tracks = useVideoTracks(player);
+  const tracks = useVideoTracks(player, settings.trackPicker);
+  const controlsVisible = useControlsVisible(player);
+
+  // Replaces this screen with the next episode's: the new route key remounts the screen, so
+  // `VideoPlayback` resolves a fresh request, and this tracker's cleanup still saves this one.
+  const playNext = () => {
+    if (!next) return;
+    logger.log(TAG, `Playing next episode "${next.title}" (${next.parsedPath})`);
+    dispatch(setEpisodeLastOpened({ path: next.path, lastOpened: Date.now() }));
+    const nextStart = resumePosition(store.getState().libraryReducer.watchProgress[next.parsedPath]);
+    router.replace({ pathname: '/videoplayer', params: { parsedPath: next.parsedPath, startAt: String(nextStart) } });
+  };
+  const upNext = useUpNext(player, next, settings.autoPlayNext, !!problem || pickerOpen || speedOpen, playNext);
+
+  const selectRate = (key: string) => {
+    const rate = Number(key);
+    player.playbackRate = rate;
+    setPlaybackRate(rate);
+    setSpeedOpen(false);
+    dispatch(setVideoPlaybackRate(rate));
+    logger.log(TAG, `Playback speed ${formatRate(rate)} chosen`);
+  };
 
   // A layout effect on purpose: on unmount its cleanup runs before the passive cleanup in which
   // `useVideoPlayer` releases the player, so the tracker can still read the final position.
@@ -123,7 +254,8 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
       // A video must not play over an audiobook that was still going.
       AudiobookPlayer.getInstance().pause();
       if (startAt > 0 && !(player.duration > 0 && startAt >= player.duration)) player.currentTime = startAt;
-      logger.log(TAG, `Playing "${title}" (${parsedPath}) from ${Math.round(startAt)}s`);
+      player.playbackRate = settings.playbackRate;
+      logger.log(TAG, `Playing "${title}" (${parsedPath}) from ${Math.round(startAt)}s at ${formatRate(settings.playbackRate)}`);
       if (!holdPlayback.current) player.play();
     };
     const onError = (error?: { message?: string }) => {
@@ -159,7 +291,7 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
       statusSubscription.remove();
       loadSubscription.remove();
     };
-  }, [player, path, parsedPath, title, startAt]);
+  }, [player, path, parsedPath, title, startAt, settings.playbackRate]);
 
   const openExternally = () => {
     logger.log(TAG, `Falling back to the external player for ${path}`);
@@ -188,15 +320,41 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
         fullscreenOptions={{ enable: false }}
       />
       {/* A small corner button rather than a touch layer, so the native controls keep every other tap. */}
-      {tracks.hasChoices && tracks.buttonVisible && !problem && !pickerOpen && (
-        <TouchableOpacity
-          style={styles.trackButton}
-          onPress={() => setPickerOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Subtitles and audio"
-        >
-          <Text style={styles.buttonText}>CC</Text>
-        </TouchableOpacity>
+      {controlsVisible && !problem && !pickerOpen && !speedOpen && (
+        <View style={styles.cornerButtons} pointerEvents="box-none">
+          {settings.speedControl && (
+            <TouchableOpacity
+              style={styles.cornerButton}
+              onPress={() => setSpeedOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Playback speed ${formatRate(playbackRate)}`}
+            >
+              <Text style={styles.buttonText}>{formatRate(playbackRate)}</Text>
+            </TouchableOpacity>
+          )}
+          {settings.trackPicker && tracks.hasChoices && (
+            <TouchableOpacity
+              style={styles.cornerButton}
+              onPress={() => setPickerOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Subtitles and audio"
+            >
+              <Text style={styles.buttonText}>CC</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+      {settings.speedControl && (
+        <OptionSheet
+          visible={speedOpen && !problem}
+          title="Playback speed"
+          options={VIDEO_PLAYBACK_RATES.map((rate) => ({ key: String(rate), label: formatRate(rate), selected: rate === playbackRate }))}
+          onSelect={selectRate}
+          onDismiss={() => setSpeedOpen(false)}
+        />
+      )}
+      {next && upNext.visible && (
+        <UpNextCard title={next.title} secondsLeft={upNext.secondsLeft} onPlay={playNext} onDismiss={upNext.dismiss} />
       )}
       {pickerOpen && !problem && (
         <VideoTrackPicker
@@ -238,5 +396,6 @@ const styles = StyleSheet.create({
   message: { color: '#ccc', fontSize: 16, textAlign: 'center' },
   button: { minWidth: 220, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, backgroundColor: '#333', alignItems: 'center' },
   buttonText: { color: '#fff', fontSize: 16 },
-  trackButton: { position: 'absolute', top: 16, right: 16, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: 'rgba(0, 0, 0, 0.6)' },
+  cornerButtons: { position: 'absolute', top: 16, right: 16, flexDirection: 'row', gap: 8 },
+  cornerButton: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: 'rgba(0, 0, 0, 0.6)' },
 });

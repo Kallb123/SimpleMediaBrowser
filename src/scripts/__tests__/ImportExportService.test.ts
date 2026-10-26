@@ -1,7 +1,7 @@
 import { configureStore } from '@reduxjs/toolkit';
 import libraryReducer, { hydrateLibrary, setListenProgress, setWatchProgress } from '@/store/libraryReducer';
 import settingsReducer from '@/store/settingsReducer';
-import { importJson } from '@/scripts/ImportExportService';
+import { exportJson, importJson } from '@/scripts/ImportExportService';
 
 // A store built from the real slice reducers stands in for `@/store/store`, which would
 // create the redux-persist store.
@@ -13,14 +13,31 @@ jest.mock('@/store/store', () => ({
 }));
 
 let mockFileText = '';
-jest.mock('expo-file-system', () => ({
-  File: class {
+let mockWritten = '';
+jest.mock('expo-file-system', () => {
+  class File {
+    constructor(public uri: string = '') {}
     text() {
       return Promise.resolve(mockFileText);
     }
-  },
-  Directory: class {},
-}));
+    write(content: string) {
+      mockWritten = content;
+    }
+  }
+  class Directory {
+    uri = 'file:///export/';
+    static pickDirectoryAsync() {
+      return Promise.resolve(new Directory());
+    }
+    list() {
+      return [];
+    }
+    createFile() {
+      return new File('file:///export/out.json');
+    }
+  }
+  return { File, Directory };
+});
 jest.mock('expo-document-picker', () => ({
   getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///import.json' }] })),
 }));
@@ -156,5 +173,103 @@ describe('importJson listenProgress', () => {
     expect(mockStore.getState().settingsReducer.videoAudioLanguage).toBe('ja');
     await importFile({ settings: { videoSubtitleLanguage: null } });
     expect(mockStore.getState().settingsReducer.videoSubtitleLanguage).toBeNull();
+  });
+});
+
+describe('video feature and sidebar sort settings', () => {
+  const settings = () => mockStore.getState().settingsReducer;
+
+  it('imports the video feature toggles, ignoring non-booleans', async () => {
+    await importFile({ settings: { videoShowProgressBar: false, videoTrackPickerEnabled: false, videoSpeedControlEnabled: false, showSidebarSort: true } });
+    expect(settings().videoShowProgressBar).toBe(false);
+    expect(settings().videoTrackPickerEnabled).toBe(false);
+    expect(settings().videoSpeedControlEnabled).toBe(false);
+    expect(settings().showSidebarSort).toBe(true);
+    await importFile({ settings: { videoShowProgressBar: 'true', videoTrackPickerEnabled: 1, videoSpeedControlEnabled: null, showSidebarSort: 'no' } });
+    expect(settings().videoShowProgressBar).toBe(false);
+    expect(settings().videoTrackPickerEnabled).toBe(false);
+    expect(settings().videoSpeedControlEnabled).toBe(false);
+    expect(settings().showSidebarSort).toBe(true);
+  });
+
+  it('imports the video playback rate, clamping and ignoring non-finite values', async () => {
+    await importFile({ settings: { videoPlaybackRate: 1.5 } });
+    expect(settings().videoPlaybackRate).toBe(1.5);
+    await importFile({ settings: { videoPlaybackRate: '2' } });
+    expect(settings().videoPlaybackRate).toBe(1.5);
+    await importFile({ settings: { videoPlaybackRate: null } });
+    expect(settings().videoPlaybackRate).toBe(1.5);
+    await importFile({ settings: { videoPlaybackRate: 9 } });
+    expect(settings().videoPlaybackRate).toBe(2);
+    await importFile({ settings: { videoPlaybackRate: 0.1 } });
+    expect(settings().videoPlaybackRate).toBe(0.5);
+  });
+
+  it('imports the auto-play-next mode, rejecting unknown values', async () => {
+    await importFile({ settings: { videoAutoPlayNext: 'countdown' } });
+    expect(settings().videoAutoPlayNext).toBe('countdown');
+    await importFile({ settings: { videoAutoPlayNext: 'bogus' } });
+    expect(settings().videoAutoPlayNext).toBe('countdown');
+    await importFile({ settings: { videoAutoPlayNext: 'off' } });
+    expect(settings().videoAutoPlayNext).toBe('off');
+    await importFile({ settings: { videoAutoPlayNext: 3 } });
+    expect(settings().videoAutoPlayNext).toBe('off');
+  });
+
+  it('imports the sort order, rejecting unknown values', async () => {
+    await importFile({ settings: { sortOrder: 'recentlyAdded' } });
+    expect(settings().sortOrder).toBe('recentlyAdded');
+    await importFile({ settings: { sortOrder: 'random' } });
+    expect(settings().sortOrder).toBe('recentlyAdded');
+    await importFile({ settings: { sortOrder: 7 } });
+    expect(settings().sortOrder).toBe('recentlyAdded');
+  });
+
+  it('round-trips the new settings through an export', async () => {
+    await importFile({
+      settings: {
+        sortOrder: 'lastOpened',
+        showSidebarSort: true,
+        videoShowProgressBar: false,
+        videoTrackPickerEnabled: false,
+        videoSpeedControlEnabled: false,
+        videoPlaybackRate: 1.25,
+        videoAutoPlayNext: 'countdown',
+      },
+    });
+    await exportJson({ includeSettings: true, includeOverrides: false, includeWatched: false, includeMatches: false });
+    const exported = JSON.parse(mockWritten).settings;
+    expect(exported).toMatchObject({
+      sortOrder: 'lastOpened',
+      showSidebarSort: true,
+      videoShowProgressBar: false,
+      videoTrackPickerEnabled: false,
+      videoSpeedControlEnabled: false,
+      videoPlaybackRate: 1.25,
+      videoAutoPlayNext: 'countdown',
+    });
+
+    // Change everything, then re-import the exported file to restore it.
+    await importFile({
+      settings: {
+        sortOrder: 'alphabetical',
+        showSidebarSort: false,
+        videoShowProgressBar: true,
+        videoTrackPickerEnabled: true,
+        videoSpeedControlEnabled: true,
+        videoPlaybackRate: 1,
+        videoAutoPlayNext: 'off',
+      },
+    });
+    await importFile({ settings: exported });
+    expect(settings()).toMatchObject({
+      sortOrder: 'lastOpened',
+      showSidebarSort: true,
+      videoShowProgressBar: false,
+      videoTrackPickerEnabled: false,
+      videoSpeedControlEnabled: false,
+      videoPlaybackRate: 1.25,
+      videoAutoPlayNext: 'countdown',
+    });
   });
 });

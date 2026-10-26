@@ -7,12 +7,13 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { router, useFocusEffect } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes, videoAutoPlayNextModes, selectVideoShowProgressBar, setVideoShowProgressBar, selectVideoTrackPickerEnabled, setVideoTrackPickerEnabled, selectVideoSpeedControlEnabled, setVideoSpeedControlEnabled, selectVideoAutoPlayNext, setVideoAutoPlayNext, selectShowSidebarSort, setShowSidebarSort } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
 import SelectDropdown from 'react-native-select-dropdown';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { sortOrderOptions } from '@/constants/sortOrderOptions';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
@@ -88,11 +89,10 @@ const audiobookRewindOptions: { id: number; label: string }[] = [
   {id: 60, label: '60 s'},
 ];
 
-const sortOrderOptions: { id: sortOrders; label: string }[] = [
-  {id: 'alphabetical', label: 'A > Z'},
-  {id: 'reverseAlphabetical', label: 'Z > A'},
-  {id: 'lastOpened', label: 'Last opened'},
-  {id: 'recentlyAdded', label: 'Recently added'},
+const videoAutoPlayNextOptions: { id: videoAutoPlayNextModes; label: string }[] = [
+  {id: 'off', label: 'Off'},
+  {id: 'prompt', label: 'Show "Up next"'},
+  {id: 'countdown', label: 'Countdown'},
 ];
 
 const BEDTIME_STEP_MINUTES = 15;
@@ -191,7 +191,12 @@ export default function SettingsPrompt() {
   const [fetchEpisodeThumbnails, setLocalFetchEpisodeThumbnails] = useState(true);
   const [appColorScheme, setLocalAppColorScheme] = useState('system' as appColorSchemes);
   const [sortOrder, setLocalSortOrder] = useState('alphabetical' as sortOrders);
+  const [showSidebarSort, setLocalShowSidebarSort] = useState(false);
   const [videoPlayer, setLocalVideoPlayer] = useState('inapp' as videoPlayers);
+  const [videoShowProgressBar, setLocalVideoShowProgressBar] = useState(true);
+  const [videoTrackPickerEnabled, setLocalVideoTrackPickerEnabled] = useState(true);
+  const [videoSpeedControlEnabled, setLocalVideoSpeedControlEnabled] = useState(true);
+  const [videoAutoPlayNext, setLocalVideoAutoPlayNext] = useState('prompt' as videoAutoPlayNextModes);
   const [audiobookPlayer, setLocalAudiobookPlayer] = useState('inapp' as audiobookPlayers);
   const [keyboardHandling, setLocalKeyboardHandling] = useState('legacy' as keyboardHandlingModes);
   const [audiobookRewindSeconds, setLocalAudiobookRewindSeconds] = useState(10);
@@ -226,7 +231,12 @@ export default function SettingsPrompt() {
   const settingsFetchEpisodeThumbnails = useSelector(selectFetchEpisodeThumbnails);
   const settingsAppColorScheme = useSelector(selectAppColorScheme);
   const settingsSortOrder = useSelector(selectSortOrder);
+  const settingsShowSidebarSort = useSelector(selectShowSidebarSort);
   const settingsVideoPlayer = useSelector(selectVideoPlayer);
+  const settingsVideoShowProgressBar = useSelector(selectVideoShowProgressBar);
+  const settingsVideoTrackPickerEnabled = useSelector(selectVideoTrackPickerEnabled);
+  const settingsVideoSpeedControlEnabled = useSelector(selectVideoSpeedControlEnabled);
+  const settingsVideoAutoPlayNext = useSelector(selectVideoAutoPlayNext);
   const settingsAudiobookPlayer = useSelector(selectAudiobookPlayer);
   const settingsKeyboardHandling = useSelector(selectKeyboardHandling);
   const settingsAudiobookRewindSeconds = useSelector(selectAudiobookRewindSeconds);
@@ -242,6 +252,7 @@ export default function SettingsPrompt() {
   const appColorSchemeRef = useRef(null);
   const sortOrderRef = useRef(null);
   const videoPlayerRef = useRef(null);
+  const videoAutoPlayNextRef = useRef(null);
   const audiobookPlayerRef = useRef(null);
   const keyboardHandlingRef = useRef(null);
   const audiobookRewindRef = useRef(null);
@@ -348,12 +359,22 @@ export default function SettingsPrompt() {
         (sortOrderRef.current as any).selectIndex(sortOrderIndex);
       }
       setLocalSortOrder(settingsSortOrder);
+      setLocalShowSidebarSort(settingsShowSidebarSort);
 
       const videoPlayerIndex = videoPlayerOptions.findIndex(o => o.id === settingsVideoPlayer);
       if (videoPlayerRef.current && videoPlayerIndex >= 0) {
         (videoPlayerRef.current as any).selectIndex(videoPlayerIndex);
       }
       setLocalVideoPlayer(settingsVideoPlayer);
+      setLocalVideoShowProgressBar(settingsVideoShowProgressBar);
+      setLocalVideoTrackPickerEnabled(settingsVideoTrackPickerEnabled);
+      setLocalVideoSpeedControlEnabled(settingsVideoSpeedControlEnabled);
+
+      const videoAutoPlayNextIndex = videoAutoPlayNextOptions.findIndex(o => o.id === settingsVideoAutoPlayNext);
+      if (videoAutoPlayNextRef.current && videoAutoPlayNextIndex >= 0) {
+        (videoAutoPlayNextRef.current as any).selectIndex(videoAutoPlayNextIndex);
+      }
+      setLocalVideoAutoPlayNext(settingsVideoAutoPlayNext);
 
       const audiobookPlayerIndex = audiobookPlayerOptions.findIndex(o => o.id === settingsAudiobookPlayer);
       if (audiobookPlayerRef.current && audiobookPlayerIndex >= 0) {
@@ -390,7 +411,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsVideoPlayer, settingsAudiobookPlayer, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]));
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsShowSidebarSort, settingsVideoPlayer, settingsVideoShowProgressBar, settingsVideoTrackPickerEnabled, settingsVideoSpeedControlEnabled, settingsVideoAutoPlayNext, settingsAudiobookPlayer, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes, bedtimeTimeOptions]));
 
   const save = useCallback(() => {
     try {
@@ -477,9 +498,34 @@ export default function SettingsPrompt() {
         dispatch(setSortOrder(sortOrder));
         changeCount++;
       }
+      if (showSidebarSort !== settingsShowSidebarSort) {
+        logger.log('Settings', `Persisting: showSidebarSort changed ${settingsShowSidebarSort} → ${showSidebarSort}`);
+        dispatch(setShowSidebarSort(showSidebarSort));
+        changeCount++;
+      }
       if (videoPlayer && videoPlayer !== settingsVideoPlayer) {
         logger.log('Settings', `Persisting: videoPlayer changed ${settingsVideoPlayer} → ${videoPlayer}`);
         dispatch(setVideoPlayer(videoPlayer));
+        changeCount++;
+      }
+      if (videoShowProgressBar !== settingsVideoShowProgressBar) {
+        logger.log('Settings', `Persisting: videoShowProgressBar changed ${settingsVideoShowProgressBar} → ${videoShowProgressBar}`);
+        dispatch(setVideoShowProgressBar(videoShowProgressBar));
+        changeCount++;
+      }
+      if (videoTrackPickerEnabled !== settingsVideoTrackPickerEnabled) {
+        logger.log('Settings', `Persisting: videoTrackPickerEnabled changed ${settingsVideoTrackPickerEnabled} → ${videoTrackPickerEnabled}`);
+        dispatch(setVideoTrackPickerEnabled(videoTrackPickerEnabled));
+        changeCount++;
+      }
+      if (videoSpeedControlEnabled !== settingsVideoSpeedControlEnabled) {
+        logger.log('Settings', `Persisting: videoSpeedControlEnabled changed ${settingsVideoSpeedControlEnabled} → ${videoSpeedControlEnabled}`);
+        dispatch(setVideoSpeedControlEnabled(videoSpeedControlEnabled));
+        changeCount++;
+      }
+      if (videoAutoPlayNext && videoAutoPlayNext !== settingsVideoAutoPlayNext) {
+        logger.log('Settings', `Persisting: videoAutoPlayNext changed ${settingsVideoAutoPlayNext} → ${videoAutoPlayNext}`);
+        dispatch(setVideoAutoPlayNext(videoAutoPlayNext));
         changeCount++;
       }
       if (audiobookPlayer && audiobookPlayer !== settingsAudiobookPlayer) {
@@ -522,7 +568,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, videoPlayer, settingsVideoPlayer, audiobookPlayer, settingsAudiobookPlayer, keyboardHandling, settingsKeyboardHandling, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, showSidebarSort, settingsShowSidebarSort, videoPlayer, settingsVideoPlayer, videoShowProgressBar, settingsVideoShowProgressBar, videoTrackPickerEnabled, settingsVideoTrackPickerEnabled, videoSpeedControlEnabled, settingsVideoSpeedControlEnabled, videoAutoPlayNext, settingsVideoAutoPlayNext, audiobookPlayer, settingsAudiobookPlayer, keyboardHandling, settingsKeyboardHandling, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
@@ -1172,6 +1218,23 @@ export default function SettingsPrompt() {
         </View>
 
         <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Sort menu in sidebar</ThemedText>
+          <Switch
+            value={showSidebarSort}
+            onValueChange={(value) => {
+              try {
+                setLocalShowSidebarSort(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling sidebar sort', e as Error);
+              }
+            }}
+          />
+        </View>
+        <ThemedText style={styles.emptyText}>
+          Adds a sort selector to the sidebar for quick switching.
+        </ThemedText>
+
+        <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>TV Show Navigation Structure:</ThemedText>
           <SelectDropdown
             ref={mediaStructureRef}
@@ -1286,37 +1349,6 @@ export default function SettingsPrompt() {
         </View>
 
         <View style={styles.row}>
-          <ThemedText style={styles.rowLabel}>Video player:</ThemedText>
-          <SelectDropdown
-            ref={videoPlayerRef}
-            data={videoPlayerOptions}
-            defaultValue={videoPlayerOptions.find(o => o.id === settingsVideoPlayer)}
-            onSelect={(selectedItem) => {
-              try {
-                setLocalVideoPlayer(selectedItem.id as videoPlayers);
-              } catch (e) {
-                logger.error('Settings', 'Exception while selecting video player', e as Error);
-              }
-            }}
-            renderButton={(selectedItem, isOpened) => (
-              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
-                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
-                  {(selectedItem && selectedItem.label) || 'Please select...'}
-                </Text>
-                <Text>{isOpened ? "🔼" : "🔽"}</Text>
-              </View>
-            )}
-            renderItem={(item, index, isSelected) => (
-              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
-                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
-              </View>
-            )}
-            showsVerticalScrollIndicator={false}
-            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
-          />
-        </View>
-
-        <View style={styles.row}>
           <ThemedText style={styles.rowLabel}>Audiobook player:</ThemedText>
           <SelectDropdown
             ref={audiobookPlayerRef}
@@ -1379,6 +1411,117 @@ export default function SettingsPrompt() {
         </View>
         <ThemedText style={styles.emptyText}>
           In-app remembers your place in each audiobook and keeps playing in the background. External app hands the files to another app. Rewind on resume steps back a few seconds when you come back after a pause.
+        </ThemedText>
+      </View>
+
+      {/* Video player */}
+      <View style={styles.section}>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>Video Player</ThemedText>
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Video player:</ThemedText>
+          <SelectDropdown
+            ref={videoPlayerRef}
+            data={videoPlayerOptions}
+            defaultValue={videoPlayerOptions.find(o => o.id === settingsVideoPlayer)}
+            onSelect={(selectedItem) => {
+              try {
+                setLocalVideoPlayer(selectedItem.id as videoPlayers);
+              } catch (e) {
+                logger.error('Settings', 'Exception while selecting video player', e as Error);
+              }
+            }}
+            renderButton={(selectedItem, isOpened) => (
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                  {(selectedItem && selectedItem.label) || 'Please select...'}
+                </Text>
+                <Text>{isOpened ? "🔼" : "🔽"}</Text>
+              </View>
+            )}
+            renderItem={(item, index, isSelected) => (
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+          />
+        </View>
+
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Show progress bars on tiles</ThemedText>
+          <Switch
+            value={videoShowProgressBar}
+            onValueChange={(value) => {
+              try {
+                setLocalVideoShowProgressBar(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling video progress bars', e as Error);
+              }
+            }}
+          />
+        </View>
+
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Subtitle & audio track picker</ThemedText>
+          <Switch
+            value={videoTrackPickerEnabled}
+            onValueChange={(value) => {
+              try {
+                setLocalVideoTrackPickerEnabled(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling video track picker', e as Error);
+              }
+            }}
+          />
+        </View>
+
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Playback speed control</ThemedText>
+          <Switch
+            value={videoSpeedControlEnabled}
+            onValueChange={(value) => {
+              try {
+                setLocalVideoSpeedControlEnabled(value);
+              } catch (e) {
+                logger.error('Settings', 'Exception while toggling video speed control', e as Error);
+              }
+            }}
+          />
+        </View>
+
+        <View style={styles.row}>
+          <ThemedText style={styles.rowLabel}>Auto-play next episode:</ThemedText>
+          <SelectDropdown
+            ref={videoAutoPlayNextRef}
+            data={videoAutoPlayNextOptions}
+            defaultValue={videoAutoPlayNextOptions.find(o => o.id === settingsVideoAutoPlayNext)}
+            onSelect={(selectedItem) => {
+              try {
+                setLocalVideoAutoPlayNext(selectedItem.id as videoAutoPlayNextModes);
+              } catch (e) {
+                logger.error('Settings', 'Exception while selecting auto-play next', e as Error);
+              }
+            }}
+            renderButton={(selectedItem, isOpened) => (
+              <View style={[styles.dropdownButtonStyle, { backgroundColor: dropdownBg }]}>
+                <Text style={[styles.dropdownButtonTxtStyle, { color: theme.text }]}>
+                  {(selectedItem && selectedItem.label) || 'Please select...'}
+                </Text>
+                <Text>{isOpened ? "🔼" : "🔽"}</Text>
+              </View>
+            )}
+            renderItem={(item, index, isSelected) => (
+              <View style={{...styles.dropdownItemStyle, backgroundColor: isSelected ? dropdownSelectedBg : dropdownBg}}>
+                <Text style={[styles.dropdownItemTxtStyle, { color: theme.text }]}>{item.label}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            dropdownStyle={[styles.dropdownMenuStyle, { backgroundColor: dropdownBg }]}
+          />
+        </View>
+        <ThemedText style={styles.emptyText}>
+          In-app plays videos here and remembers your place; External app hands them to another app. The track picker, speed control and auto-play options only affect the in-app player; progress bars apply to the library tiles either way. Countdown starts the next episode automatically 10 seconds after one ends.
         </ThemedText>
       </View>
 

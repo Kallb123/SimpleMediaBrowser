@@ -1,4 +1,4 @@
-import { preferredTrack, resolveVideoRequest, sameTrack, trackLabel, trackLabels, unsupportedVideoTrack } from '../VideoPlayback';
+import { nextEpisode, preferredTrack, resolveVideoRequest, sameTrack, trackLabel, trackLabels, unsupportedVideoTrack } from '../VideoPlayback';
 import type { IMediaObject } from '../libraryUtils';
 import type { LibraryState } from '@/store/libraryReducer';
 
@@ -224,5 +224,91 @@ describe('trackLabels', () => {
       { label: 'English', language: 'en' },
       { label: 'English', name: 'English', language: 'en' },
     ])).toEqual(['English 1', 'English 2', 'English 3']);
+  });
+});
+
+describe('nextEpisode', () => {
+  const ids = { tvdb: null, imdb: null, tmdb: null };
+  const season = (seasonNumber: number, episodes: IMediaObject[]) => ({
+    ids,
+    seasonNumber,
+    episodes: Object.fromEntries(episodes.map((ep, i) => [String(i), ep])),
+  });
+  const makeShows = (overrides: LibraryState['mediaOverrides'] = {}): Pick<LibraryState, 'mediaLibrary' | 'mediaOverrides'> => ({
+    mediaLibrary: {
+      Bluey: {
+        ids,
+        title: 'Bluey',
+        year: 2018,
+        poster: '',
+        seasons: {
+          // Out of order on purpose: both seasons and episodes are sorted before use.
+          '2': season(2, [episode('s02e02', 2, { title: 'Two' }), episode('s02e01', 1, { title: 'One' })]),
+          '1': season(1, [episode('s01e01', 1, { title: 'Pilot' }), episode('s01e02', 2, { title: 'Second' })]),
+        },
+      },
+      Solo: {
+        ids,
+        title: 'Solo',
+        year: 2020,
+        poster: '',
+        seasons: { '1': season(1, [episode('solo-s01e01', 1, { title: 'Only' })]) },
+      },
+    },
+    mediaOverrides: overrides,
+  } as Pick<LibraryState, 'mediaLibrary' | 'mediaOverrides'>);
+
+  it('returns the next episode of the season with the label the player shows', () => {
+    expect(nextEpisode(makeShows(), 'tree/s01e01.mkv')).toEqual({
+      path: 'content://tree/s01e02.mkv',
+      parsedPath: 'tree/s01e02.mkv',
+      title: 'Bluey S01E02 - Second',
+    });
+  });
+
+  it('crosses into the first episode of the next season', () => {
+    expect(nextEpisode(makeShows(), 'tree/s01e02.mkv')?.parsedPath).toBe('tree/s02e01.mkv');
+  });
+
+  it('returns null for the last episode of the show', () => {
+    expect(nextEpisode(makeShows(), 'tree/s02e02.mkv')).toBeNull();
+    expect(nextEpisode(makeShows(), 'tree/solo-s01e01.mkv')).toBeNull();
+  });
+
+  it('returns null for a movie, an unknown key or no key', () => {
+    const library = { ...makeShows(), movies: [] };
+    expect(nextEpisode(library, 'tree/Heat.mkv')).toBeNull();
+    expect(nextEpisode(library, 'tree/missing.mkv')).toBeNull();
+    expect(nextEpisode(library, undefined)).toBeNull();
+  });
+
+  it('skips hidden episodes, including across a season boundary', () => {
+    const library = makeShows({
+      'episode:tree/s01e02.mkv': { hidden: true },
+      'episode:tree/s02e01.mkv': { hidden: true },
+    });
+    expect(nextEpisode(library, 'tree/s01e01.mkv')?.parsedPath).toBe('tree/s02e02.mkv');
+  });
+
+  it('is null when every later episode is hidden', () => {
+    const library = makeShows({ 'episode:tree/s02e02.mkv': { hidden: true } });
+    expect(nextEpisode(library, 'tree/s02e01.mkv')).toBeNull();
+  });
+
+  it('still finds the next one from an episode that is itself hidden', () => {
+    const library = makeShows({ 'episode:tree/s01e01.mkv': { hidden: true } });
+    expect(nextEpisode(library, 'tree/s01e01.mkv')?.parsedPath).toBe('tree/s01e02.mkv');
+  });
+
+  it('orders by sortTitle override when one is set', () => {
+    // s01e01 is sorted last by its override, so s01e02 now comes first and s01e01 ends the season.
+    const library = makeShows({ 'episode:tree/s01e01.mkv': { sortTitle: 'zzz' } });
+    expect(nextEpisode(library, 'tree/s01e02.mkv')?.parsedPath).toBe('tree/s01e01.mkv');
+    expect(nextEpisode(library, 'tree/s01e01.mkv')?.parsedPath).toBe('tree/s02e01.mkv');
+  });
+
+  it('applies title overrides to the label', () => {
+    const library = makeShows({ 'show:Bluey': { title: 'Bluey!' }, 'episode:tree/s01e02.mkv': { title: 'Renamed' } });
+    expect(nextEpisode(library, 'tree/s01e01.mkv')?.title).toBe('Bluey! S01E02 - Renamed');
   });
 });

@@ -17,6 +17,11 @@ export type videoPlayers = 'inapp' | 'external';
  * `KeyboardAwareScrollView` instead.
  */
 export type keyboardHandlingModes = 'legacy' | 'library';
+/**
+ * What the in-app video player does when an episode reaches its end credits: nothing, offer the
+ * next episode ("Up next" card), or offer it and start it automatically after a countdown.
+ */
+export type videoAutoPlayNextModes = 'off' | 'prompt' | 'countdown';
 export type sortOrders = 'alphabetical' | 'reverseAlphabetical' | 'lastOpened' | 'reverseLastOpened' | 'recentlyAdded';
 
 export interface IMediaSource {
@@ -69,6 +74,17 @@ interface SettingsState {
   videoSubtitleLanguage: string | null
   /** Preferred audio language for the in-app video player; null = never chosen (keep the default). */
   videoAudioLanguage: string | null
+  /** Show the resume progress bar on movie / episode tiles and rows. */
+  videoShowProgressBar: boolean
+  /** Offer the subtitle / audio track picker (and apply the remembered languages) in the in-app video player. */
+  videoTrackPickerEnabled: boolean
+  /** Offer a playback speed control in the in-app video player (off = always normal speed). */
+  videoSpeedControlEnabled: boolean
+  /** In-app video playback speed (1 = normal), remembered across videos. */
+  videoPlaybackRate: number
+  videoAutoPlayNext: videoAutoPlayNextModes
+  /** Show a sort-order dropdown in the drawer (sidebar) for quick switching. */
+  showSidebarSort: boolean
 }
 
 // Define the initial state using that type
@@ -101,6 +117,12 @@ const initialState: SettingsState = {
   audiobookRewindSeconds: 10,
   videoSubtitleLanguage: null,
   videoAudioLanguage: null,
+  videoShowProgressBar: true,
+  videoTrackPickerEnabled: true,
+  videoSpeedControlEnabled: true,
+  videoPlaybackRate: 1,
+  videoAutoPlayNext: 'prompt',
+  showSidebarSort: false,
 }
 
 // Stable fallback for persisted state that predates bedtime mode, so selectors don't
@@ -208,10 +230,29 @@ export const settingsSlice = createSlice({
     setVideoAudioLanguage: (state, action: PayloadAction<string | null>) => {
       state.videoAudioLanguage = action.payload;
     },
+    setVideoShowProgressBar: (state, action: PayloadAction<boolean>) => {
+      state.videoShowProgressBar = action.payload;
+    },
+    setVideoTrackPickerEnabled: (state, action: PayloadAction<boolean>) => {
+      state.videoTrackPickerEnabled = action.payload;
+    },
+    setVideoSpeedControlEnabled: (state, action: PayloadAction<boolean>) => {
+      state.videoSpeedControlEnabled = action.payload;
+    },
+    setVideoPlaybackRate: (state, action: PayloadAction<number>) => {
+      if (!Number.isFinite(action.payload)) return;
+      state.videoPlaybackRate = Math.min(2, Math.max(0.5, action.payload));
+    },
+    setVideoAutoPlayNext: (state, action: PayloadAction<videoAutoPlayNextModes>) => {
+      state.videoAutoPlayNext = action.payload;
+    },
+    setShowSidebarSort: (state, action: PayloadAction<boolean>) => {
+      state.showSidebarSort = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setKeyboardHandling, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setKeyboardHandling, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage, setVideoShowProgressBar, setVideoTrackPickerEnabled, setVideoSpeedControlEnabled, setVideoPlaybackRate, setVideoAutoPlayNext, setShowSidebarSort } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -246,6 +287,16 @@ export const selectAudiobookPlaybackRate = (state: RootState): number => state.s
 export const selectAudiobookRewindSeconds = (state: RootState): number => state.settingsReducer.audiobookRewindSeconds ?? 10;
 export const selectVideoSubtitleLanguage = (state: RootState): string | null => state.settingsReducer.videoSubtitleLanguage ?? null;
 export const selectVideoAudioLanguage = (state: RootState): string | null => state.settingsReducer.videoAudioLanguage ?? null;
+export const selectVideoShowProgressBar = (state: RootState): boolean => state.settingsReducer.videoShowProgressBar ?? true;
+export const selectVideoTrackPickerEnabled = (state: RootState): boolean => state.settingsReducer.videoTrackPickerEnabled ?? true;
+export const selectVideoSpeedControlEnabled = (state: RootState): boolean => state.settingsReducer.videoSpeedControlEnabled ?? true;
+export const selectVideoPlaybackRate = (state: RootState): number => state.settingsReducer.videoPlaybackRate ?? 1;
+// A missing or stale/corrupt persisted value means the default ('prompt').
+export const selectVideoAutoPlayNext = (state: RootState): videoAutoPlayNextModes => {
+  const mode = state.settingsReducer.videoAutoPlayNext;
+  return mode === 'off' || mode === 'countdown' ? mode : 'prompt';
+};
+export const selectShowSidebarSort = (state: RootState): boolean => state.settingsReducer.showSidebarSort ?? false;
 export const selectBedtimeEnabled = (state: RootState) => state.settingsReducer.bedtimeEnabled ?? false;
 export const selectBedtimeStart = (state: RootState) => state.settingsReducer.bedtimeStart ?? '19:00';
 export const selectBedtimeEnd = (state: RootState) => state.settingsReducer.bedtimeEnd ?? '07:00';
