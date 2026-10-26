@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { router } from 'expo-router';
+import { useNavigation } from 'expo-router';
+import { StackActions } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { AudiobookPlayer } from '@/scripts/AudiobookPlayer';
@@ -14,10 +15,17 @@ const TAG = 'VideoPlayerScreen';
 
 const ERROR_MESSAGE = 'This file could not be played.';
 
-/** Closes the player, or goes home when it was opened without anything under it. */
-function closeScreen() {
-  if (router.canGoBack()) router.back();
-  else router.replace('/');
+/**
+ * Closes the player, or goes home when it was opened without anything under it. "Home" is the
+ * drawer by name: "/" is a route the root stack guards off, and the drawer picks its own initial
+ * section (the default page, or the first one bedtime allows).
+ */
+function useCloseScreen() {
+  const navigation = useNavigation();
+  return () => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.dispatch(StackActions.replace('(drawer)'));
+  };
 }
 
 /**
@@ -33,6 +41,7 @@ export default function VideoPlayerScreen() {
 }
 
 function NothingPlaying() {
+  const closeScreen = useCloseScreen();
   return (
     <View style={styles.center}>
       <StatusBar hidden />
@@ -45,6 +54,7 @@ function NothingPlaying() {
 function VideoPlayback({ request }: { request: VideoRequest }) {
   const { path, parsedPath, filename, title, startAt } = request;
   const [failed, setFailed] = useState(false);
+  const closeScreen = useCloseScreen();
 
   const player = useVideoPlayer(path, (p) => {
     // One tick a second is plenty for the progress tracker.

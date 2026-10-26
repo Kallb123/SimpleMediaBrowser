@@ -18,7 +18,6 @@ import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
 import Constants from 'expo-constants';
-import { useEditMode } from '@/contexts/EditModeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { exportJson, importJson, exportToFilesystem } from '@/scripts/ImportExportService';
@@ -156,7 +155,6 @@ export default function SettingsPrompt() {
   const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const theme = Colors[colorScheme];
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
-  const { drawerUnlocked } = useEditMode();
   const insets = useSafeAreaInsets();
   // See edititem.tsx for why we use the real header height here instead of
   // KeyboardAvoidingView's automaticOffset heuristic.
@@ -278,14 +276,6 @@ export default function SettingsPrompt() {
       return [] as IMediaSource[];
     }
   }, [mediaSources]);
-
-  useEffect(() => {
-    if (!drawerUnlocked) {
-      logger.warn('Settings', 'Blocked settings access while drawer is locked');
-      router.replace('/(drawer)/(home)');
-      return;
-    }
-  }, [drawerUnlocked]);
 
   useEffect(() => {
     try {

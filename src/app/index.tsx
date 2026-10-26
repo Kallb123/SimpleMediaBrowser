@@ -1,9 +1,10 @@
 import { View, StyleSheet } from 'react-native';
 
-// Root route rendered for a single frame while RootLayout's firstTimeSetupCheck
-// decides whether to redirect to /firsttime or /(drawer). Kept visually blank
-// (matching the native splash background) rather than the old Expo template
-// content, which used to flash before the redirect landed.
+// The startup URL "/" resolves to this route. RootLayout guards it off
+// (Stack.Protected guard={false}) so the stack opens on whichever screen the
+// first-time guards allow, which means this is never actually shown. Kept as a
+// trivial blank route (matching the native splash background) just so "/" has a
+// root route to resolve to.
 export default function HomeScreen() {
   return <View style={styles.container} />;
 }

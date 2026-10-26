@@ -6,7 +6,6 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
-import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
 import { StorageKeys } from '@/constants/StorageKeys';
@@ -14,6 +13,7 @@ import { useDispatch } from 'react-redux';
 import { setPassword, setEnableThumbnailGeneration } from '@/store/settingsReducer';
 import { AddMediaSource } from '@/components/ui/AddMediaSource';
 import { logger } from '@/scripts/Logger';
+import { useFirstTimeSetup } from '@/contexts/FirstTimeSetupContext';
 import Constants from 'expo-constants';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
@@ -23,6 +23,7 @@ export default function FirstTime() {
   const [sourceAdded, setSourceAdded] = useState(false);
   const [enableThumbnailGeneration, setEnableThumbnailGenerationLocal] = useState(false);
   const dispatch = useDispatch();
+  const { setSetupComplete } = useFirstTimeSetup();
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
   const insets = useSafeAreaInsets();
   const { scrollViewProps, extraBottomSpace, handleInputFocus, handleInputBlur } = useKeyboardAwareScroll();
@@ -36,9 +37,10 @@ export default function FirstTime() {
     }
     dispatch(setEnableThumbnailGeneration(enableThumbnailGeneration));
     await AsyncStorage.setItem(StorageKeys.FIRST_TIME_SETUP_KEY, JSON.stringify(false));
-    logger.log('FirstTime', 'First-time setup key written to AsyncStorage. Navigating to home.');
-    router.replace('/(drawer)/(home)');
-  }, [password, enableThumbnailGeneration, dispatch]);
+    logger.log('FirstTime', 'First-time setup key written to AsyncStorage. Opening the app.');
+    // The root layout's guards swap firsttime for the drawer.
+    setSetupComplete(true);
+  }, [password, enableThumbnailGeneration, dispatch, setSetupComplete]);
 
   const contentPlatformStyle = Platform.select({
     android: {

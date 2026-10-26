@@ -3,7 +3,7 @@
  * are reachable from the drawer. No runtime imports, so it is safe to use from
  * anywhere and trivially unit-testable.
  */
-import type { contentTypes } from '@/store/settingsReducer';
+import type { contentTypes, defaultPages } from '@/store/settingsReducer';
 
 /** Drawer route names of the media sections, in drawer order. */
 export type BedtimeSection = '(home)' | 'tv' | 'movies' | 'audiobooks';
@@ -67,4 +67,20 @@ export function bedtimeRestrictedSections(allowedTypes: readonly contentTypes[])
 /** First section (in BEDTIME_SECTIONS order) not in `restricted`, or null if all are restricted. */
 export function firstAllowedSection(restricted: ReadonlySet<BedtimeSection>): BedtimeSection | null {
   return BEDTIME_SECTIONS.find((s) => !restricted.has(s)) ?? null;
+}
+
+/** The drawer section a "default page" setting opens ('home' is the '(home)' route; unknown values fall back to it). */
+export function defaultPageSection(page: defaultPages): BedtimeSection {
+  return page === 'tv' || page === 'movies' || page === 'audiobooks' ? page : '(home)';
+}
+
+/**
+ * The section the drawer opens on: the default page's section unless bedtime restricts it,
+ * else the first allowed section. Falls back to the default's section only when nothing is
+ * allowed (callers avoid that case by never restricting every section).
+ */
+export function initialSection(page: defaultPages, restricted: ReadonlySet<BedtimeSection>): BedtimeSection {
+  const preferred = defaultPageSection(page);
+  if (!restricted.has(preferred)) return preferred;
+  return firstAllowedSection(restricted) ?? preferred;
 }

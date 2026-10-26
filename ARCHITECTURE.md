@@ -125,6 +125,7 @@ SimpleMediaBrowser/
     │
     ├── contexts/EditModeContext.tsx # React context: edit-mode on/off, drawer lock state, multi-select for edit mode
     ├── contexts/BedtimeContext.tsx  # React context: bedtime-mode state (active / lifted) and the drawer sections it locks
+    ├── contexts/FirstTimeSetupContext.tsx  # React context: whether first-time setup is done (drives the root Stack's guards)
     ├── constants/                   # Colors.ts, theme.ts (spacing/typography tokens), StorageKeys.ts (AsyncStorage keys)
     ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks), useThumbnailVersion
     ├── utils/viewScale.ts           # Maps the user's view-scale setting to a grid column count
@@ -160,15 +161,33 @@ turns it into `extra.router.root`, which both the dev server and
    color scheme (`system` | `light` | `dark` from settings).
 3. Once fonts are ready, it awaits `redux-persist` rehydration
    (`waitForPersistBootstrap()`), then awaits `startLibraryPersistence()` (§5)
-   so the library is in Redux before routing, then checks the
-   `firstTimeSetup` AsyncStorage key (`StorageKeys.FIRST_TIME_SETUP_KEY`).
-   - Not set / not `"false"` → `router.replace('/firsttime')`.
-   - Otherwise → redirect to the user's configured `defaultPage`
-     (`(drawer)/(home)`, `(drawer)/tv`, `(drawer)/movies`, or `(drawer)/audiobooks`).
+   so the library is in Redux before routing, then reads the
+   `firstTimeSetup` AsyncStorage key (`StorageKeys.FIRST_TIME_SETUP_KEY`):
+   setup is complete only when it is `"false"`. Until then it renders nothing
+   (the native splash stays up). The result is kept in `FirstTimeSetupContext`,
+   which `firsttime.tsx` flips when setup finishes.
 4. Renders a `Stack` with screens: `firsttime`, `(drawer)`, `+not-found`,
    `modal` (presentation: modal), `edititem`, `editposter` and `editrematch`
    (all presentation: modal), `mergeshows` (presentation: modal), `player` (presentation: modal),
    `videoplayer` (presentation: fullScreenModal, no header).
+
+**Route guards are declared on the navigators, not run as effects.** Expo
+Router's `Stack.Protected` / `Drawer.Protected guard={…}` removes a guarded
+route from its navigator, so it can't be reached or rendered; if the focused
+route becomes guarded, the navigator falls back to its first remaining screen
+in declared order. The rules:
+
+- Root `Stack`: `firsttime` only while setup is incomplete; `(drawer)` and the
+  modal screens only once it is complete. The template `index` route is always
+  guarded off: the startup URL `/` resolves to it, so the stack opens on the
+  first screen the guards allow instead.
+- `Drawer`: Settings and Debug Logs only while `drawerUnlocked`; each media
+  section only while bedtime doesn't restrict it (§10). The Drawer's
+  `initialRouteName` is the user's `defaultPage` section, or the first allowed
+  one when bedtime restricts it (`initialSection` in `utils/bedtime.ts`;
+  passing a guarded name would throw). The sections are declared in
+  `BEDTIME_SECTIONS` order, so the fallback when the visible section gets
+  locked is the same section `firstAllowedSection` picks.
 
 **Real navigation lives entirely under `(drawer)`.** `(drawer)/_layout.tsx`
 renders a custom drawer (`CustomDrawerContent`) with Home/TV/Movies/
@@ -613,7 +632,8 @@ progress on the normal scan banner and honour its Stop button, and both end by
 clearing expo-image's memory cache — refreshed art reuses the same file URIs,
 so the old bitmaps would otherwise stay on screen.
 
-The drawer (`(drawer)/_layout.tsx`) gates Settings, Debug Logs, and the
+The drawer (`(drawer)/_layout.tsx`) gates Settings, Debug Logs (both as
+`Drawer.Protected` routes, §4), and the
 Edit Mode toggle behind `drawerUnlocked`, which requires the
 `settingsPassword` (if set in settings) to unlock. This "parent mode" lets a
 primary user restrict a shared/kid device to just browsing and playing
@@ -640,10 +660,13 @@ entry checks also clear a previous lift. A 60 s interval re-evaluates the clock
 only (it does not clear a lift), so an app left open across the start time still
 locks. In the drawer, restricted sections show a bed icon; tapping one opens
 `PasswordPromptModal` (the shared password + recovery modal, also used by
-Unlock) and on success calls `liftBedtime()` and navigates there. `DrawerLayout`
-watches `useSegments()` and `router.replace`s off any restricted section to the
-first allowed one, and `firstTimeSetupCheck` in `app/_layout.tsx` does the same
-for the default page at startup to avoid a flash of a restricted screen.
+Unlock) and on success calls `liftBedtime()`, then navigates there once the
+section is back in the navigator. Each section is a `Drawer.Protected` route
+guarded by `restrictedSections` (§4), so a restricted section is never mounted:
+when one becomes restricted while visible, the drawer falls back to the first
+allowed section, and at startup the initial section skips a restricted
+`defaultPage`. Because the drawer needs at least one section, `BedtimeContext`
+restricts nothing (and logs a warning) if the settings would lock every one.
 
 ## 11. Logging & Diagnostics (`Logger.ts`)
 
@@ -813,8 +836,11 @@ Worth knowing before you go hunting for "why is there a duplicate of X":
   `web-badge.tsx`, `hint-row.tsx`) are **stock Expo Router template
   scaffolding** left over from `create-expo-app`/template upgrades. The
   real app's root `Stack` in `_layout.tsx` never routes to `(tabs)` or the
-  top-level `index`/`explore`, and always redirects into `(drawer)` (or
-  `firsttime`). `modal.tsx` is still wired as a Stack screen but is the
+  top-level `index`/`explore`, and always opens on `(drawer)` (or
+  `firsttime`). The top-level `index` must stay, though: `/` resolves to it,
+  and the root `Stack` guards it off so it opens on the first allowed screen
+  (§4); without it `/` would resolve to some other group's `index` (a drawer
+  section or `(tabs)`) instead of letting the guards pick. `modal.tsx` is still wired as a Stack screen but is the
   default template's "About" modal, not app-specific UI.
 - Two component naming conventions coexist side-by-side:
   **PascalCase** (`ThemedText.tsx`, `ThemedView.tsx`, `Collapsible.tsx`,

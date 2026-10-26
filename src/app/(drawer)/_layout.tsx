@@ -1,6 +1,5 @@
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { Drawer } from 'expo-router/drawer';
-import { router, useSegments } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { DrawerContentScrollView, DrawerItem, DrawerContentComponentProps } from '@react-navigation/drawer';
 import { CommonActions, DrawerActions, StackActions } from '@react-navigation/native';
@@ -8,25 +7,29 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { useBedtime } from '@/contexts/BedtimeContext';
 import { useSelector } from 'react-redux';
-import { selectPassword, selectMediaSources, selectRescanOnStartup } from '@/store/settingsReducer';
+import { selectPassword, selectMediaSources, selectRescanOnStartup, selectDefaultPage } from '@/store/settingsReducer';
 import { useState, useEffect } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { PasswordPromptModal } from '@/components/PasswordPromptModal';
 import { logger } from '@/scripts/Logger';
-import { BEDTIME_SECTIONS, firstAllowedSection, type BedtimeSection } from '@/utils/bedtime';
+import { initialSection, type BedtimeSection } from '@/utils/bedtime';
 
-const MAIN_ROUTES: string[] = [...BEDTIME_SECTIONS];
-
-type DrawerRoute = DrawerContentComponentProps['state']['routes'][number];
+/**
+ * The media sections shown in the drawer's main list. The order matters: it is the declared
+ * screen order, and when the focused screen is removed from the navigator (guarded) the drawer
+ * falls back to the first remaining one, so it must match BEDTIME_SECTIONS (firstAllowedSection).
+ */
+const MEDIA_SECTIONS: readonly { name: BedtimeSection; drawerLabel: string; title: string }[] = [
+  { name: '(home)', drawerLabel: '🏠 Home', title: 'Home' },
+  { name: 'tv', drawerLabel: '📺 TV', title: 'TV' },
+  { name: 'movies', drawerLabel: '🎬 Movies', title: 'Movies' },
+  { name: 'audiobooks', drawerLabel: '🎧 Audiobooks', title: 'Audiobooks' },
+];
 
 /** What the shared password modal is asking for. */
 type PasswordPrompt =
   | { kind: 'unlock' }
-  | { kind: 'bedtime'; route: DrawerRoute; title: string };
-
-function isBedtimeSection(name: string | undefined): name is BedtimeSection {
-  return BEDTIME_SECTIONS.some((s) => s === name);
-}
+  | { kind: 'bedtime'; section: BedtimeSection; title: string };
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { editMode, setEditMode, drawerUnlocked, setDrawerUnlocked } = useEditMode();
@@ -35,12 +38,21 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
   // The prompt content outlives its visibility so the text doesn't change during the modal's fade-out.
   const [prompt, setPrompt] = useState<PasswordPrompt>({ kind: 'unlock' });
   const [promptVisible, setPromptVisible] = useState(false);
+  // A bedtime-locked section the parent just unlocked; we navigate once it is back in the navigator.
+  const [pendingSection, setPendingSection] = useState<BedtimeSection | null>(null);
   const colorScheme = useColorScheme() ?? 'light';
 
   const currentRouteName = props.state.routes[props.state.index]?.name;
 
-  // Only the media sections go in the main list; the rest are behind the parent-mode unlock.
-  const mainRoutes = props.state.routes.filter(r => MAIN_ROUTES.includes(r.name));
+  // Navigating to a guarded route is silently dropped (and not replayed), so after a bedtime
+  // unlock wait until the section reappears in the navigator.
+  const { routeNames, key: stateKey } = props.state;
+  const { dispatch } = props.navigation;
+  useEffect(() => {
+    if (!pendingSection || !routeNames.includes(pendingSection)) return;
+    dispatch({ ...CommonActions.navigate(pendingSection), target: stateKey });
+    setPendingSection(null);
+  }, [pendingSection, routeNames, stateKey, dispatch]);
 
   const handleUnlockPress = () => {
     if (!settingsPassword) {
@@ -57,11 +69,9 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     setDrawerUnlocked(false);
     setEditMode(false);
     setPromptVisible(false);
-    // Locking re-arms bedtime if it was lifted; DrawerLayout's guard then moves us off a restricted section.
+    // Locking re-arms bedtime if it was lifted. Logs, settings and any newly restricted section
+    // then leave the navigator (DrawerLayout's guards), which moves us to the first available section.
     recheckBedtime();
-    if (currentRouteName === 'logs') {
-      props.navigation.navigate('(home)');
-    }
   };
 
   const handleEditModeToggle = () => {
@@ -83,19 +93,12 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     props.navigation.navigate('logs');
   };
 
-  const navigateToRoute = (route: DrawerRoute) => {
-    props.navigation.dispatch({
-      ...CommonActions.navigate(route),
-      target: props.state.key,
-    });
-  };
-
-  const unlockBedtimeSection = (route: DrawerRoute) => {
+  const unlockBedtimeSection = (section: BedtimeSection) => {
     liftBedtime();
-    navigateToRoute(route);
+    setPendingSection(section);
   };
 
-  const handleRestrictedPress = (route: DrawerRoute, title: string) => {
+  const handleRestrictedPress = (section: BedtimeSection, title: string) => {
     if (!settingsPassword) {
       Alert.alert(
         `${title} is locked`,
@@ -106,14 +109,14 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
             text: 'Unlock',
             onPress: () => {
               logger.log('Bedtime', `${title} unlocked for bedtime (no password set)`);
-              unlockBedtimeSection(route);
+              unlockBedtimeSection(section);
             },
           },
         ],
       );
       return;
     }
-    setPrompt({ kind: 'bedtime', route, title });
+    setPrompt({ kind: 'bedtime', section, title });
     setPromptVisible(true);
   };
 
@@ -122,27 +125,36 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     if (prompt.kind === 'unlock') {
       setDrawerUnlocked(true);
     } else {
-      unlockBedtimeSection(prompt.route);
+      unlockBedtimeSection(prompt.section);
     }
   };
 
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={styles.drawerContent}>
-      {mainRoutes.map((route) => {
-        const focused = route.name === currentRouteName;
-        const { drawerLabel, title } = props.descriptors[route.key].options;
-        const label = typeof drawerLabel === 'string' ? drawerLabel : (title ?? route.name);
-        const restricted = isBedtimeSection(route.name) && restrictedSections.has(route.name);
+      {MEDIA_SECTIONS.map(({ name, drawerLabel: label, title }) => {
+        // Restricted sections are removed from the navigator, so they have no route here.
+        const restricted = restrictedSections.has(name);
+        if (restricted) {
+          return (
+            <DrawerItem
+              key={name}
+              label={label}
+              onPress={() => handleRestrictedPress(name, title)}
+              icon={({ color, size }) => <Ionicons name="bed" color={color} size={size} />}
+              labelStyle={styles.restrictedLabel}
+              accessibilityLabel={`${title}, locked for bedtime`}
+            />
+          );
+        }
+        const route = props.state.routes.find((r) => r.name === name);
+        if (!route) return null;
+        const focused = name === currentRouteName;
         // Each section is a stack of folder levels. Sections other than the current one are
         // always at their root (popToTopOnBlur), so only the current one can be deeper; its
         // entry then shows a back arrow, since tapping it returns to the section root.
         const nestedState = route.state;
         const isDeep = (nestedState?.index ?? 0) > 0;
         const onPress = () => {
-          if (restricted) {
-            handleRestrictedPress(route, title ?? route.name);
-            return;
-          }
           if (isDeep && nestedState?.key) {
             props.navigation.dispatch({ ...StackActions.popToTop(), target: nestedState.key });
           }
@@ -157,13 +169,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
             label={label}
             focused={focused}
             onPress={onPress}
-            icon={restricted
-              ? ({ color, size }) => <Ionicons name="bed" color={color} size={size} />
-              : isDeep ? ({ color, size }) => <Ionicons name="arrow-back" color={color} size={size} /> : undefined}
-            labelStyle={restricted ? styles.restrictedLabel : undefined}
-            accessibilityLabel={restricted
-              ? `${title ?? label}, locked for bedtime`
-              : isDeep ? `Back to ${title ?? label}` : undefined}
+            icon={isDeep ? ({ color, size }) => <Ionicons name="arrow-back" color={color} size={size} /> : undefined}
+            accessibilityLabel={isDeep ? `Back to ${title}` : undefined}
           />
         );
       })}
@@ -220,24 +227,9 @@ export default function DrawerLayout() {
     const theme = (colorScheme ?? 'light') as 'light' | 'dark';
     const mediaSources = useSelector(selectMediaSources);
     const rescanOnStartup = useSelector(selectRescanOnStartup);
+    const defaultPage = useSelector(selectDefaultPage);
     const { restrictedSections } = useBedtime();
-    // Cast: the typed-routes segment union doesn't include arbitrary section names.
-    const segments = useSegments() as string[];
-    const currentSection = segments[0] === '(drawer)' ? segments[1] : undefined;
-
-    // Bedtime guard: whenever the visible media section becomes restricted (foreground entry
-    // check, the Lock button, or the clock passing the bedtime start), move to an allowed one.
-    // The target is never restricted, so this cannot loop.
-    useEffect(() => {
-      if (!isBedtimeSection(currentSection) || !restrictedSections.has(currentSection)) return;
-      const target = firstAllowedSection(restrictedSections);
-      if (!target) {
-        logger.warn('Bedtime', `${currentSection} is restricted but no section is allowed – not redirecting`);
-        return;
-      }
-      logger.log('Bedtime', `${currentSection} is locked for bedtime – redirecting to ${target}`);
-      router.replace(target === '(home)' ? '/(drawer)/(home)' : `/(drawer)/${target}`);
-    }, [currentSection, restrictedSections]);
+    const { drawerUnlocked } = useEditMode();
 
     useEffect(() => {
       if (!rescanOnStartup) {
@@ -256,65 +248,45 @@ export default function DrawerLayout() {
       });
     // Empty dependency array is intentional: this effect should fire only once on
     // mount (startup). redux-persist rehydration completes before the drawer layout
-    // renders (guaranteed by the await in _layout.tsx's firstTimeSetupCheck), so
+    // renders (the root layout awaits it before it renders the navigator), so
     // rescanOnStartup and mediaSources are already up-to-date at this point.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
   
+    // Guarded screens are removed from the navigator, so they can't be reached or rendered;
+    // if one is focused when it becomes guarded, the drawer falls back to the first remaining
+    // screen (MEDIA_SECTIONS order). initialRouteName must itself never be guarded or the
+    // drawer throws, hence initialSection.
     return (
         <Drawer
+          initialRouteName={initialSection(defaultPage, restrictedSections)}
           drawerContent={(props) => <CustomDrawerContent {...props} />}
           screenOptions={{
             headerTintColor: Colors[theme].text,
             headerStyle: { backgroundColor: Colors[theme].background },
         }}>
-            <Drawer.Screen
-            name="(home)"
-            options={{
-                ...mediaSectionOptions,
-                drawerLabel: '🏠 Home',
-                title: "Home",
-            }}
-            />
-            <Drawer.Screen
-            name="tv"
-            options={{
-                ...mediaSectionOptions,
-                drawerLabel: '📺 TV',
-                title: "TV",
-            }}
-            />
-            <Drawer.Screen
-            name="movies"
-            options={{
-                ...mediaSectionOptions,
-                drawerLabel: '🎬 Movies',
-                title: "Movies",
-            }}
-            />
-            <Drawer.Screen
-            name="audiobooks"
-            options={{
-                ...mediaSectionOptions,
-                drawerLabel: '🎧 Audiobooks',
-                title: "Audiobooks",
-            }}
-            />
-            <Drawer.Screen
-            name="logs"
-            options={{
-                drawerLabel: '🪲 Debug Logs',
-                title: "Debug Logs",
-            }}
-            />
-            <Drawer.Screen
-            name="settings"
-            options={{
-                drawerLabel: '⚙️ Settings',
-                title: "Settings",
-                drawerItemStyle: { display: 'none' },
-            }}
-            />
+            {MEDIA_SECTIONS.map(({ name, drawerLabel, title }) => (
+              <Drawer.Protected key={name} guard={!restrictedSections.has(name)}>
+                <Drawer.Screen name={name} options={{ ...mediaSectionOptions, drawerLabel, title }} />
+              </Drawer.Protected>
+            ))}
+            <Drawer.Protected guard={drawerUnlocked}>
+              <Drawer.Screen
+              name="logs"
+              options={{
+                  drawerLabel: '🪲 Debug Logs',
+                  title: "Debug Logs",
+              }}
+              />
+              <Drawer.Screen
+              name="settings"
+              options={{
+                  drawerLabel: '⚙️ Settings',
+                  title: "Settings",
+                  drawerItemStyle: { display: 'none' },
+              }}
+              />
+            </Drawer.Protected>
         </Drawer>
     );
 }

@@ -9,7 +9,7 @@ import {
   selectBedtimeEnd,
   selectBedtimeStart,
 } from '@/store/settingsReducer';
-import { bedtimeRestrictedSections, isWithinBedtime, type BedtimeSection } from '@/utils/bedtime';
+import { bedtimeRestrictedSections, firstAllowedSection, isWithinBedtime, type BedtimeSection } from '@/utils/bedtime';
 
 /** How often bedtimeActive is re-evaluated while bedtime mode is enabled. */
 const BEDTIME_TICK_MS = 60_000;
@@ -21,7 +21,11 @@ const NO_SECTIONS: ReadonlySet<BedtimeSection> = new Set<BedtimeSection>();
 interface BedtimeContextType {
   /** Bedtime mode is enabled and the current time is inside the configured window. */
   bedtimeActive: boolean;
-  /** Drawer sections currently locked away (empty when inactive, lifted, or parent mode is unlocked). */
+  /**
+   * Drawer sections currently locked away. Empty when inactive, lifted, or parent mode is
+   * unlocked, and also when the settings would lock every section (e.g. no allowed types):
+   * the drawer needs at least one screen, so bedtime then restricts nothing.
+   */
   restrictedSections: ReadonlySet<BedtimeSection>;
   /** "HH:MM" at which bedtime ends, for messages like "locked until 07:00". */
   bedtimeEnd: string;
@@ -107,10 +111,17 @@ export function BedtimeProvider({ children }: { children: React.ReactNode }) {
   // evaluatedActive can lag one render behind a settings change until the entry check runs.
   const bedtimeActive = enabled && evaluatedActive;
 
-  const restrictedSections = useMemo<ReadonlySet<BedtimeSection>>(
-    () => (!bedtimeActive || lifted || drawerUnlocked ? NO_SECTIONS : bedtimeRestrictedSections(allowedTypes)),
-    [bedtimeActive, lifted, drawerUnlocked, allowedTypes],
-  );
+  const configuredRestriction = useMemo(() => bedtimeRestrictedSections(allowedTypes), [allowedTypes]);
+  const enforced = bedtimeActive && !lifted && !drawerUnlocked;
+  const nothingAllowed = firstAllowedSection(configuredRestriction) === null;
+
+  const restrictedSections = enforced && !nothingAllowed ? configuredRestriction : NO_SECTIONS;
+
+  useEffect(() => {
+    if (enforced && nothingAllowed) {
+      logger.warn('Bedtime', 'Bedtime would lock every section (no allowed types) – not restricting anything');
+    }
+  }, [enforced, nothingAllowed]);
 
   // Memoised for the same reason as EditModeContext's value: consumers use these as hook dependencies.
   const value = useMemo(
