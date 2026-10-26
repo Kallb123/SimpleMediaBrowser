@@ -71,7 +71,7 @@ SimpleMediaBrowser/
     │   │   │   ├── index.tsx    #   Section root
     │   │   │   └── folder.tsx   #   One folder level (show / season / multi-part audiobook), pushed per level
     │   │   ├── tv/, movies/, audiobooks/   # Same three files, mediaFilter="tv" / "movies" / "audiobooks"
-    │   │   ├── settings.tsx     # Media sources, API keys, view options, import/export, parent-mode password
+    │   │   ├── settings.tsx     # Category list → per-category pages (two-pane on tablets); one shared draft saved by Save
     │   │   └── logs.tsx         # Debug log viewer (reads Logger's in-memory/on-disk log)
     │   ├── (tabs)/ , index.tsx, explore.tsx   # Stock Expo template tab demo — NOT part of the real navigation flow (see §10)
     │   └── +html.tsx, +not-found.tsx          # Expo Router web/404 conventions
@@ -210,6 +210,16 @@ hardware back. The drawer sets `popToTopOnBlur` on the sections so leaving one
 resets it to its root, and its custom item list also pops the current
 section to its root when tapped — that entry shows a back arrow while the
 section is deeper than its root.
+
+Settings (`(drawer)/settings.tsx`) is a single drawer screen laid out like
+the platform's own settings: a list of categories (Media folders, Metadata,
+Appearance, Browsing, Video player, Audiobook player, Parental controls,
+Backup & restore, Troubleshooting), each with a one-line summary, that opens
+that category's page. On a phone the list and a page are shown one at a time
+(header back arrow and Android back return to the list); on a tablet-sized
+window they sit side by side. The pages are not routes: they are local state
+in the one component, so every page edits the same draft, which the header's
+Save writes in one go (media folders apply immediately, as before).
 
 Screens are thin: every section's `index.tsx` and `folder.tsx` render
 `<MediaBrowserScreen mediaFilter="..." location={...} />` — the
