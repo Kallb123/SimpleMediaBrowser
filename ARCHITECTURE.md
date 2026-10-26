@@ -81,7 +81,8 @@ SimpleMediaBrowser/
     │   ├── MediaSectionStack.tsx    # Shared native-stack layout for the four media sections (+ the mini-player bar)
     │   ├── MiniPlayer.tsx           # "Now playing" bar under the browse screens; tap opens the /player modal
     │   ├── OptionSheet.tsx          # Small modal option list (player speed / sleep-timer pickers)
-    │   ├── ui/                      # PosterBox, ListItem, WatchedBadge, MediaItem, DirectoryLink, FileLink, AddMediaSource
+    │   ├── VideoTrackPicker.tsx     # Subtitle / audio track sheet over the in-app video player
+    │   ├── ui/                      # PosterBox, ListItem, WatchedBadge, Listen/WatchProgressBar (+ ProgressStrip), MediaItem, DirectoryLink, FileLink, AddMediaSource
     │   ├── ThemedText.tsx, ThemedView.tsx, ThemedTextInput.tsx  # Theme-aware primitives used by real app screens
     │   ├── themed-text.tsx, themed-view.tsx, animated-icon*, app-tabs*, web-badge.tsx, hint-row.tsx
     │   │                             # ^ Newer-template kebab-case components used only by the leftover
@@ -128,7 +129,7 @@ SimpleMediaBrowser/
     ├── contexts/BedtimeContext.tsx  # React context: bedtime-mode state (active / lifted) and the drawer sections it locks
     ├── contexts/FirstTimeSetupContext.tsx  # React context: whether first-time setup is done (drives the root Stack's guards)
     ├── constants/                   # Colors.ts, theme.ts (spacing/typography tokens), StorageKeys.ts (AsyncStorage keys)
-    ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks), useThumbnailVersion
+    ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks), useThumbnailVersion, useVideoTracks (player track state + remembered languages)
     ├── utils/viewScale.ts           # Maps the user's view-scale setting to a grid column count
     └── types/                       # Ambient type declarations (require.context, *.css modules)
 ```
@@ -228,6 +229,8 @@ Redux Toolkit with three slices, combined in `store/store.ts`:
   `audiobookPlayer` and `videoPlayer` (each `inapp` | `external`, default `inapp`),
   `audiobookPlaybackRate` (0.5–2, default 1, set from the player screen),
   `audiobookRewindSeconds` (rewind on resume, 0 = off, default 10),
+  `videoSubtitleLanguage` / `videoAudioLanguage` (the in-app video player's remembered
+  track languages, default null = never chosen; subtitles can also be `'off'`, see §13),
   `appColorScheme`, and `settingsPassword` (parent-mode lock).
 - **`libraryReducer`** — everything produced by scanning/enrichment:
   `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`,
@@ -446,6 +449,11 @@ Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
   end (it is then marked watched). `resumePosition` (`videoProgress.ts`) decides whether an
   entry is worth offering to resume. It sits beside `watched`, so rescans keep it, and is
   exported in the JSON backup with the watched marks and merged on import (later `updatedAt` wins).
+  `WatchProgressBar` (inside `PosterBox` / `ListItem`, on every cell that is not an audiobook)
+  draws the same strip as `ListenProgressBar` (`ProgressStrip`). A file's bar selects only its
+  own entry and shows `watchProgressFraction` (nothing unless `resumePosition` would resume and
+  the duration is known). A show or season folder resolves its `watchKeys` and shows
+  `latestWatchProgressFraction`: the episode in progress with the latest `updatedAt`.
 
 Provider/data-source resolution follows a strict override chain, applied
 consistently in `MetadataService` and the UI: **per-item override →
@@ -773,6 +781,22 @@ episode in `MediaBrowserScreen` runs `playVideoInApp`:
   (`AudiobookPlayer.pause()`, so the two never play over each other), seeks to `startAt` and
   plays. There is no background playback and no Picture-in-Picture: expo-video pauses when
   the app is backgrounded, and closing the screen releases the player.
+- **Subtitle and audio tracks** (`hooks/useVideoTracks.ts`, `components/VideoTrackPicker.tsx`).
+  The hook follows the player's embedded tracks (`sourceLoad`, `available*TracksChange`,
+  `*TrackChange`, plus the player's current values, since it may be ahead of the subscription).
+  The first time each list is non-empty it applies the remembered language from settings once
+  (so a choice made during playback is never undone): subtitles `'off'` sets
+  `player.subtitleTrack = null`; a language picks the track `preferredTrack`
+  (`VideoPlayback.ts`) matches, exactly or by primary subtag ('en' finds 'en-GB'), else the
+  player's default stays. Audio is only switched when there are two or more tracks. A small "CC"
+  button (top right) shows when there is a subtitle track or a second audio track. expo-video
+  does not report when its native controls show, so the button is up while paused and for 4 s
+  after playback starts, and is hidden behind a problem overlay. It opens a sheet listing
+  "Subtitles" (Off + each track) and "Audio" (only with two or more); labels come from
+  `trackLabels`, which tells identical labels apart. A choice is applied to the player and
+  remembered in `videoSubtitleLanguage` / `videoAudioLanguage` (a track without a language is
+  applied but not remembered). Both settings go into the JSON backup. Sidecar `.srt` files are
+  not loaded.
 - **Errors.** Three problems cover the video with an overlay (the screen's `Problem` state);
   each offers "Open in external player" (`openMediaInExternalApp`, then closes the screen; it
   does not mark the file watched) and "Close". An `error` always replaces the other two.
