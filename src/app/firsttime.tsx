@@ -1,10 +1,10 @@
-import { StyleSheet, Button, Switch, ScrollView, View, Platform } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { StyleSheet, Button, Switch, View, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HelloWave } from '@/components/HelloWave';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
+import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
@@ -26,7 +26,8 @@ export default function FirstTime() {
   const { setSetupComplete } = useFirstTimeSetup();
   const appVersion = Constants.expoConfig?.version ?? 'unknown';
   const insets = useSafeAreaInsets();
-  const { scrollViewProps, extraBottomSpace, handleInputFocus, handleInputBlur } = useKeyboardAwareScroll();
+  const keyboard = useKeyboardAwareScroll();
+  const { handleInputFocus, handleInputBlur } = keyboard;
 
   logger.log('FirstTime', 'FirstTime screen rendered');
 
@@ -52,10 +53,11 @@ export default function FirstTime() {
   return (
     <SafeAreaView style={styles.container}>
     <ThemedView style={styles.container}>
-    <KeyboardAvoidingView style={styles.container} behavior="padding" automaticOffset>
-    <ScrollView
-      {...scrollViewProps}
-      contentContainerStyle={[styles.contentContainer, contentPlatformStyle, { paddingBottom: 20 + extraBottomSpace }]}
+    <KeyboardAwareForm
+      keyboard={keyboard}
+      automaticOffset
+      avoidingViewStyle={styles.container}
+      contentContainerStyle={[styles.contentContainer, contentPlatformStyle, { paddingBottom: 20 }]}
     >
       <View style={styles.header}>
         <ThemedText type="title">Welcome to Zibo</ThemedText>
@@ -116,8 +118,7 @@ export default function FirstTime() {
       <View style={styles.footerContainer}>
         <ThemedText style={styles.footerText}>Version {appVersion}</ThemedText>
       </View>
-    </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareForm>
     </ThemedView>
     </SafeAreaView>
   );

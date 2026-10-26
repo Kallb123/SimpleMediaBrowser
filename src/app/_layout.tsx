@@ -15,6 +15,7 @@ import { store, waitForPersistBootstrap } from '@/store/store';
 import '@/store/wireServices';
 import { startLibraryPersistence } from '@/store/libraryPersistence';
 import { logger } from '@/scripts/Logger';
+import { startKeyboardDiagnostics } from '@/scripts/keyboardDiagnostics';
 import { EditModeProvider } from '@/contexts/EditModeContext';
 import { BedtimeProvider } from '@/contexts/BedtimeContext';
 import { FirstTimeSetupProvider } from '@/contexts/FirstTimeSetupContext';
@@ -24,6 +25,7 @@ import { selectAppColorScheme } from '@/store/settingsReducer';
 SplashScreen.preventAutoHideAsync();
 
 logger.log('RootLayout', 'App starting up');
+startKeyboardDiagnostics();
 
 export default function RootLayout() {
   return (

@@ -9,6 +9,7 @@ import {
   type NativeSyntheticEvent,
   type View,
 } from 'react-native';
+import { logger } from '@/scripts/Logger';
 
 /** Breathing room kept below the focused input once it has been revealed. */
 export const REVEAL_MARGIN = 24;
@@ -245,6 +246,7 @@ export function useKeyboardAwareScroll() {
       return;
     }
     measureFocusedInput((inputTop) => {
+      logger.log('Keyboard', 'No keyboard reaction after focus; parking the focused input at the top');
       scrollRef.current?.scrollTo({ y: planTopParkScroll(inputTop), animated: true });
     });
   }, [measureFocusedInput, visibleHeight]);

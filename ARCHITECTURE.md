@@ -688,6 +688,19 @@ navigation code are the only way to debug a release build in the field.
 The in-app **Debug Logs** screen (`(drawer)/logs.tsx`) surfaces this log for
 on-device inspection/sharing without `adb`.
 
+**Keyboard handling experiment (issue 244).** The four screens with text
+inputs (`edititem`, `editrematch`, `firsttime`, `(drawer)/settings`) render
+`components/KeyboardAwareForm.tsx`, which switches on the temporary
+`keyboardHandling` setting (Settings > Troubleshooting, default `'legacy'`).
+`'legacy'` is `hooks/useKeyboardAwareScroll.ts` plus `KeyboardAvoidingView`
+(the hook exists because Amazon Fire tablets don't report the keyboard to the
+app). `'library'` is react-native-keyboard-controller's
+`KeyboardAwareScrollView`, with the hook's handlers still wired to the inputs
+but inert because its refs are never attached. `scripts/keyboardDiagnostics.ts`
+logs (tag `Keyboard`) which keyboard events the device actually delivers, so
+the result of testing on a Fire shows up in Debug Logs. Remove the setting,
+the wrapper and one of the two paths once the experiment is settled.
+
 ## 12. Theming
 
 `constants/Colors.ts` and `constants/theme.ts` define the light/dark palette
