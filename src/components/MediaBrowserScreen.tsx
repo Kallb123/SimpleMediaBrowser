@@ -7,6 +7,7 @@ import { File } from 'expo-file-system';
 import { Image } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, Stack, router } from 'expo-router';
+import { useRoute } from '@react-navigation/native';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder, selectAudiobookPlayer, selectVideoPlayer } from '@/store/settingsReducer';
@@ -586,6 +587,7 @@ function buildBaseDisplayItems(
 const EMPTY_LIBRARY: IMediaLibrary = {};
 const EMPTY_MOVIES: IMediaObject[] = [];
 const EMPTY_AUDIOBOOKS: IMediaAudiobook[] = [];
+const EMPTY_SELECTION: Set<string> = new Set();
 
 const CARD_GAP = 8;
 /** Portrait mode: minimum number of grid columns shown at the lowest viewScale. */
@@ -655,7 +657,16 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   const mediaOverrides = useSelector(selectMediaOverrides);
 
   const dispatch = useDispatch();
-  const { editMode, selectedItems, toggleItemSelection, clearItemSelection } = useEditMode();
+  const { editMode, selectedItems: contextSelection, selectionOwner, toggleItemSelection: toggleOwnedSelection, clearItemSelection: clearOwnedSelection } = useEditMode();
+  // The edit-mode selection is app-wide but belongs to the screen that made it. Every folder
+  // level stays mounted under the one on top, so each level must treat a selection owned by
+  // another route as empty, or a parent would show (and act on) items picked in a child.
+  const routeKey = useRoute().key;
+  const selectedItems = selectionOwner === routeKey ? contextSelection : EMPTY_SELECTION;
+  const toggleItemSelection = useCallback((key: string) => toggleOwnedSelection(key, routeKey), [toggleOwnedSelection, routeKey]);
+  const clearItemSelection = useCallback(() => clearOwnedSelection(routeKey), [clearOwnedSelection, routeKey]);
+  // Drop our selection when this screen is popped so it can't linger for an unmounted owner.
+  useEffect(() => () => clearOwnedSelection(routeKey), [clearOwnedSelection, routeKey]);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
