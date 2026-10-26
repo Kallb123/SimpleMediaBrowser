@@ -132,7 +132,7 @@ done.
 | Navigation structure | `src/app/_layout.tsx`, `src/app/(drawer)/_layout.tsx`, ARCHITECTURE.md §4 |
 | Edit mode / overrides / parent lock | `src/contexts/EditModeContext.tsx`, `src/app/edititem.tsx`, `src/app/editposter.tsx`, `src/app/editrematch.tsx`, `src/scripts/posterSources.ts`, `src/app/mergeshows.tsx` |
 | In-app audiobook playback / resume | `src/scripts/AudiobookPlayer.ts`, `src/app/player.tsx`, ARCHITECTURE.md §13 |
-| In-app video playback / resume | `src/app/videoplayer.tsx`, `src/scripts/VideoProgressTracker.ts`, `src/scripts/videoProgress.ts`, ARCHITECTURE.md §13 |
+| In-app video playback / resume / tracks | `src/app/videoplayer.tsx`, `src/scripts/VideoProgressTracker.ts`, `src/scripts/videoProgress.ts`, `src/hooks/useVideoTracks.ts`, ARCHITECTURE.md §13 |
 | App-wide logging | `src/scripts/Logger.ts`, `src/app/(drawer)/logs.tsx` |
 
 ## Notes for future edits to this file

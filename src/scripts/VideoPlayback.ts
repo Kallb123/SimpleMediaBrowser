@@ -2,7 +2,7 @@ import { episodeDisplayLabel, movieDisplayLabel, showDisplayLabel } from '@/scri
 // Type-only imports, so this module (and the tests that load it) never pulls in the store.
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { LibraryState } from '@/store/libraryReducer';
-import type { VideoTrack } from 'expo-video';
+import type { AudioTrack, SubtitleTrack, VideoTrack } from 'expo-video';
 
 /** What the video player screen should play. */
 export interface VideoRequest {
@@ -67,4 +67,56 @@ export function resolveVideoRequest(
 export function unsupportedVideoTrack(tracks: readonly Pick<VideoTrack, 'isSupported' | 'mimeType'>[]): string | null {
     if (tracks.length === 0 || !tracks.every((t) => t.isSupported === false)) return null;
     return tracks[0].mimeType ?? 'unknown';
+}
+
+/** The fields of an audio or subtitle track that the picker reads. */
+type LanguageTrack = Pick<AudioTrack | SubtitleTrack, 'id' | 'language' | 'label' | 'name'>;
+
+/** The language's primary subtag, lowercased: 'en-GB' and 'en_US' both give 'en'. */
+const primaryLanguage = (language: string) => language.toLowerCase().split(/[-_]/)[0];
+
+/**
+ * The track to use for a remembered language: the first with exactly that code, else the first
+ * sharing its primary subtag ('en' finds 'en-GB'), compared case-insensitively. Codes are not
+ * translated between 2- and 3-letter forms; the remembered code comes from a track's own
+ * `language`, so the same file family reports it the same way. Null when nothing matches.
+ */
+export function preferredTrack<T extends Pick<LanguageTrack, 'language'>>(tracks: readonly T[], language: string): T | null {
+    const wanted = language.trim().toLowerCase();
+    if (!wanted) return null;
+    return tracks.find((t) => t.language?.toLowerCase() === wanted)
+        ?? tracks.find((t) => t.language && primaryLanguage(t.language) === primaryLanguage(wanted))
+        ?? null;
+}
+
+/** Whether two tracks (possibly distinct objects from different reads) are the same one. */
+export function sameTrack(a: LanguageTrack | null | undefined, b: LanguageTrack | null | undefined): boolean {
+    if (!a || !b) return false;
+    if (a.id !== undefined && b.id !== undefined) return a.id === b.id;
+    return a.language === b.language && a.label === b.label && a.name === b.name;
+}
+
+/** A readable name for one track: its label, else its name, else its language, else 'Unknown'. */
+export function trackLabel(track: Pick<LanguageTrack, 'label' | 'name' | 'language'>): string {
+    return track.label?.trim() || track.name?.trim() || track.language?.trim() || 'Unknown';
+}
+
+/**
+ * Labels for a list of tracks, one per track in order. Tracks that would read the same (two
+ * English audio tracks) get their `name` appended when it tells them apart, then a running number.
+ */
+export function trackLabels(tracks: readonly LanguageTrack[]): string[] {
+    const base = tracks.map(trackLabel);
+    const named = tracks.map((t, i) => {
+        const name = t.name?.trim();
+        const duplicated = base.filter((b) => b === base[i]).length > 1;
+        return duplicated && name && name !== base[i] ? `${base[i]} - ${name}` : base[i];
+    });
+    const seen = new Map<string, number>();
+    return named.map((label) => {
+        if (named.filter((n) => n === label).length < 2) return label;
+        const n = (seen.get(label) ?? 0) + 1;
+        seen.set(label, n);
+        return `${label} ${n}`;
+    });
 }

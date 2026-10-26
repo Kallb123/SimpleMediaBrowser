@@ -146,4 +146,15 @@ describe('importJson listenProgress', () => {
     expect(mockStore.getState().settingsReducer.audiobookPlaybackRate).toBe(2);
     expect(mockStore.getState().settingsReducer.audiobookRewindSeconds).toBe(300);
   });
+
+  it('imports the preferred video languages, ignoring non-strings and empty strings', async () => {
+    await importFile({ settings: { videoSubtitleLanguage: 'off', videoAudioLanguage: 'ja' } });
+    expect(mockStore.getState().settingsReducer.videoSubtitleLanguage).toBe('off');
+    expect(mockStore.getState().settingsReducer.videoAudioLanguage).toBe('ja');
+    await importFile({ settings: { videoSubtitleLanguage: 5, videoAudioLanguage: '' } });
+    expect(mockStore.getState().settingsReducer.videoSubtitleLanguage).toBe('off');
+    expect(mockStore.getState().settingsReducer.videoAudioLanguage).toBe('ja');
+    await importFile({ settings: { videoSubtitleLanguage: null } });
+    expect(mockStore.getState().settingsReducer.videoSubtitleLanguage).toBeNull();
+  });
 });

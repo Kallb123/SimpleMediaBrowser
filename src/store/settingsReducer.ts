@@ -55,6 +55,13 @@ interface SettingsState {
   audiobookPlaybackRate: number
   /** Seconds the in-app audiobook player steps back when resuming after a pause; 0 = off. */
   audiobookRewindSeconds: number
+  /**
+   * Preferred subtitle language for the in-app video player: null = never chosen (keep the
+   * player's default), 'off' = subtitles turned off, otherwise a language code from the track.
+   */
+  videoSubtitleLanguage: string | null
+  /** Preferred audio language for the in-app video player; null = never chosen (keep the default). */
+  videoAudioLanguage: string | null
 }
 
 // Define the initial state using that type
@@ -84,6 +91,8 @@ const initialState: SettingsState = {
   audiobookPlayer: 'inapp',
   audiobookPlaybackRate: 1,
   audiobookRewindSeconds: 10,
+  videoSubtitleLanguage: null,
+  videoAudioLanguage: null,
 }
 
 // Stable fallback for persisted state that predates bedtime mode, so selectors don't
@@ -182,10 +191,16 @@ export const settingsSlice = createSlice({
       if (!Number.isFinite(action.payload)) return;
       state.audiobookRewindSeconds = Math.min(300, Math.max(0, Math.round(action.payload)));
     },
+    setVideoSubtitleLanguage: (state, action: PayloadAction<string | null>) => {
+      state.videoSubtitleLanguage = action.payload;
+    },
+    setVideoAudioLanguage: (state, action: PayloadAction<string | null>) => {
+      state.videoAudioLanguage = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setAudiobookPlaybackRate, setAudiobookRewindSeconds } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -215,6 +230,8 @@ export const selectVideoPlayer = (state: RootState): videoPlayers => state.setti
 export const selectAudiobookPlayer = (state: RootState): audiobookPlayers => state.settingsReducer.audiobookPlayer ?? 'inapp';
 export const selectAudiobookPlaybackRate = (state: RootState): number => state.settingsReducer.audiobookPlaybackRate ?? 1;
 export const selectAudiobookRewindSeconds = (state: RootState): number => state.settingsReducer.audiobookRewindSeconds ?? 10;
+export const selectVideoSubtitleLanguage = (state: RootState): string | null => state.settingsReducer.videoSubtitleLanguage ?? null;
+export const selectVideoAudioLanguage = (state: RootState): string | null => state.settingsReducer.videoAudioLanguage ?? null;
 export const selectBedtimeEnabled = (state: RootState) => state.settingsReducer.bedtimeEnabled ?? false;
 export const selectBedtimeStart = (state: RootState) => state.settingsReducer.bedtimeStart ?? '19:00';
 export const selectBedtimeEnd = (state: RootState) => state.settingsReducer.bedtimeEnd ?? '07:00';

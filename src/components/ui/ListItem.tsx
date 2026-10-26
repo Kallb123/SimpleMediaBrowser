@@ -1,6 +1,7 @@
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ListenProgressBar } from '@/components/ui/ListenProgressBar';
+import { WatchProgressBar } from '@/components/ui/WatchProgressBar';
 import { WatchedBadge } from '@/components/ui/WatchedBadge';
 import type { ToggleWatched } from '@/components/ui/WatchedBadge';
 import type { IMediaAudiobook } from '@/store/libraryReducer';
@@ -86,7 +87,9 @@ export function ListItem({
           <ThemedText style={styles.editIcon}>✏️</ThemedText>
         </TouchableOpacity>
       ) : null}
-      {audiobook && <ListenProgressBar audiobook={audiobook} partPath={audiobookPartPath} />}
+      {audiobook
+        ? <ListenProgressBar audiobook={audiobook} partPath={audiobookPartPath} />
+        : <WatchProgressBar watchKey={watchKey} watchKeys={watchKeys} />}
     </TouchableOpacity>
   );
 }
