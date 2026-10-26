@@ -7,6 +7,11 @@ on:
       - "**.md"
       - "LICENSE"
       - "docs/**"
+  # Label-gated PR builds: add the `build-apk` label to a PR into main to get an
+  # installable APK as a run artifact. See the check-skip job for the gate.
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize, opened, reopened]
   workflow_dispatch:
     inputs:
       buildType:
@@ -16,6 +21,19 @@ on:
           - dev
           - all
 
+# One build per PR; a newer push to the PR cancels the superseded PR build.
+# Push/dispatch runs, and `labeled` events for any label other than `build-apk`
+# (which are skipped anyway), get a unique group so they never cancel or queue
+# behind anything.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+    github.event_name == 'pull_request' &&
+    !(github.event.action == 'labeled' && github.event.label.name != 'build-apk') &&
+    format('pr-{0}', github.event.pull_request.number) ||
+    github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
   NODE_OPTIONS: --openssl-legacy-provider
@@ -23,7 +41,15 @@ env:
 jobs:
   check-skip:
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    # head_commit is null on pull_request events; contains(null, ...) is false, so
+    # the [skip ci] check only ever applies to push. PR events are built only when
+    # labeled `build-apk`: for `labeled`, only when that label was just added (so
+    # other labels don't start a duplicate build); otherwise when the label is present.
+    if: >-
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      (github.event_name != 'pull_request' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'build-apk') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'build-apk')))
     steps:
       - name: Skip CI check
         run: echo "Proceeding with workflow"
@@ -34,6 +60,9 @@ jobs:
     steps:
       - name: 🏗 Checkout repository
         uses: actions/checkout@v5
+        with:
+          # On PRs build the PR head commit, not the merge commit
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: 🏗 Setup Node.js
         uses: actions/setup-node@v5
@@ -64,11 +93,14 @@ jobs:
 
   build-and-deploy:
     needs: test
-    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: 🏗 Checkout repository
         uses: actions/checkout@v5
+        with:
+          # On PRs build the PR head commit, not the merge commit
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: 🏗 Setup Node.js
         uses: actions/setup-node@v5
@@ -101,19 +133,52 @@ jobs:
       - name: Link EAS project
         run: eas init --non-interactive --force 
 
+      - name: 🏷 Compute artifact names
+        id: names
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE="app-pr${PR_NUMBER}-${PR_HEAD_SHA:0:7}"
+            echo "artifact=${BASE}" >> "$GITHUB_OUTPUT"
+            echo "apk=./${BASE}.apk" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact=app-builds" >> "$GITHUB_OUTPUT"
+            echo "apk=./app-dev.apk" >> "$GITHUB_OUTPUT"
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: 📱 Build Development APK
-        if: github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'dev' || github.event_name == 'push'
+        if: github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'dev' || github.event_name == 'push' || github.event_name == 'pull_request'
         run: |
           # Build with increased memory limit
           export NODE_OPTIONS="--openssl-legacy-provider --max_old_space_size=4096"
-          eas build --platform android --profile preview --local --non-interactive --output=./app-dev.apk
+          eas build --platform android --profile preview --local --non-interactive --output="$APK_PATH"
         env:
           NODE_ENV: development
+          APK_PATH: ${{ steps.names.outputs.apk }}
 
       - name: 📦 Upload build artifacts to GitHub
+        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: app-builds
+          name: ${{ steps.names.outputs.artifact }}
           path: |
-            ./app-dev.apk
+            ${{ steps.names.outputs.apk }}
           retention-days: 7
+
+      - name: 📝 Write build summary
+        env:
+          BUILD_COMMIT: ${{ steps.names.outputs.commit }}
+          ARTIFACT_NAME: ${{ steps.names.outputs.artifact }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          {
+            echo "APK built from commit \`${BUILD_COMMIT}\`. Download \`${ARTIFACT_NAME}\` from the Artifacts section of this run."
+            if [ -n "$ARTIFACT_URL" ]; then
+              echo ""
+              echo "Direct link: ${ARTIFACT_URL}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
