@@ -803,13 +803,39 @@ episode in `MediaBrowserScreen` runs `playVideoInApp`:
   (`VideoPlayback.ts`) matches, exactly or by primary subtag ('en' finds 'en-GB'), else the
   player's default stays. Audio is only switched when there are two or more tracks. A small "CC"
   button (top right) shows when there is a subtitle track or a second audio track. expo-video
-  does not report when its native controls show, so the button is up while paused and for 4 s
-  after playback starts, and is hidden behind a problem overlay. It opens a sheet listing
+  does not report when its native controls show, so `useControlsVisible` keeps the corner
+  buttons up while paused and for 4 s after playback starts; they hide behind a problem overlay
+  or an open picker. It opens a sheet listing
   "Subtitles" (Off + each track) and "Audio" (only with two or more); labels come from
   `trackLabels`, which tells identical labels apart. A choice is applied to the player and
   remembered in `videoSubtitleLanguage` / `videoAudioLanguage` (a track without a language is
   applied but not remembered). Both settings go into the JSON backup. Sidecar `.srt` files are
   not loaded.
+- **Optional features.** Each player feature has a setting, read once when the screen mounts
+  (a change applies to the next video): `videoShowProgressBar` (`WatchProgressBar` renders
+  nothing when off), `videoTrackPickerEnabled` (off: no CC button, and `useVideoTracks` does not
+  apply the remembered languages, so the player keeps its default tracks),
+  `videoSpeedControlEnabled` and `videoAutoPlayNext` (below).
+- **Playback speed.** With `videoSpeedControlEnabled`, a corner button next to "CC" shows the
+  rate ("1×", "1.25×") and opens an `OptionSheet` of rates (0.5× plus the audiobook player's
+  `PLAYBACK_RATES`). Choosing one sets `player.playbackRate` (pitch is preserved, expo-video's
+  default) and remembers it in `videoPlaybackRate`; the remembered rate is applied on the first
+  `readyToPlay`. With the control off the video plays at 1× whatever is remembered.
+- **Auto-play next episode** (`videoAutoPlayNext`: `off` | `prompt` (default) | `countdown`).
+  Unless `off`, the screen computes `nextEpisode` (`VideoPlayback.ts`) once on mount: the next
+  episode in the same order the browse screen uses (`sortTitle` override, then episode number,
+  then natural title order), else the first of the next season by season number. Episodes with a
+  `hidden` override are skipped; there is no season-level hidden override. It is null for movies
+  and the last episode of a show. Once playback passes the watched threshold (`isWatchedPosition`,
+  from `timeUpdate`) or reaches `playToEnd`, `UpNextCard` shows the title with "Play now" and
+  a dismiss button. Seeking back below the threshold hides it again; dismissing keeps it hidden
+  for this video. It is also hidden (and the countdown held) while a problem overlay or picker is
+  open. In `countdown` mode, a video that has played to its end shows "Playing in 10s" and then
+  plays the next episode; replaying the video cancels it. Playing next dispatches
+  `setEpisodeLastOpened` for the next file and `router.replace`s `/videoplayer` with that
+  `parsedPath` and its `resumePosition` as `startAt`. The replaced route has a new key, so the
+  screen remounts and resolves a fresh request, while the old screen's tracker dispose still
+  saves/marks the finished episode.
 - **Errors.** Three problems cover the video with an overlay (the screen's `Problem` state);
   each offers "Open in external player" (`openMediaInExternalApp`, then closes the screen; it
   does not mark the file watched) and "Close". An `error` always replaces the other two.

@@ -1,7 +1,7 @@
 import { episodeDisplayLabel, movieDisplayLabel, showDisplayLabel } from '@/scripts/mediaLabels';
 // Type-only imports, so this module (and the tests that load it) never pulls in the store.
 import type { IMediaObject } from '@/scripts/libraryUtils';
-import type { LibraryState } from '@/store/libraryReducer';
+import type { IMediaOverride, IMediaSeason, LibraryState } from '@/store/libraryReducer';
 import type { AudioTrack, SubtitleTrack, VideoTrack } from 'expo-video';
 
 /** What the video player screen should play. */
@@ -15,6 +15,14 @@ export interface VideoRequest {
     title: string;
     /** Where to start, in seconds (0 = from the beginning). */
     startAt: number;
+}
+
+/** The same label the 'flat' browse view builds for an episode ("Show S01E02 - Title"). */
+function episodeTitle(showName: string, season: IMediaSeason, ep: IMediaObject, overrides: { [key: string]: IMediaOverride }): string {
+    const prefix = ep.episodeNumber > 0
+        ? `${showDisplayLabel(showName, overrides)} S${String(season.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`
+        : '';
+    return episodeDisplayLabel(ep, overrides, prefix);
 }
 
 /**
@@ -46,13 +54,68 @@ export function resolveVideoRequest(
         for (const season of Object.values(show.seasons)) {
             for (const ep of Object.values(season.episodes)) {
                 if (ep.parsedPath !== parsedPath) continue;
-                // The same label the 'flat' browse view builds for the episode.
-                const prefix = ep.episodeNumber > 0
-                    ? `${showDisplayLabel(showName, mediaOverrides)} S${String(season.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`
-                    : '';
-                return request(ep, episodeDisplayLabel(ep, mediaOverrides, prefix));
+                return request(ep, episodeTitle(showName, season, ep, mediaOverrides));
             }
         }
+    }
+    return null;
+}
+
+/** Natural (numeric-aware) ordering, as the browse screen sorts titles. */
+const NATURAL_SORT_OPTS: Intl.CollatorOptions = { numeric: true, sensitivity: 'base' };
+
+/**
+ * Orders two episodes of a season as the browse screen does (`compareEpisodes` in
+ * `MediaBrowserScreen.tsx`): by title when either has a `sortTitle` override, else by episode
+ * number, then title. Duplicated rather than imported because that module is a UI screen.
+ */
+function compareEpisodes(a: IMediaObject, b: IMediaObject, overrides: { [key: string]: IMediaOverride }): number {
+    const aO = overrides[`episode:${a.parsedPath}`];
+    const bO = overrides[`episode:${b.parsedPath}`];
+    if (aO?.sortTitle || bO?.sortTitle) {
+        const aKey = aO?.sortTitle ?? aO?.title ?? a.resolvedTitle ?? a.title ?? a.filename;
+        const bKey = bO?.sortTitle ?? bO?.title ?? b.resolvedTitle ?? b.title ?? b.filename;
+        return aKey.localeCompare(bKey, undefined, NATURAL_SORT_OPTS);
+    }
+    if (a.episodeNumber !== b.episodeNumber) return a.episodeNumber - b.episodeNumber;
+    return (a.resolvedTitle ?? a.title ?? a.filename).localeCompare(b.resolvedTitle ?? b.title ?? b.filename, undefined, NATURAL_SORT_OPTS);
+}
+
+/** The episode the player offers after the one that just played. */
+export interface NextEpisode {
+    /** The file's SAF `content://` URI (for `setEpisodeLastOpened`). */
+    path: string;
+    /** The file's library key; also what the player route takes. */
+    parsedPath: string;
+    /** Display label, as `resolveVideoRequest` gives it. */
+    title: string;
+}
+
+/**
+ * The episode that follows `parsedPath` in browse order: the next one in its season, else the
+ * first of the next season (by season number). Hidden episodes are skipped, so a season that is
+ * hidden episode by episode is passed over. Null for a movie, a key the library does not have,
+ * or the last episode of the show.
+ */
+export function nextEpisode(
+    library: Pick<LibraryState, 'mediaLibrary' | 'mediaOverrides'>,
+    parsedPath: string | undefined,
+): NextEpisode | null {
+    if (!parsedPath) return null;
+    const { mediaLibrary, mediaOverrides } = library;
+    for (const [showName, show] of Object.entries(mediaLibrary)) {
+        const seasons = Object.values(show.seasons).sort((a, b) => a.seasonNumber - b.seasonNumber);
+        // Every episode of the show in play order; the current one is found in it even if hidden.
+        const ordered = seasons.flatMap((season) =>
+            Object.values(season.episodes)
+                .sort((a, b) => compareEpisodes(a, b, mediaOverrides))
+                .map((ep) => ({ season, ep })),
+        );
+        const index = ordered.findIndex(({ ep }) => ep.parsedPath === parsedPath);
+        if (index < 0) continue;
+        const next = ordered.slice(index + 1).find(({ ep }) => !mediaOverrides[`episode:${ep.parsedPath}`]?.hidden);
+        if (!next) return null;
+        return { path: next.ep.path, parsedPath: next.ep.parsedPath, title: episodeTitle(showName, next.season, next.ep, mediaOverrides) };
     }
     return null;
 }

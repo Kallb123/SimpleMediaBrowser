@@ -7,33 +7,57 @@ import { useAppDispatch, useAppStore } from '@/hooks/useRedux';
 
 const TAG = 'VideoTracks';
 
-/** How long the picker button stays up after playback starts (the native controls hide on a similar timer). */
+/** How long the corner buttons stay up after playback starts (the native controls hide on a similar timer). */
 const BUTTON_HIDE_MS = 4000;
+
+/**
+ * Whether the corner buttons (tracks, speed) should show. It stands in for the native controls:
+ * expo-video does not report when they show, so this is true while paused and for a few seconds
+ * after play starts.
+ */
+export function useControlsVisible(player: VideoPlayer): boolean {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const onPlaying = (isPlaying: boolean) => {
+      clearTimeout(hideTimer);
+      setVisible(true);
+      if (isPlaying) hideTimer = setTimeout(() => setVisible(false), BUTTON_HIDE_MS);
+    };
+    const subscription = player.addListener('playingChange', ({ isPlaying }) => onPlaying(isPlaying));
+    // The player starts loading when it is created, so it may be ahead of this subscription.
+    onPlaying(player.playing);
+    return () => {
+      clearTimeout(hideTimer);
+      subscription.remove();
+    };
+  }, [player]);
+  return visible;
+}
 
 /**
  * The embedded subtitle and audio tracks of a player and the user's choice among them. Applies the
  * remembered language once per list (so a choice made during playback is never overridden) and
- * remembers a new choice. `buttonVisible` stands in for the native controls: expo-video does not
- * report when they show, so the button is up while paused and for a few seconds after play starts.
+ * remembers a new choice. With `enabled` false (the track picker is switched off in settings) the
+ * remembered languages are left alone and the player keeps its default tracks. `enabled` is read
+ * once per player, like the rest of the player's setup.
  */
-export function useVideoTracks(player: VideoPlayer) {
+export function useVideoTracks(player: VideoPlayer, enabled: boolean) {
   const store = useAppStore();
   const dispatch = useAppDispatch();
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [subtitleTrack, setSubtitleTrack] = useState<SubtitleTrack | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [audioTrack, setAudioTrack] = useState<AudioTrack | null>(null);
-  const [buttonVisible, setButtonVisible] = useState(true);
 
   useEffect(() => {
     let subtitlesApplied = false;
     let audioApplied = false;
-    let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
     // The remembered language is read from the store here, not from a selector hook, so changing it
     // (which choosing a track does) does not re-run this effect.
     const applySubtitles = (tracks: SubtitleTrack[]) => {
-      if (subtitlesApplied || tracks.length === 0) return;
+      if (!enabled || subtitlesApplied || tracks.length === 0) return;
       subtitlesApplied = true;
       const language = selectVideoSubtitleLanguage(store.getState());
       if (language === null) return;
@@ -51,7 +75,7 @@ export function useVideoTracks(player: VideoPlayer) {
     };
     const applyAudio = (tracks: AudioTrack[]) => {
       // With a single track there is nothing to choose between.
-      if (audioApplied || tracks.length === 0) return;
+      if (!enabled || audioApplied || tracks.length === 0) return;
       audioApplied = true;
       const language = selectVideoAudioLanguage(store.getState());
       if (language === null || tracks.length < 2) return;
@@ -69,11 +93,6 @@ export function useVideoTracks(player: VideoPlayer) {
       setAudioTracks(tracks);
       applyAudio(tracks);
     };
-    const onPlaying = (isPlaying: boolean) => {
-      clearTimeout(hideTimer);
-      setButtonVisible(true);
-      if (isPlaying) hideTimer = setTimeout(() => setButtonVisible(false), BUTTON_HIDE_MS);
-    };
 
     const subscriptions = [
       player.addListener('availableSubtitleTracksChange', ({ availableSubtitleTracks }) => onSubtitleTracks(availableSubtitleTracks)),
@@ -84,19 +103,16 @@ export function useVideoTracks(player: VideoPlayer) {
       }),
       player.addListener('subtitleTrackChange', ({ subtitleTrack: track }) => setSubtitleTrack(track)),
       player.addListener('audioTrackChange', ({ audioTrack: track }) => setAudioTrack(track)),
-      player.addListener('playingChange', ({ isPlaying }) => onPlaying(isPlaying)),
     ];
     // The player starts loading when it is created, so it may be ahead of these subscriptions.
     setSubtitleTrack(player.subtitleTrack);
     setAudioTrack(player.audioTrack);
     onSubtitleTracks(player.availableSubtitleTracks);
     onAudioTracks(player.availableAudioTracks);
-    onPlaying(player.playing);
     return () => {
-      clearTimeout(hideTimer);
       subscriptions.forEach((s) => s.remove());
     };
-  }, [player, store]);
+  }, [player, store, enabled]);
 
   const selectSubtitle = (track: SubtitleTrack | null) => {
     player.subtitleTrack = track;
@@ -120,7 +136,6 @@ export function useVideoTracks(player: VideoPlayer) {
     audioTrack,
     /** Whether there is anything to choose: a subtitle track to turn on, or a second audio track. */
     hasChoices: subtitleTracks.length > 0 || audioTracks.length > 1,
-    buttonVisible,
     selectSubtitle,
     selectAudio,
   };
