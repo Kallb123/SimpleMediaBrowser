@@ -12,7 +12,7 @@ import { nextEpisode, resolveVideoRequest, unsupportedVideoTrack } from '@/scrip
 import type { NextEpisode, VideoRequest } from '@/scripts/VideoPlayback';
 import { VideoProgressTracker } from '@/scripts/VideoProgressTracker';
 import { isWatchedPosition, resumePosition } from '@/scripts/videoProgress';
-import { setEpisodeLastOpened } from '@/store/libraryReducer';
+import { setEpisodeLastOpened, setPersonalLastOpened } from '@/store/libraryReducer';
 import {
   selectVideoAutoPlayNext,
   selectVideoPlaybackRate,
@@ -195,9 +195,9 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
   const [speedOpen, setSpeedOpen] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(settings.playbackRate);
   const closeScreen = useCloseScreen();
-  // Bedtime locking TV must also stop the player from chaining into the next episode.
+  // Bedtime locking TV (or Personal) must also stop the player from chaining into the next video.
   const { restrictedSections } = useBedtime();
-  const next = restrictedSections.has('tv') ? null : settings.next;
+  const next = settings.next && !restrictedSections.has(settings.next.isPersonal ? 'personal' : 'tv') ? settings.next : null;
 
   const player = useVideoPlayer(path, (p) => {
     // One tick a second is plenty for the progress tracker.
@@ -212,7 +212,8 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
   const playNext = () => {
     if (!next) return;
     logger.log(TAG, `Playing next episode "${next.title}" (${next.parsedPath})`);
-    dispatch(setEpisodeLastOpened({ path: next.path, lastOpened: Date.now() }));
+    const openedAction = next.isPersonal ? setPersonalLastOpened : setEpisodeLastOpened;
+    dispatch(openedAction({ path: next.path, lastOpened: Date.now() }));
     const nextStart = resumePosition(store.getState().libraryReducer.watchProgress[next.parsedPath]);
     router.replace({ pathname: '/videoplayer', params: { parsedPath: next.parsedPath, startAt: String(nextStart) } });
   };

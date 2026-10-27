@@ -79,7 +79,7 @@ describe('pickPersistedLibrary', () => {
       scanProgress: { phase: 'scanning' },
       scanList: ['x'],
     });
-    expect(Object.keys(picked).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaLibrary', 'mediaOverrides', 'movies', 'thumbnails', 'watchProgress', 'watched']);
+    expect(Object.keys(picked).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaLibrary', 'mediaOverrides', 'movies', 'personal', 'personalFolderPosters', 'thumbnails', 'watchProgress', 'watched']);
   });
 
   it('defaults missing fields to empty', () => {
@@ -97,6 +97,8 @@ describe('pickPersistedLibrary', () => {
     expect(picked.mediaLibrary).toBe(lib.mediaLibrary);
     expect(picked.movies).toBe(lib.movies);
     expect(picked.audiobooks).toBe(lib.audiobooks);
+    expect(picked.personal).toBe(lib.personal);
+    expect(picked.personalFolderPosters).toBe(lib.personalFolderPosters);
     expect(picked.mediaOverrides).toBe(lib.mediaOverrides);
     expect(picked.thumbnails).toBe(lib.thumbnails);
     expect(picked.watched).toBe(lib.watched);
@@ -178,7 +180,7 @@ describe('LibraryStore', () => {
       expect(batch.version).toBe(String(LIBRARY_STORE_VERSION));
       expect(batch.clearShows).toBe(true);
       expect(names(batch)).toEqual(Object.keys(lib.mediaLibrary));
-      expect(batch.putKv.map(k => k.key).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaOverrides', 'movies', 'thumbnails', 'watchProgress', 'watched']);
+      expect(batch.putKv.map(k => k.key).sort()).toEqual(['audiobooks', 'listenProgress', 'mediaOverrides', 'movies', 'personal', 'personalFolderPosters', 'thumbnails', 'watchProgress', 'watched']);
     });
 
     it('writeAll replaces previous contents', async () => {
@@ -284,6 +286,45 @@ describe('LibraryStore', () => {
       const lib = makeLibrary();
       await new LibraryStore(db).writeAll(lib);
       expect((await new LibraryStore(db).load())!.watchProgress).toEqual(lib.watchProgress);
+    });
+
+    it('loads a store written before the Personal library as having none, and adds both rows on the next save', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.delete('personal');
+      db.kv.delete('personalFolderPosters');
+
+      const store = new LibraryStore(db);
+      const loaded = (await store.load())!;
+      expect(loaded.personal).toEqual([]);
+      expect(loaded.personalFolderPosters).toEqual({});
+      const stop = store.startAutoSave(makeSource(loaded), appState);
+      db.clearBatches();
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putKv.map(k => k.key).sort()).toEqual(['personal', 'personalFolderPosters']);
+      expect(db.kv.get('personal')).toBe('[]');
+      expect(db.kv.get('personalFolderPosters')).toBe('{}');
+      stop();
+    });
+
+    it('persists Personal videos and folder posters and loads them back', async () => {
+      const lib = makeLibrary();
+      await new LibraryStore(db).writeAll(lib);
+      const loaded = (await new LibraryStore(db).load())!;
+      expect(loaded.personal).toEqual(lib.personal);
+      expect(loaded.personalFolderPosters).toEqual(lib.personalFolderPosters);
+    });
+
+    it('throws when the personal row has the wrong shape', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.set('personal', '{}');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
+    });
+
+    it('throws when the personalFolderPosters row has the wrong shape', async () => {
+      await new LibraryStore(db).writeAll(makeLibrary());
+      db.kv.set('personalFolderPosters', '[]');
+      await expect(new LibraryStore(db).load()).rejects.toThrow(/unexpected shape/);
     });
 
     it('throws when the watchProgress row has the wrong shape', async () => {
@@ -436,6 +477,26 @@ describe('LibraryStore', () => {
       expect(db.batches[0].putShows).toEqual([]);
       expect(db.batches[0].putKv.map(k => k.key)).toEqual(['watchProgress']);
       expect(JSON.parse(db.kv.get('watchProgress')!)).toEqual({ 'm/a.mkv': lib.watchProgress['m/a.mkv'], 'm/b.mkv': progress });
+      stop();
+    });
+
+    it('writes only the personal row when a Personal video changes', async () => {
+      const { store, source, lib, stop } = await started();
+      source.set({ ...lib, personal: lib.personal.map(v => ({ ...v, resolvedTitle: 'Never Gonna Give You Up' })) });
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putShows).toEqual([]);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['personal']);
+      expect(JSON.parse(db.kv.get('personal')!)[0].resolvedTitle).toBe('Never Gonna Give You Up');
+      stop();
+    });
+
+    it('writes only the personalFolderPosters row when a folder poster is added', async () => {
+      const { store, source, lib, stop } = await started();
+      source.set({ ...lib, personalFolderPosters: { ...lib.personalFolderPosters, Home: 'file:///posters/home.jpg' } });
+      await store.flush();
+      expect(db.batches).toHaveLength(1);
+      expect(db.batches[0].putKv.map(k => k.key)).toEqual(['personalFolderPosters']);
       stop();
     });
 

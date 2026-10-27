@@ -54,7 +54,7 @@ const currentWatch = () => mockStore.getState().libraryReducer.watchProgress;
 
 describe('importJson listenProgress', () => {
   beforeEach(() => {
-    mockStore.dispatch(hydrateLibrary({ mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress: {}, watchProgress: {} }));
+    mockStore.dispatch(hydrateLibrary({ mediaLibrary: {}, movies: [], audiobooks: [], personal: [], personalFolderPosters: {}, mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress: {}, watchProgress: {} }));
     mockStore.dispatch(setListenProgress({ folderKey: 'existing', progress: progress(500, 99) }));
     mockStore.dispatch(setWatchProgress({ key: 'm/existing.mkv', progress: watchProgress(500, 99) }));
   });
@@ -214,6 +214,31 @@ describe('video feature and sidebar sort settings', () => {
     expect(settings().videoAutoPlayNext).toBe('off');
     await importFile({ settings: { videoAutoPlayNext: 3 } });
     expect(settings().videoAutoPlayNext).toBe('off');
+  });
+
+  it('imports the default page, accepting personal and rejecting unknown values', async () => {
+    await importFile({ settings: { defaultPage: 'personal' } });
+    expect(settings().defaultPage).toBe('personal');
+    await importFile({ settings: { defaultPage: 'podcasts' } });
+    expect(settings().defaultPage).toBe('personal');
+    await importFile({ settings: { defaultPage: 'home' } });
+    expect(settings().defaultPage).toBe('home');
+  });
+
+  it('imports the Personal layout, rejecting unknown values, and exports it', async () => {
+    await importFile({ settings: { personalLayout: 'flat' } });
+    expect(settings().personalLayout).toBe('flat');
+    await importFile({ settings: { personalLayout: 'tree' } });
+    expect(settings().personalLayout).toBe('flat');
+    await exportJson({ includeSettings: true, includeOverrides: false, includeWatched: false, includeMatches: false });
+    expect(JSON.parse(mockWritten).settings.personalLayout).toBe('flat');
+    await importFile({ settings: { personalLayout: 'folders' } });
+    expect(settings().personalLayout).toBe('folders');
+  });
+
+  it('imports personal in the bedtime allowed types and ignores unknown types', async () => {
+    await importFile({ settings: { bedtimeAllowedTypes: ['audiobook', 'personal', 'podcast'] } });
+    expect(settings().bedtimeAllowedTypes).toEqual(['audiobook', 'personal']);
   });
 
   it('imports the sort order, rejecting unknown values', async () => {

@@ -20,6 +20,8 @@ export const makeLibrary = (): PersistedLibrary => ({
   },
   movies: [{ name: 'Movie A', path: 'content://m/a.mkv' } as any],
   audiobooks: [{ title: 'Book', folderKey: 'book', path: 'p', files: [], poster: '' } as any],
+  personal: [{ title: 'Clip', filename: 'Clip [dQw4w9WgXcQ].mp4', path: 'content://p/Clip.mp4', folderPath: ['Art'], youtubeId: 'dQw4w9WgXcQ' } as any],
+  personalFolderPosters: { Art: 'file:///posters/art.jpg' },
   mediaOverrides: { 'show:Bluey': { title: 'Bluey!' } },
   thumbnails: { 'content://m/a.mkv': 'file:///t/a.jpg' },
   watched: { 'm/a.mkv': 1700000000000 },

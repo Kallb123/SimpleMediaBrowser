@@ -21,11 +21,13 @@ import { initialSection, type BedtimeSection } from '@/utils/bedtime';
  * screen order, and when the focused screen is removed from the navigator (guarded) the drawer
  * falls back to the first remaining one, so it must match BEDTIME_SECTIONS (firstAllowedSection).
  */
-const MEDIA_SECTIONS: readonly { name: BedtimeSection; drawerLabel: string; title: string }[] = [
-  { name: '(home)', drawerLabel: '🏠 Home', title: 'Home' },
+const MEDIA_SECTIONS: readonly { name: BedtimeSection; drawerLabel: string; title: string; separatorBefore?: boolean }[] = [
+  { name: '(home)', drawerLabel: '🏠 Library', title: 'Library' },
   { name: 'tv', drawerLabel: '📺 TV', title: 'TV' },
   { name: 'movies', drawerLabel: '🎬 Movies', title: 'Movies' },
   { name: 'audiobooks', drawerLabel: '🎧 Audiobooks', title: 'Audiobooks' },
+  // Personal sits apart from the library sections above it (and is not part of the Library page).
+  { name: 'personal', drawerLabel: '🎞️ Personal', title: 'Personal', separatorBefore: true },
 ];
 
 /** What the shared password modal is asking for. */
@@ -49,6 +51,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
   const currentRouteName = props.state.routes[props.state.index]?.name;
   const textColor = Colors[colorScheme].text;
+  const separatorColor = colorScheme === 'dark' ? '#444' : '#CCC';
 
   // Navigating to a guarded route is silently dropped (and not replayed), so after a bedtime
   // unlock wait until the section reappears in the navigator.
@@ -137,11 +140,15 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={styles.drawerContent}>
-      {MEDIA_SECTIONS.map(({ name, drawerLabel: label, title }) => {
+      {MEDIA_SECTIONS.map(({ name, drawerLabel: label, title, separatorBefore }) => {
+        const separator = separatorBefore
+          ? <View key={`${name}-separator`} style={[styles.drawerSeparator, { backgroundColor: separatorColor }]} />
+          : null;
         // Restricted sections are removed from the navigator, so they have no route here.
         const restricted = restrictedSections.has(name);
         if (restricted) {
-          return (
+          return [
+            separator,
             <DrawerItem
               key={name}
               label={label}
@@ -149,8 +156,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
               icon={({ color, size }) => <Ionicons name="bed" color={color} size={size} />}
               labelStyle={styles.restrictedLabel}
               accessibilityLabel={`${title}, locked for bedtime`}
-            />
-          );
+            />,
+          ];
         }
         const route = props.state.routes.find((r) => r.name === name);
         if (!route) return null;
@@ -169,7 +176,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
             target: props.state.key,
           });
         };
-        return (
+        return [
+          separator,
           <DrawerItem
             key={route.key}
             label={label}
@@ -177,8 +185,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
             onPress={onPress}
             icon={isDeep ? ({ color, size }) => <Ionicons name="arrow-back" color={color} size={size} /> : undefined}
             accessibilityLabel={isDeep ? `Back to ${title}` : undefined}
-          />
-        );
+          />,
+        ];
       })}
 
       {showSidebarSort && (
@@ -200,7 +208,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
       <View style={styles.drawerSpacer} />
 
-      <View style={[styles.drawerSeparator, { backgroundColor: colorScheme === 'dark' ? '#444' : '#CCC' }]} />
+      <View style={[styles.drawerSeparator, { backgroundColor: separatorColor }]} />
 
       {drawerUnlocked ? (
         <>

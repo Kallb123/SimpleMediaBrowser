@@ -4,7 +4,7 @@ import { createVideoPlayer } from "expo-video";
 import type { VideoThumbnail } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { librarySink } from "@/scripts/librarySink";
-import { setMediaLibrary, setMovies, setAudiobooks, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
+import { setMediaLibrary, setMovies, setAudiobooks, setPersonal, setPersonalFolderPosters, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster } from "@/store/libraryReducer";
 import type { IMediaLibrary, IMediaAudiobook, IAudiobookFile, MergeEpisodePayload } from "@/store/libraryReducer";
 import { setIsScanning } from "@/store/scanReducer";
 import type { IMediaSource } from "@/store/settingsReducer";
@@ -12,8 +12,10 @@ import { scanProgressDispatcher } from "@/scripts/scanProgressDispatcher";
 import { logger } from "@/scripts/Logger";
 import { thumbnailCache } from "@/scripts/thumbnailCache";
 import { MetadataService } from "@/scripts/MetadataService";
-import { NON_DIRECTORY_EXTENSIONS, episodeKeyFor, isMediaFile, normalizeShowName, parseFilename, parseFromPath, unnumberedEpisodeKey } from "@/scripts/libraryUtils";
+import { AUDIO_EXTENSIONS, NON_DIRECTORY_EXTENSIONS, VIDEO_EXTENSIONS, episodeKeyFor, isMediaFile, normalizeShowName, parseFilename, parseFromPath, unnumberedEpisodeKey } from "@/scripts/libraryUtils";
 import type { IMediaObject, ParsedMetadata, dataSources } from "@/scripts/libraryUtils";
+import { extractYoutubeId, matchPersonalSidecars, parseYtDlpInfoJson, personalFolderKey, personalTitleFromFilename } from "@/scripts/personalLibrary";
+import type { IPersonalVideo } from "@/scripts/personalLibrary";
 import type { SmbJsonData } from "@/scripts/SmbTypes";
 import { SMB_THUMB_REGEX } from "@/scripts/SmbTypes";
 
@@ -26,6 +28,19 @@ const THUMBNAIL_INDEX_FILE = new File(THUMBNAILS_DIR, 'index.json');
 /** Maps video-file path → local thumbnail file URI (persisted across restarts). */
 type ThumbnailIndex = Record<string, string>;
 
+/** 16 hex characters from two independent 32-bit hashes (DJB2xor and FNV-1a) of `value`. */
+function pathHash(value: string): string {
+    let h1 = 5381;
+    let h2 = 0x811c9dc5;
+    for (let i = 0; i < value.length; i++) {
+        const c = value.charCodeAt(i);
+        h1 = (((h1 << 5) + h1) ^ c) | 0;   // DJB2xor variant
+        h2 = ((h2 ^ c) * 0x01000193) | 0;   // FNV-1a 32-bit variant
+    }
+    return Math.abs(h1).toString(16).padStart(8, '0') +
+           Math.abs(h2).toString(16).padStart(8, '0');
+}
+
 /**
  * Returns a short, stable filename for the thumbnail corresponding to `videoPath`.
  *
@@ -35,15 +50,7 @@ type ThumbnailIndex = Record<string, string>;
  * filename component is appended as a final disambiguator for human readability.
  */
 function thumbnailFilename(videoPath: string): string {
-    let h1 = 5381;
-    let h2 = 0x811c9dc5;
-    for (let i = 0; i < videoPath.length; i++) {
-        const c = videoPath.charCodeAt(i);
-        h1 = (((h1 << 5) + h1) ^ c) | 0;   // DJB2xor variant
-        h2 = ((h2 ^ c) * 0x01000193) | 0;   // FNV-1a 32-bit variant
-    }
-    const segment = Math.abs(h1).toString(16).padStart(8, '0') +
-                    Math.abs(h2).toString(16).padStart(8, '0');
+    const segment = pathHash(videoPath);
     const filename = videoPath.substring(videoPath.lastIndexOf('/') + 1);
     const safe = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40);
     return `thumb_${segment}_${safe}.jpg`;
@@ -160,6 +167,12 @@ const POSTER_FILENAMES = new Set([
     'show.jpg',   'show.jpeg',
     'movie.jpg',  'movie.jpeg',
 ]);
+
+/**
+ * Extra sidecar extensions found next to yt-dlp downloads that are never directories (the
+ * rest — images, `.json`, subtitles, audio — are already in `NON_DIRECTORY_EXTENSIONS`).
+ */
+const PERSONAL_NON_DIRECTORY_EXTENSIONS = new Set(['.description', '.part', '.ytdl']);
 
 /**
  * Copy a poster image (which may be a SAF content:// URI) into the app's
@@ -399,11 +412,49 @@ export class FileScanner {
         const audiobooks = this.buildAudiobookList(allAudiobookFiles, audiobookPosterMap);
         logger.log('FileScanner', `Built audiobook list with ${audiobooks.length} audiobook(s)`);
 
+        // Collect Personal videos (with their sidecars) from all personal sources
+        const personalSources = sources.filter((s) => s.contentType === 'personal');
+        logger.log('FileScanner', `Personal sources: ${personalSources.length}`);
+        const personal: IPersonalVideo[] = [];
+        const personalFolderPosterMap = new Map<string, string>();
+        const failedPersonalSourceUris = new Set<string>();
+        const seenPersonalPaths = new Set<string>();
+        for (const src of personalSources) {
+            if (this._cancelRequested) {
+                logger.log('FileScanner', 'Scan cancelled before personal source');
+                return;
+            }
+            collectProgress.currentSourceIndex = sourceIndexByUri.get(src.uri) ?? 1;
+            logger.log('FileScanner', `Scanning Personal source (${collectProgress.currentSourceIndex}/${collectProgress.sourcesTotal}): ${src.uri}`);
+            const { videos, folderPosters, rootAccessible } = await this.collectPersonalVideos(src.uri, dirSemaphore, collectProgress);
+            logger.log('FileScanner', `  Found ${videos.length} personal video(s) in source`);
+            if (!rootAccessible) {
+                logger.warn('FileScanner', `Personal source unreachable, will preserve its previously scanned items as unavailable: ${src.uri}`);
+                failedPersonalSourceUris.add(src.uri);
+            }
+            for (const video of videos) {
+                if (seenPersonalPaths.has(video.path)) continue;
+                seenPersonalPaths.add(video.path);
+                personal.push(video);
+            }
+            folderPosters.forEach((uri, key) => { if (!personalFolderPosterMap.has(key)) personalFolderPosterMap.set(key, uri); });
+        }
+
+        if (this._cancelRequested) {
+            logger.log('FileScanner', 'Scan cancelled after personal collection');
+            return;
+        }
+        logger.log('FileScanner', `Built personal list with ${personal.length} video(s)`);
+        // Videos found by this scan (excludes the unavailable ones carried forward below);
+        // these are the ones that can get frame thumbnails.
+        const scannedPersonal = [...personal];
+
         // Build a combined scan list for diagnostic purposes
         const allScanUris: string[] = [
             ...allTvFiles.map((f) => f.path),
             ...allMovieFiles.map((f) => f.path),
             ...allAudiobookFiles.map((f) => f.path),
+            ...personal.map((v) => v.path),
         ];
 
         // Carry over previously-fetched provider poster URIs and IDs into the freshly-built
@@ -511,6 +562,30 @@ export class FileScanner {
             }
         }
 
+        // Carry over looked-up Personal metadata (online title/channel, downloaded thumbnail) so
+        // it stays visible and isn't re-fetched. Sidecar data found by this scan wins; the
+        // poster is only restored when the cached file still exists on disk.
+        const prevPersonal = librarySink.getState().libraryReducer.personal ?? [];
+        const prevPersonalByPath = new Map(prevPersonal.map((v) => [v.path, v]));
+        for (const video of personal) {
+            const prev = prevPersonalByPath.get(video.path);
+            if (!prev) continue;
+            try {
+                if (prev.firstDetected) video.firstDetected = prev.firstDetected;
+                if (prev.lastOpened !== undefined) video.lastOpened = prev.lastOpened;
+                if (!video.resolvedTitle && prev.resolvedTitle) video.resolvedTitle = prev.resolvedTitle;
+                if (!video.channel && prev.channel) video.channel = prev.channel;
+                if (!video.description && prev.description) video.description = prev.description;
+                if (!video.uploadDate && prev.uploadDate) video.uploadDate = prev.uploadDate;
+                if (!video.youtubeId && prev.youtubeId) video.youtubeId = prev.youtubeId;
+                if (prev.poster && !video.poster && new File(prev.poster).exists) {
+                    video.poster = prev.poster;
+                }
+            } catch {
+                // Ignore file-existence errors; the thumbnail will be re-fetched during enrichment.
+            }
+        }
+
         // Preserve shows/movies/audiobooks from sources that failed to enumerate this
         // scan (e.g. a disconnected storage device) instead of letting the dispatches
         // below wipe them out just because they're absent from this scan's fresh build.
@@ -551,12 +626,35 @@ export class FileScanner {
             }
         }
 
+        if (failedPersonalSourceUris.size > 0) {
+            const allPersonalSourcesFailed = failedPersonalSourceUris.size === personalSources.length;
+            const personalPaths = new Set(personal.map((v) => v.path));
+            // Folders (and their ancestors) of the carried-forward videos keep their folder poster.
+            const carriedFolderKeys = new Set<string>();
+            for (const prevVideo of prevPersonal) {
+                if (personalPaths.has(prevVideo.path)) continue;
+                const belongsToFailedSource = prevVideo.sourceUri ? failedPersonalSourceUris.has(prevVideo.sourceUri) : allPersonalSourcesFailed;
+                if (belongsToFailedSource) {
+                    personal.push({ ...prevVideo, unavailable: true });
+                    for (let depth = 0; depth <= prevVideo.folderPath.length; depth++) {
+                        carriedFolderKeys.add(personalFolderKey(prevVideo.folderPath.slice(0, depth)));
+                    }
+                }
+            }
+            const prevFolderPosters = librarySink.getState().libraryReducer.personalFolderPosters ?? {};
+            for (const [key, uri] of Object.entries(prevFolderPosters)) {
+                if (carriedFolderKeys.has(key) && !personalFolderPosterMap.has(key)) personalFolderPosterMap.set(key, uri);
+            }
+        }
+
         // Dispatch a final "collecting done" progress update with the exact total before
         // dispatching the library data, so the UI can show the correct file count.
         scanProgressDispatcher.immediate({ phase: 'collecting', filesFound: allScanUris.length, thumbnailsDone: 0, thumbnailsTotal: 0, metadataDone: 0, metadataTotal: 0 });
         librarySink.dispatch(setMediaLibrary(mergedLibrary));
         librarySink.dispatch(setMovies(movies));
         librarySink.dispatch(setAudiobooks(audiobooks));
+        librarySink.dispatch(setPersonal(personal));
+        librarySink.dispatch(setPersonalFolderPosters(Object.fromEntries(personalFolderPosterMap)));
         logger.log('FileScanner', `Scan complete. Total media files dispatched: ${allScanUris.length}`);
 
         // Enrich library with metadata posters if any provider key is configured.
@@ -567,15 +665,18 @@ export class FileScanner {
         const hasAnyProviderKey = !!(settings.tmdbApiKey || settings.tvdbApiKey);
         // Audiobook cover art comes from the keyless iTunes Search API, so enrichment
         // is worth running whenever poster fetching is on and any audiobooks exist,
-        // even without a TMDB/TVDB key.
+        // even without a TMDB/TVDB key. Likewise Personal videos with a YouTube id get their
+        // title/channel/thumbnail from keyless YouTube endpoints.
         const hasAudiobooks = audiobooks.length > 0;
-        if (!this._cancelRequested && enablePosterFetching && (hasAnyProviderKey || hasAudiobooks)) {
+        const hasPersonalYoutube = personal.some((v) => v.youtubeId);
+        if (!this._cancelRequested && enablePosterFetching && (hasAnyProviderKey || hasAudiobooks || hasPersonalYoutube)) {
             logger.log('FileScanner', 'Starting metadata enrichment');
             const currentLibrary = librarySink.getState().libraryReducer.mediaLibrary;
             const currentMovies = librarySink.getState().libraryReducer.movies;
             const currentAudiobooks = librarySink.getState().libraryReducer.audiobooks;
+            const currentPersonal = librarySink.getState().libraryReducer.personal ?? [];
             try {
-                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, currentAudiobooks, () => this._cancelRequested);
+                await MetadataService.getInstance().enrichAll(currentLibrary, currentMovies, currentAudiobooks, () => this._cancelRequested, currentPersonal);
             } catch (e) {
                 logger.error('FileScanner', 'Metadata enrichment failed', e);
             }
@@ -592,6 +693,7 @@ export class FileScanner {
         const allMediaFiles: IMediaObject[] = [
             ...allTvFiles.map(({ relativePathParts, ...obj }) => obj),
             ...allMovieFiles.map(({ relativePathParts, ...obj }) => obj),
+            ...scannedPersonal,
         ];
         const enableThumbnailGeneration = librarySink.getState().settingsReducer.enableThumbnailGeneration ?? false;
         if (!this._cancelRequested && enableThumbnailGeneration) {
@@ -738,19 +840,19 @@ export class FileScanner {
     }
 
     /**
-     * Force-refetches provider metadata for a specific set of shows and movies.
+     * Force-refetches provider metadata for a specific set of shows, movies and Personal videos.
      *
      * The caller is expected to have already cleared the cached poster/still state for
      * these items (MetadataService skips anything that still has a cached poster on disk).
      * Progress is reported through the same scan banner, so {@link cancelScan} aborts it.
      */
-    async refetchMetadataFor(showNames: string[], moviePaths: string[]): Promise<void> {
-        logger.log('FileScanner', `refetchMetadataFor: ${showNames.length} show(s), ${moviePaths.length} movie(s)`);
-        if (showNames.length === 0 && moviePaths.length === 0) return;
+    async refetchMetadataFor(showNames: string[], moviePaths: string[], personalPaths: string[] = []): Promise<void> {
+        logger.log('FileScanner', `refetchMetadataFor: ${showNames.length} show(s), ${moviePaths.length} movie(s), ${personalPaths.length} personal video(s)`);
+        if (showNames.length === 0 && moviePaths.length === 0 && personalPaths.length === 0) return;
         this._cancelRequested = false;
         librarySink.dispatch(setIsScanning(true));
         try {
-            await MetadataService.getInstance().enrichSelection(showNames, moviePaths, () => this._cancelRequested);
+            await MetadataService.getInstance().enrichSelection(showNames, moviePaths, () => this._cancelRequested, personalPaths);
         } catch (e) {
             logger.error('FileScanner', 'refetchMetadataFor threw an error', e);
             throw e;
@@ -1044,6 +1146,169 @@ export class FileScanner {
                 this.recursiveCollect(uri, pathParts, result, posterMap, depth + 1, dirSemaphore, progress, streamState),
             ),
         );
+    }
+
+    // ─── Personal collection ─────────────────────────────────────────────────
+
+    /**
+     * Walks one Personal source and builds its videos directly (rather than via the TV/movie
+     * streaming path): video files only, each with the sidecars found beside it — an image
+     * (`<base>.jpg` / `<base>-thumb.jpg`), a yt-dlp `<base>.info.json`, and a YouTube id from
+     * the filename — plus the folder posters (`folder.jpg` etc.) keyed by `personalFolderKey`.
+     * `rootAccessible` is false when the source root itself could not be read.
+     */
+    private async collectPersonalVideos(
+        rootDirectory: string,
+        dirSemaphore: Semaphore,
+        progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
+    ): Promise<{ videos: IPersonalVideo[]; folderPosters: Map<string, string>; rootAccessible: boolean }> {
+        const state = { rootDirectory, videos: [] as IPersonalVideo[], folderPosters: new Map<string, string>(), rootAccessible: true };
+        await this.recursiveCollectPersonal(rootDirectory, [], 0, dirSemaphore, progress, state);
+        return { videos: state.videos, folderPosters: state.folderPosters, rootAccessible: state.rootAccessible };
+    }
+
+    private async recursiveCollectPersonal(
+        directory: string,
+        folderPath: string[],
+        depth: number,
+        dirSemaphore: Semaphore,
+        progress: { filesFound: number; currentSourceIndex: number; sourcesTotal: number },
+        state: { rootDirectory: string; videos: IPersonalVideo[]; folderPosters: Map<string, string>; rootAccessible: boolean },
+    ): Promise<void> {
+        if (depth > MAX_SCAN_DEPTH) {
+            logger.warn('FileScanner', `Max scan depth (${MAX_SCAN_DEPTH}) reached at: ${directory}`);
+            return;
+        }
+        if (this._cancelRequested) return;
+
+        let contents: string[];
+        await dirSemaphore.acquire();
+        try {
+            contents = await StorageAccessFramework.readDirectoryAsync(directory);
+        } catch (e) {
+            logger.warn('FileScanner', `Cannot read directory (depth=${depth}): ${directory}`, e);
+            if (depth === 0) state.rootAccessible = false;
+            return;
+        } finally {
+            dirSemaphore.release();
+        }
+        logger.log('FileScanner', `Scanning personal dir (depth=${depth}, ${contents.length} entries): ${decodeURIComponent(directory).split('/').slice(-2).join('/')}`);
+
+        const entries = contents
+            .map((resolvedUri) => {
+                const uri = decodeURIComponent(resolvedUri);
+                return { resolvedUri, uri, name: uri.substring(uri.lastIndexOf('/') + 1) };
+            })
+            .filter((entry) => entry.name.charAt(0) !== '.');
+        const siblingNames = entries.map((entry) => entry.name);
+        const uriByName = new Map(entries.map((entry) => [entry.name, entry.resolvedUri]));
+        const folderKey = personalFolderKey(folderPath);
+        const subdirs: { uri: string; name: string }[] = [];
+
+        for (const { resolvedUri, uri, name } of entries) {
+            if (this._cancelRequested) return;
+            const dotIdx = name.lastIndexOf('.');
+            const ext = dotIdx !== -1 ? name.substring(dotIdx).toLowerCase() : '';
+
+            if (VIDEO_EXTENSIONS.has(ext)) {
+                const title = personalTitleFromFilename(name);
+                const video: IPersonalVideo = {
+                    ids: { tvdb: null, imdb: null, tmdb: null },
+                    title,
+                    scannedTitle: title,
+                    episodeNumber: 0,
+                    filename: name,
+                    path: resolvedUri,
+                    parsedPath: uri,
+                    isDirectory: false,
+                    poster: '',
+                    folderPath,
+                    sourceUri: state.rootDirectory,
+                    firstDetected: Date.now(),
+                };
+                const youtubeId = extractYoutubeId(name);
+                if (youtubeId) video.youtubeId = youtubeId;
+                await this.applyPersonalSidecars(video, siblingNames, uriByName);
+                state.videos.push(video);
+
+                progress.filesFound++;
+                if (progress.filesFound % PROGRESS_DISPATCH_INTERVAL === 0) {
+                    scanProgressDispatcher.throttled({
+                        phase: 'collecting',
+                        filesFound: progress.filesFound,
+                        thumbnailsDone: 0,
+                        thumbnailsTotal: 0,
+                        metadataDone: 0,
+                        metadataTotal: 0,
+                        currentSourceIndex: progress.sourcesTotal > 1 ? progress.currentSourceIndex : undefined,
+                        sourcesTotal: progress.sourcesTotal > 1 ? progress.sourcesTotal : undefined,
+                    });
+                }
+                continue;
+            }
+
+            // A folder image (folder.jpg, poster.jpg, ...) becomes the folder tile's image;
+            // only the first one found per folder key is used.
+            if (POSTER_FILENAMES.has(name.toLowerCase())) {
+                if (!state.folderPosters.has(folderKey)) {
+                    try {
+                        state.folderPosters.set(folderKey, await copyLocalPoster(resolvedUri, `personal_folder_${pathHash(folderKey)}`));
+                        logger.log('FileScanner', `Local poster found for personal folder "${folderKey || '/'}": ${name}`);
+                    } catch (e) {
+                        logger.warn('FileScanner', `Failed to copy local poster for personal folder "${folderKey || '/'}"`, e);
+                    }
+                }
+                continue;
+            }
+
+            // Audio, images, info.json, smb.json, smb_thumb_*, subtitles... are never directories.
+            if (NON_DIRECTORY_EXTENSIONS.has(ext) || AUDIO_EXTENSIONS.has(ext) || PERSONAL_NON_DIRECTORY_EXTENSIONS.has(ext)) continue;
+
+            subdirs.push({ uri: resolvedUri, name });
+        }
+
+        await Promise.allSettled(
+            subdirs.map(({ uri, name }) =>
+                this.recursiveCollectPersonal(uri, [...folderPath, name], depth + 1, dirSemaphore, progress, state),
+            ),
+        );
+    }
+
+    /**
+     * Fills `video` from the sidecars beside it: the yt-dlp `.info.json` (title, channel,
+     * description, upload date and, for YouTube downloads, the video id) and an image copied
+     * into persistent storage as its poster. A failure in either is logged and skipped.
+     */
+    private async applyPersonalSidecars(video: IPersonalVideo, siblingNames: string[], uriByName: Map<string, string>): Promise<void> {
+        const { image, infoJson } = matchPersonalSidecars(video.filename, siblingNames);
+
+        const infoUri = infoJson ? uriByName.get(infoJson) : undefined;
+        if (infoUri) {
+            try {
+                const info = parseYtDlpInfoJson(await StorageAccessFramework.readAsStringAsync(infoUri));
+                if (info) {
+                    if (info.title) video.resolvedTitle = info.title;
+                    if (info.channel) video.channel = info.channel;
+                    if (info.description) video.description = info.description;
+                    if (info.uploadDate) video.uploadDate = info.uploadDate;
+                    // The extractor's id is more reliable than one guessed from the filename.
+                    if (info.isYoutube && info.id) video.youtubeId = info.id;
+                } else {
+                    logger.warn('FileScanner', `Ignoring unparseable info.json for "${video.filename}"`);
+                }
+            } catch (e) {
+                logger.warn('FileScanner', `Failed to read info.json for "${video.filename}"`, e);
+            }
+        }
+
+        const imageUri = image ? uriByName.get(image) : undefined;
+        if (imageUri) {
+            try {
+                video.poster = await copyLocalPoster(imageUri, `personal_${pathHash(video.parsedPath)}`);
+            } catch (e) {
+                logger.warn('FileScanner', `Failed to copy sidecar image for "${video.filename}"`, e);
+            }
+        }
     }
 
     /**

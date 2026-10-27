@@ -3,15 +3,18 @@ import { librarySink } from '@/scripts/librarySink';
 import { scanProgressDispatcher } from '@/scripts/scanProgressDispatcher';
 import { createBatcher } from '@/scripts/batchedDispatch';
 import type { UnknownAction } from '@reduxjs/toolkit';
-import { applyLibraryActions, updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, updateShowPoster, setMoviePoster, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
+import { applyLibraryActions, updateShowMetadata, updateMovieMetadata, updateAudiobookMetadata, updatePersonalMetadata, updateShowPoster, setMoviePoster, mergeDuplicateShows, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } from '@/store/libraryReducer';
 import type { IMediaLibrary, IMediaShow, IMediaSeason, IMediaAudiobook, dataSources } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import { fuzzyKey } from '@/scripts/libraryUtils';
+import { personalOverrideKey } from '@/scripts/personalLibrary';
+import type { IPersonalVideo } from '@/scripts/personalLibrary';
 import { logger } from '@/scripts/Logger';
 import type { IMetadataProvider } from '@/scripts/providers/IMetadataProvider';
 import { TmdbProvider } from '@/scripts/providers/TmdbProvider';
 import { TvdbProvider } from '@/scripts/providers/TvdbProvider';
 import { AudiobookProvider } from '@/scripts/providers/AudiobookProvider';
+import { downloadYoutubeThumbnail, fetchYoutubeOEmbed } from '@/scripts/providers/YouTubeProvider';
 
 /** Metadata actions are applied to the library in batches of at most this many... */
 const METADATA_BATCH_MAX_ITEMS = 25;
@@ -87,8 +90,11 @@ export class MetadataService {
         );
     }
 
-    /** Enrich the TV library, the movie list, and audiobooks concurrently. */
-    async enrichAll(library: IMediaLibrary, movies: IMediaObject[], audiobooks: IMediaAudiobook[] = [], isCancelled: () => boolean = () => false): Promise<void> {
+    /**
+     * Enrich the TV library, the movie list, audiobooks and Personal videos concurrently.
+     * Personal videos are only looked up online (YouTube) when poster fetching is enabled.
+     */
+    async enrichAll(library: IMediaLibrary, movies: IMediaObject[], audiobooks: IMediaAudiobook[] = [], isCancelled: () => boolean = () => false, personal: IPersonalVideo[] = []): Promise<void> {
         // Read global settings from the Redux store (credentials are handled in buildProviders).
         const settings = librarySink.getState().settingsReducer;
 
@@ -107,7 +113,9 @@ export class MetadataService {
         const audiobookProvider = new AudiobookProvider();
 
         const showNames = Object.keys(dedupedLibrary);
-        const metadataTotal = showNames.length + movies.length + audiobooks.length;
+        // Only videos with a known YouTube id have anything to look up (needs no API key).
+        const personalTargets = (settings.enablePosterFetching ?? true) ? personal.filter((v) => v.youtubeId) : [];
+        const metadataTotal = showNames.length + movies.length + audiobooks.length + personalTargets.length;
         // Announce the enriching phase so the UI can show a progress banner.
         scanProgressDispatcher.immediate({
             phase: 'enriching',
@@ -137,6 +145,7 @@ export class MetadataService {
             this.enrichLibrary(dedupedLibrary, resolveShowProvider, progress, dispatchProgress, isCancelled),
             this.enrichMovies(movies, resolveMovieProvider, progress, dispatchProgress, isCancelled),
             this.enrichAudiobooks(audiobooks, audiobookProvider, progress, dispatchProgress, isCancelled),
+            this.enrichPersonal(personalTargets, progress, dispatchProgress, isCancelled),
         ]);
         for (const result of results) {
             if (result.status === 'rejected') {
@@ -195,8 +204,9 @@ export class MetadataService {
      *
      * @param showNames  Redux library keys of the selected shows.
      * @param moviePaths `parsedPath` values of the selected movies.
+     * @param personalPaths `path` (SAF URI) values of the selected Personal videos.
      */
-    async enrichSelection(showNames: string[], moviePaths: string[], isCancelled: () => boolean = () => false): Promise<void> {
+    async enrichSelection(showNames: string[], moviePaths: string[], isCancelled: () => boolean = () => false, personalPaths: string[] = []): Promise<void> {
         const settings = librarySink.getState().settingsReducer;
         const { resolveShowProvider, resolveMovieProvider } = await this.buildProviders();
 
@@ -211,14 +221,16 @@ export class MetadataService {
         }
         const moviesSubset = (state.libraryReducer.movies as IMediaObject[])
             .filter((movie) => moviePaths.includes(movie.parsedPath));
+        const personalSubset = (state.libraryReducer.personal ?? [])
+            .filter((video) => video.youtubeId && personalPaths.includes(video.path));
 
         const selectedShowNames = Object.keys(librarySubset);
-        const metadataTotal = selectedShowNames.length + moviesSubset.length;
+        const metadataTotal = selectedShowNames.length + moviesSubset.length + personalSubset.length;
         if (metadataTotal === 0) {
             logger.log('MetadataService', 'enrichSelection: nothing to enrich');
             return;
         }
-        logger.log('MetadataService', `enrichSelection: ${selectedShowNames.length} show(s), ${moviesSubset.length} movie(s)`);
+        logger.log('MetadataService', `enrichSelection: ${selectedShowNames.length} show(s), ${moviesSubset.length} movie(s), ${personalSubset.length} personal video(s)`);
 
         scanProgressDispatcher.immediate({
             phase: 'enriching',
@@ -243,6 +255,7 @@ export class MetadataService {
         const results = await Promise.allSettled([
             this.enrichLibrary(librarySubset, resolveShowProvider, progress, dispatchProgress, isCancelled),
             this.enrichMovies(moviesSubset, resolveMovieProvider, progress, dispatchProgress, isCancelled),
+            this.enrichPersonal(personalSubset, progress, dispatchProgress, isCancelled),
         ]);
         for (const result of results) {
             if (result.status === 'rejected') {
@@ -518,6 +531,74 @@ export class MetadataService {
         // Apply the last partial batch before callers read the library back.
         batch.flush();
         logger.log('MetadataService', 'enrichAudiobooks complete');
+    }
+
+    /**
+     * Fetch the title, channel and thumbnail of Personal videos that have a YouTube id, from
+     * YouTube's keyless oEmbed endpoint and thumbnail host ({@link fetchYoutubeOEmbed},
+     * {@link downloadYoutubeThumbnail}).
+     *
+     * Only missing data is fetched: the oEmbed request is skipped when `resolvedTitle` and
+     * `channel` are both set (from an info.json sidecar or an earlier lookup), the thumbnail
+     * when the video already has a cached poster or the user set a poster override.  Videos
+     * without a YouTube id are counted but left alone.  Callers decide whether online lookups
+     * are allowed (`enablePosterFetching`).
+     */
+    async enrichPersonal(
+        personal: IPersonalVideo[],
+        progress: { done: number },
+        dispatchProgress: () => void,
+        isCancelled: () => boolean = () => false,
+    ): Promise<void> {
+        logger.log('MetadataService', `enrichPersonal: ${personal.length} video(s) to process`);
+        const batch = this.createLibraryBatcher();
+
+        const overrides = librarySink.getState().libraryReducer.mediaOverrides;
+
+        for (const video of personal) {
+            if (isCancelled()) {
+                logger.log('MetadataService', 'enrichPersonal: cancelled');
+                break;
+            }
+            try {
+                const youtubeId = video.youtubeId;
+                if (!youtubeId) continue;
+
+                const update: { path: string; resolvedTitle?: string; channel?: string; poster?: string } = { path: video.path };
+
+                if (!(video.resolvedTitle && video.channel)) {
+                    const info = await fetchYoutubeOEmbed(youtubeId);
+                    if (info) {
+                        if (!video.resolvedTitle) update.resolvedTitle = info.title;
+                        if (!video.channel && info.channel) update.channel = info.channel;
+                    }
+                }
+
+                const overridePoster = overrides[personalOverrideKey(video.parsedPath)]?.poster;
+                const hasOverridePoster = !!overridePoster && new File(overridePoster).exists;
+                const hasCachedPoster = !!video.poster && new File(video.poster).exists;
+                if (!hasOverridePoster && !hasCachedPoster && !isCancelled()) {
+                    const poster = await downloadYoutubeThumbnail(youtubeId);
+                    if (poster) update.poster = poster;
+                }
+
+                if (update.resolvedTitle !== undefined || update.channel !== undefined || update.poster !== undefined) {
+                    batch.add(updatePersonalMetadata(update));
+                    logger.log('MetadataService', `Personal video "${video.title}" → YouTube ${youtubeId}${update.resolvedTitle ? `, title "${update.resolvedTitle}"` : ''}${update.poster ? `, thumbnail cached at ${update.poster}` : ''}`);
+                } else {
+                    logger.log('MetadataService', `Personal video "${video.title}" – nothing new from YouTube (${youtubeId})`);
+                }
+            } catch (e) {
+                logger.warn('MetadataService', `Error enriching personal video "${video.title}"`, e);
+            } finally {
+                progress.done++;
+                dispatchProgress();
+            }
+        }
+
+        // Apply the last partial batch before callers read the library back.
+        batch.flush();
+        logger.log('MetadataService', 'enrichPersonal complete');
     }
 
     /**

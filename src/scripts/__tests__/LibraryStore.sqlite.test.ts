@@ -131,7 +131,7 @@ describe('LibraryStore on SQLite', () => {
     it('round-trips movies, audiobooks, overrides and thumbnails as whole documents', async () => {
       const lib = makeLibrary();
       await newStore().writeAll(lib);
-      expect(sqlite.all<{ key: string }>('SELECT key FROM kv ORDER BY key').map(r => r.key)).toEqual(['audiobooks', 'listenProgress', 'mediaOverrides', 'movies', 'thumbnails', 'watchProgress', 'watched']);
+      expect(sqlite.all<{ key: string }>('SELECT key FROM kv ORDER BY key').map(r => r.key)).toEqual(['audiobooks', 'listenProgress', 'mediaOverrides', 'movies', 'personal', 'personalFolderPosters', 'thumbnails', 'watchProgress', 'watched']);
       const loaded = (await newStore().load())!;
       expect(loaded.movies).toEqual(lib.movies);
       expect(loaded.audiobooks).toEqual(lib.audiobooks);
@@ -139,6 +139,8 @@ describe('LibraryStore on SQLite', () => {
       expect(loaded.thumbnails).toEqual(lib.thumbnails);
       expect(loaded.listenProgress).toEqual(lib.listenProgress);
       expect(loaded.watchProgress).toEqual(lib.watchProgress);
+      expect(loaded.personal).toEqual(lib.personal);
+      expect(loaded.personalFolderPosters).toEqual(lib.personalFolderPosters);
     });
 
     it('round-trips an empty library', async () => {

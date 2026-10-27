@@ -6,6 +6,8 @@ import libraryReducer, {
   clearListenProgress,
   clearWatchProgress,
   clearLibraryAndMovies,
+  clearPersonalMetadata,
+  clearPosterOverrides,
   getAudiobookWatchKeys,
   getSeasonWatchKeys,
   getShowWatchKeys,
@@ -20,13 +22,21 @@ import libraryReducer, {
   setWatchProgress,
   setMediaLibrary,
   setMediaOverride,
+  selectPersonal,
+  selectPersonalFolderPosters,
   setMoviePoster,
   setMovies,
+  setPersonal,
+  setPersonalFolderPosters,
+  setPersonalLastOpened,
+  updatePersonalMetadata,
   updateMovieMetadata,
   updateShowMetadata,
 } from '@/store/libraryReducer';
 import type { IListenProgress, IMediaAudiobook, IMediaShow, IWatchProgress } from '@/store/libraryReducer';
+import type { IPersonalVideo } from '@/scripts/personalLibrary';
 import type { IMediaObject } from '@/scripts/libraryUtils';
+import type { RootState } from '@/store/store';
 
 const NO_IDS = () => ({ tvdb: null, imdb: null, tmdb: null });
 
@@ -307,6 +317,88 @@ describe('watch progress', () => {
     it('defaults to empty when the payload has none', () => {
       const seeded = libraryReducer(init(), setWatchProgress({ key: 'a', progress: progress(1) }));
       expect(libraryReducer(seeded, hydrateLibrary(payload())).watchProgress).toEqual({});
+    });
+  });
+});
+
+describe('personal library', () => {
+  const video = (name: string, extra: Partial<IPersonalVideo> = {}): IPersonalVideo => ({
+    ...movie(name),
+    path: `content://p/${name}.mp4`,
+    parsedPath: `p/${name}.mp4`,
+    filename: `${name}.mp4`,
+    folderPath: [],
+    ...extra,
+  });
+  const init = () => libraryReducer(undefined, { type: '@@init' });
+  const seeded = () => libraryReducer(libraryReducer(init(), setPersonal([video('a'), video('b')])), setPersonalFolderPosters({ Art: 'file:///art.jpg' }));
+  const root = (libraryState: unknown) => ({ libraryReducer: libraryState }) as unknown as RootState;
+
+  it('starts empty and the selectors fall back for state that predates the section', () => {
+    expect(init().personal).toEqual([]);
+    expect(init().personalFolderPosters).toEqual({});
+    expect(selectPersonal(root({}))).toEqual([]);
+    expect(selectPersonalFolderPosters(root({}))).toEqual({});
+    expect(selectPersonal(root(seeded()))).toHaveLength(2);
+    expect(selectPersonalFolderPosters(root(seeded()))).toEqual({ Art: 'file:///art.jpg' });
+  });
+
+  it('updatePersonalMetadata sets only the provided fields', () => {
+    const state = libraryReducer(seeded(), updatePersonalMetadata({ path: 'content://p/a.mp4', resolvedTitle: 'Nice', poster: 'file:///a.jpg' }));
+    expect(state.personal[0]).toMatchObject({ resolvedTitle: 'Nice', poster: 'file:///a.jpg' });
+    expect(state.personal[0].channel).toBeUndefined();
+    const next = libraryReducer(state, updatePersonalMetadata({ path: 'content://p/a.mp4', channel: 'Chan' }));
+    expect(next.personal[0]).toMatchObject({ resolvedTitle: 'Nice', poster: 'file:///a.jpg', channel: 'Chan' });
+    expect(next.personal[1].resolvedTitle).toBeUndefined();
+  });
+
+  it('updatePersonalMetadata ignores an unknown path', () => {
+    const before = seeded();
+    expect(libraryReducer(before, updatePersonalMetadata({ path: 'content://p/zzz.mp4', resolvedTitle: 'x' })).personal).toEqual(before.personal);
+  });
+
+  it('clearPersonalMetadata drops the looked-up title, channel and poster only', () => {
+    let state = libraryReducer(seeded(), updatePersonalMetadata({ path: 'content://p/a.mp4', resolvedTitle: 'Nice', channel: 'Chan', poster: 'file:///a.jpg' }));
+    state = libraryReducer(state, clearPersonalMetadata('content://p/a.mp4'));
+    expect(state.personal[0]).toMatchObject({ poster: '', title: 'a' });
+    expect(state.personal[0].resolvedTitle).toBeUndefined();
+    expect(state.personal[0].channel).toBeUndefined();
+  });
+
+  it('setPersonalLastOpened records the timestamp like setMovieLastOpened', () => {
+    const state = libraryReducer(seeded(), setPersonalLastOpened({ path: 'content://p/b.mp4', lastOpened: 1234 }));
+    expect(state.personal[1].lastOpened).toBe(1234);
+    expect(state.personal[0].lastOpened).toBeUndefined();
+  });
+
+  it('clearLibraryAndMovies also clears Personal videos and folder posters', () => {
+    const state = libraryReducer(seeded(), clearLibraryAndMovies());
+    expect(state.personal).toEqual([]);
+    expect(state.personalFolderPosters).toEqual({});
+  });
+
+  it('clearPosterOverrides blanks Personal posters and folder posters', () => {
+    let state = libraryReducer(seeded(), updatePersonalMetadata({ path: 'content://p/a.mp4', poster: 'file:///a.jpg' }));
+    state = libraryReducer(state, clearPosterOverrides());
+    expect(state.personal[0].poster).toBe('');
+    expect(state.personalFolderPosters).toEqual({});
+  });
+
+  describe('hydrateLibrary', () => {
+    const payload = (extra: object = {}): any => ({
+      mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, ...extra,
+    });
+
+    it('restores persisted Personal videos and folder posters', () => {
+      const state = libraryReducer(init(), hydrateLibrary(payload({ personal: [video('a')], personalFolderPosters: { Art: 'file:///art.jpg' } })));
+      expect(state.personal).toHaveLength(1);
+      expect(state.personalFolderPosters).toEqual({ Art: 'file:///art.jpg' });
+    });
+
+    it('defaults to empty for a payload that predates the section', () => {
+      const state = libraryReducer(seeded(), hydrateLibrary(payload()));
+      expect(state.personal).toEqual([]);
+      expect(state.personalFolderPosters).toEqual({});
     });
   });
 });

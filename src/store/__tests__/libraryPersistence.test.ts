@@ -22,7 +22,7 @@ jest.mock('@/store/store', () => ({
   waitForPersistBootstrap: () => Promise.resolve(),
 }));
 
-const EMPTY = { mediaLibrary: {}, movies: [], audiobooks: [], mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress: {}, watchProgress: {} };
+const EMPTY = { mediaLibrary: {}, movies: [], audiobooks: [], personal: [], personalFolderPosters: {}, mediaOverrides: {}, thumbnails: {}, watched: {}, listenProgress: {}, watchProgress: {} };
 
 const LEGACY: any = {
   mediaLibrary: { Bluey: { title: 'Bluey', seasons: {} } },
@@ -42,7 +42,9 @@ const PICKED_LEGACY: any = {
   audiobooks: LEGACY.audiobooks,
   mediaOverrides: LEGACY.mediaOverrides,
   thumbnails: LEGACY.thumbnails,
-  // The legacy persist:root blob predates watched tracking and listen/video progress.
+  // The legacy persist:root blob predates watched tracking, listen/video progress and the Personal library.
+  personal: [],
+  personalFolderPosters: {},
   watched: {},
   listenProgress: {},
   watchProgress: {},
