@@ -1,6 +1,16 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit'
+import { createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit'
+import { ALL_BEDTIME_DAYS, DEFAULT_BEDTIME_SLOT } from '@/utils/bedtime'
 import type { RootState } from './store'
 
+/** A bedtime window that repeats on the given weekdays (0 = Sunday … 6 = Saturday, JS getDay order). */
+export interface BedtimeSlot {
+  /** Sorted ascending, unique, each 0..6. A window that crosses midnight belongs to the day it starts on. */
+  days: number[]
+  /** "HH:MM" local time at which the window starts. */
+  start: string
+  /** "HH:MM" local time at which the window ends; earlier than `start` means it runs overnight into the next day. */
+  end: string
+}
 export type contentTypes = 'tv' | 'movie' | 'audiobook' | 'personal';
 export type dataSources = 'tmdb' | 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
@@ -56,10 +66,11 @@ interface SettingsState {
   appColorScheme: appColorSchemes
   sortOrder: sortOrders
   bedtimeEnabled: boolean
-  /** "HH:MM" local time at which bedtime mode starts. */
-  bedtimeStart: string
-  /** "HH:MM" local time at which bedtime mode ends (may be earlier than start to cross midnight). */
-  bedtimeEnd: string
+  /** When bedtime mode applies: each slot is a start/end window that repeats on some weekdays. */
+  bedtimeSlots: BedtimeSlot[]
+  /** Pre-#257 single window ("HH:MM"); only read as a migration fallback when `bedtimeSlots` is missing. */
+  bedtimeStart?: string
+  bedtimeEnd?: string
   /** Content types that stay accessible while bedtime mode is in effect. */
   bedtimeAllowedTypes: contentTypes[]
   videoPlayer: videoPlayers
@@ -110,8 +121,7 @@ const initialState: SettingsState = {
   appColorScheme: 'system',
   sortOrder: 'alphabetical',
   bedtimeEnabled: false,
-  bedtimeStart: '19:00',
-  bedtimeEnd: '07:00',
+  bedtimeSlots: [{ ...DEFAULT_BEDTIME_SLOT, days: [...ALL_BEDTIME_DAYS] }],
   bedtimeAllowedTypes: ['audiobook'],
   videoPlayer: 'inapp',
   audiobookPlayer: 'inapp',
@@ -202,11 +212,10 @@ export const settingsSlice = createSlice({
     setBedtimeEnabled: (state, action: PayloadAction<boolean>) => {
       state.bedtimeEnabled = action.payload;
     },
-    setBedtimeStart: (state, action: PayloadAction<string>) => {
-      state.bedtimeStart = action.payload;
-    },
-    setBedtimeEnd: (state, action: PayloadAction<string>) => {
-      state.bedtimeEnd = action.payload;
+    setBedtimeSlots: (state, action: PayloadAction<BedtimeSlot[]>) => {
+      state.bedtimeSlots = action.payload;
+      delete state.bedtimeStart;
+      delete state.bedtimeEnd;
     },
     setBedtimeAllowedTypes: (state, action: PayloadAction<contentTypes[]>) => {
       state.bedtimeAllowedTypes = action.payload;
@@ -259,7 +268,7 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setKeyboardHandling, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage, setVideoShowProgressBar, setVideoTrackPickerEnabled, setVideoSpeedControlEnabled, setVideoPlaybackRate, setVideoAutoPlayNext, setShowSidebarSort, setPersonalLayout } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeSlots, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setKeyboardHandling, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage, setVideoShowProgressBar, setVideoTrackPickerEnabled, setVideoSpeedControlEnabled, setVideoPlaybackRate, setVideoAutoPlayNext, setShowSidebarSort, setPersonalLayout } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -308,8 +317,17 @@ export const selectShowSidebarSort = (state: RootState): boolean => state.settin
 export const selectPersonalLayout = (state: RootState): personalLayouts =>
   state.settingsReducer.personalLayout === 'flat' ? 'flat' : 'folders';
 export const selectBedtimeEnabled = (state: RootState) => state.settingsReducer.bedtimeEnabled ?? false;
-export const selectBedtimeStart = (state: RootState) => state.settingsReducer.bedtimeStart ?? '19:00';
-export const selectBedtimeEnd = (state: RootState) => state.settingsReducer.bedtimeEnd ?? '07:00';
+// Persisted state that predates per-day slots (#257) only has bedtimeStart/bedtimeEnd; it
+// becomes a single every-day slot. Memoised so the fallback keeps one reference per input.
+export const selectBedtimeSlots: (state: RootState) => BedtimeSlot[] = createSelector(
+  [
+    (state: RootState) => state.settingsReducer.bedtimeSlots,
+    (state: RootState) => state.settingsReducer.bedtimeStart,
+    (state: RootState) => state.settingsReducer.bedtimeEnd,
+  ],
+  (slots, legacyStart, legacyEnd): BedtimeSlot[] =>
+    slots ?? [{ days: [...ALL_BEDTIME_DAYS], start: legacyStart ?? DEFAULT_BEDTIME_SLOT.start, end: legacyEnd ?? DEFAULT_BEDTIME_SLOT.end }],
+);
 export const selectBedtimeAllowedTypes = (state: RootState) =>
   state.settingsReducer.bedtimeAllowedTypes ?? DEFAULT_BEDTIME_ALLOWED_TYPES;
 

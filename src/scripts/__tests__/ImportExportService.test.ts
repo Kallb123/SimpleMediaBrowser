@@ -241,6 +241,59 @@ describe('video feature and sidebar sort settings', () => {
     expect(settings().bedtimeAllowedTypes).toEqual(['audiobook', 'personal']);
   });
 
+  it('imports bedtime slots, filtering invalid entries and normalising times', async () => {
+    await importFile({
+      settings: {
+        bedtimeSlots: [
+          { days: [3, 1, 2], start: '7:00', end: '19:30' },
+          { days: [4, 5], start: '25:00', end: '07:00' },
+          { days: [], start: '19:00', end: '07:00' },
+          { days: [6, 0, 8], start: '21:00', end: '07:00' },
+          'junk',
+        ],
+      },
+    });
+    expect(settings().bedtimeSlots).toEqual([
+      { days: [1, 2, 3], start: '07:00', end: '19:30' },
+      { days: [0, 6], start: '21:00', end: '07:00' },
+    ]);
+  });
+
+  it('leaves the bedtime slots alone when none of the imported ones are valid', async () => {
+    await importFile({ settings: { bedtimeSlots: [{ days: [1], start: '19:00', end: '07:00' }] } });
+    await importFile({ settings: { bedtimeSlots: [{ days: [], start: '20:00', end: '06:00' }, 5] } });
+    await importFile({ settings: { bedtimeSlots: 'nope' } });
+    expect(settings().bedtimeSlots).toEqual([{ days: [1], start: '19:00', end: '07:00' }]);
+  });
+
+  it('turns a legacy bedtimeStart/bedtimeEnd pair into one every-day slot', async () => {
+    await importFile({ settings: { bedtimeStart: '20:30', bedtimeEnd: '6:15' } });
+    expect(settings().bedtimeSlots).toEqual([{ days: [0, 1, 2, 3, 4, 5, 6], start: '20:30', end: '06:15' }]);
+  });
+
+  it('ignores legacy bedtime times unless both are valid, and prefers bedtimeSlots', async () => {
+    await importFile({ settings: { bedtimeSlots: [{ days: [2], start: '22:00', end: '06:00' }] } });
+    await importFile({ settings: { bedtimeStart: '20:30' } });
+    await importFile({ settings: { bedtimeStart: '20:30', bedtimeEnd: 'late' } });
+    expect(settings().bedtimeSlots).toEqual([{ days: [2], start: '22:00', end: '06:00' }]);
+    await importFile({
+      settings: { bedtimeSlots: [{ days: [4], start: '21:00', end: '05:00' }], bedtimeStart: '20:30', bedtimeEnd: '06:15' },
+    });
+    expect(settings().bedtimeSlots).toEqual([{ days: [4], start: '21:00', end: '05:00' }]);
+  });
+
+  it('exports bedtimeSlots instead of the legacy start/end', async () => {
+    await importFile({ settings: { bedtimeSlots: [{ days: [1, 2, 3], start: '19:00', end: '07:00' }, { days: [0, 6], start: '21:00', end: '07:00' }] } });
+    await exportJson({ includeSettings: true, includeOverrides: false, includeWatched: false, includeMatches: false });
+    const exported = JSON.parse(mockWritten).settings;
+    expect(exported.bedtimeSlots).toEqual([
+      { days: [1, 2, 3], start: '19:00', end: '07:00' },
+      { days: [0, 6], start: '21:00', end: '07:00' },
+    ]);
+    expect(exported).not.toHaveProperty('bedtimeStart');
+    expect(exported).not.toHaveProperty('bedtimeEnd');
+  });
+
   it('imports the sort order, rejecting unknown values', async () => {
     await importFile({ settings: { sortOrder: 'recentlyAdded' } });
     expect(settings().sortOrder).toBe('recentlyAdded');
