@@ -14,6 +14,10 @@ export type ListItemProps = {
   isEditable: boolean;
   isSelected?: boolean;
   count?: number;
+  /** What `count` counts, singular (default "episode"). */
+  countNoun?: string;
+  /** Secondary line under the label (a Personal video's channel). */
+  subtitle?: string;
   /** 1-based part number of an audiobook file; shown in place of the icon. */
   partNumber?: number;
   /** A file's watched key (its `parsedPath`); a folder passes `watchKeys` instead. */
@@ -37,6 +41,8 @@ export function ListItem({
   isEditable,
   isSelected,
   count,
+  countNoun,
+  subtitle,
   partNumber,
   watchKey,
   watchKeys,
@@ -64,7 +70,10 @@ export function ListItem({
       >
         {icon}
       </ThemedText>
-      <ThemedText style={styles.label} numberOfLines={1}>{label}</ThemedText>
+      <View style={styles.labelColumn}>
+        <ThemedText style={styles.label} numberOfLines={1}>{label}</ThemedText>
+        {subtitle ? <ThemedText style={styles.subtitle} numberOfLines={1}>{subtitle}</ThemedText> : null}
+      </View>
       <WatchedBadge
         variant="list"
         watchKey={watchKey}
@@ -75,7 +84,7 @@ export function ListItem({
       {kind === 'folder' && count !== undefined && (
         <View
           style={styles.countBadge}
-          accessibilityLabel={`${count} ${count === 1 ? 'episode' : 'episodes'}`}
+          accessibilityLabel={`${count} ${countNoun ?? 'episode'}${count === 1 ? '' : 's'}`}
         >
           <ThemedText style={styles.countBadgeText}>{count}</ThemedText>
         </View>
@@ -115,9 +124,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '700',
   },
-  label: {
+  labelColumn: {
     flex: 1,
+  },
+  label: {
     fontSize: 14,
+  },
+  subtitle: {
+    fontSize: 11,
+    opacity: 0.6,
   },
   countBadge: {
     backgroundColor: 'rgba(128,128,128,0.25)',

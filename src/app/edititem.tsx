@@ -50,7 +50,7 @@ export default function EditItemScreen() {
   const [saved, setSaved] = useState(false);
 
   const isAudiobook = itemType === 'audiobook';
-  const hasPoster = itemType === 'show' || itemType === 'movie' || isAudiobook;
+  const hasPoster = itemType === 'show' || itemType === 'movie' || itemType === 'personal' || isAudiobook;
   const isDirty =
     titleInput.trim() !== (existingOverride.title ?? currentTitle ?? '').trim() ||
     sortTitleInput.trim() !== (existingOverride.sortTitle ?? '') ||
@@ -179,7 +179,7 @@ export default function EditItemScreen() {
           )}
         </View>
 
-        {/* Poster/cover (shows, movies and audiobooks); picked on its own screen */}
+        {/* Poster/cover (shows, movies, Personal videos and audiobooks); picked on its own screen */}
         {hasPoster && (
           <View style={styles.section}>
             <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>

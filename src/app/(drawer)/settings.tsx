@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { router, useFocusEffect } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes, videoAutoPlayNextModes, selectVideoShowProgressBar, setVideoShowProgressBar, selectVideoTrackPickerEnabled, setVideoTrackPickerEnabled, selectVideoSpeedControlEnabled, setVideoSpeedControlEnabled, selectVideoAutoPlayNext, setVideoAutoPlayNext, selectShowSidebarSort, setShowSidebarSort } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes, videoAutoPlayNextModes, selectVideoShowProgressBar, setVideoShowProgressBar, selectVideoTrackPickerEnabled, setVideoTrackPickerEnabled, selectVideoSpeedControlEnabled, setVideoSpeedControlEnabled, selectVideoAutoPlayNext, setVideoAutoPlayNext, selectShowSidebarSort, setShowSidebarSort, personalLayouts, selectPersonalLayout, setPersonalLayout } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -77,10 +77,16 @@ const uiTypeOptions: { id: viewOrientations; label: string }[] = [
 ];
 
 const defaultPageOptions: { id: defaultPages; label: string }[] = [
-  {id: 'home', label: 'Home (All)'},
+  {id: 'home', label: 'Library (All)'},
   {id: 'tv', label: 'TV'},
   {id: 'movies', label: 'Movies'},
   {id: 'audiobooks', label: 'Audiobooks'},
+  {id: 'personal', label: 'Personal'},
+];
+
+const personalLayoutOptions: { id: personalLayouts; label: string; title: string }[] = [
+  {id: 'folders', label: 'Folders', title: 'Mirrors the folders on disk: a tile for each folder, with its videos inside'},
+  {id: 'flat', label: 'Flat list', title: 'Every Personal video in one list'},
 ];
 
 const appColorSchemeOptions: { id: appColorSchemes; label: string }[] = [
@@ -130,6 +136,7 @@ const bedtimeTypeOptions: { id: contentTypes; label: string }[] = [
   {id: 'tv', label: 'TV'},
   {id: 'movie', label: 'Movies'},
   {id: 'audiobook', label: 'Audiobooks'},
+  {id: 'personal', label: 'Personal'},
 ];
 
 // "7:00" -> "07:00" so stored values line up with dropdown option ids; malformed values are left as-is.
@@ -272,6 +279,7 @@ export default function SettingsPrompt() {
   const [viewOrientation, setLocalViewOrientation] = useState("" as viewOrientations);
   const [viewScale, setLocalViewScale] = useState(2);
   const [defaultPage, setLocalDefaultPage] = useState("home" as defaultPages);
+  const [personalLayout, setLocalPersonalLayout] = useState('folders' as personalLayouts);
   const [enablePosterFetching, setLocalEnablePosterFetching] = useState(true);
   const [enableThumbnailGeneration, setLocalEnableThumbnailGeneration] = useState(false);
   const [rescanOnStartup, setLocalRescanOnStartup] = useState(true);
@@ -324,6 +332,7 @@ export default function SettingsPrompt() {
   const settingsVideoSpeedControlEnabled = useSelector(selectVideoSpeedControlEnabled);
   const settingsVideoAutoPlayNext = useSelector(selectVideoAutoPlayNext);
   const settingsAudiobookPlayer = useSelector(selectAudiobookPlayer);
+  const settingsPersonalLayout = useSelector(selectPersonalLayout);
   const settingsKeyboardHandling = useSelector(selectKeyboardHandling);
   const settingsAudiobookRewindSeconds = useSelector(selectAudiobookRewindSeconds);
   const settingsBedtimeEnabled = useSelector(selectBedtimeEnabled);
@@ -355,7 +364,7 @@ export default function SettingsPrompt() {
       const sanitised = mediaSources.filter((source): source is IMediaSource => {
         if (!source || typeof source !== 'object') return false;
         const uriOk = typeof source.uri === 'string' && source.uri.length > 0;
-        const typeOk = source.contentType === 'tv' || source.contentType === 'movie' || source.contentType === 'audiobook';
+        const typeOk = source.contentType === 'tv' || source.contentType === 'movie' || source.contentType === 'audiobook' || source.contentType === 'personal';
         return uriOk && typeOk;
       });
 
@@ -407,6 +416,7 @@ export default function SettingsPrompt() {
       setLocalVideoSpeedControlEnabled(settingsVideoSpeedControlEnabled);
       setLocalVideoAutoPlayNext(settingsVideoAutoPlayNext);
       setLocalAudiobookPlayer(settingsAudiobookPlayer);
+      setLocalPersonalLayout(settingsPersonalLayout);
       setLocalKeyboardHandling(settingsKeyboardHandling);
       setLocalAudiobookRewindSeconds(settingsAudiobookRewindSeconds);
       setLocalBedtimeEnabled(settingsBedtimeEnabled);
@@ -416,7 +426,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsShowSidebarSort, settingsVideoPlayer, settingsVideoShowProgressBar, settingsVideoTrackPickerEnabled, settingsVideoSpeedControlEnabled, settingsVideoAutoPlayNext, settingsAudiobookPlayer, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes]));
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsShowSidebarSort, settingsVideoPlayer, settingsVideoShowProgressBar, settingsVideoTrackPickerEnabled, settingsVideoSpeedControlEnabled, settingsVideoAutoPlayNext, settingsAudiobookPlayer, settingsPersonalLayout, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes]));
 
   // Leaving Settings closes any open category, so the next visit starts at the category list.
   useFocusEffect(useCallback(() => () => setActiveSection(null), []));
@@ -546,6 +556,11 @@ export default function SettingsPrompt() {
         dispatch(setVideoAutoPlayNext(videoAutoPlayNext));
         changeCount++;
       }
+      if (personalLayout !== settingsPersonalLayout) {
+        logger.log('Settings', `Persisting: personalLayout changed ${settingsPersonalLayout} → ${personalLayout}`);
+        dispatch(setPersonalLayout(personalLayout));
+        changeCount++;
+      }
       if (audiobookPlayer && audiobookPlayer !== settingsAudiobookPlayer) {
         logger.log('Settings', `Persisting: audiobookPlayer changed ${settingsAudiobookPlayer} → ${audiobookPlayer}`);
         dispatch(setAudiobookPlayer(audiobookPlayer));
@@ -586,7 +601,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, showSidebarSort, settingsShowSidebarSort, videoPlayer, settingsVideoPlayer, videoShowProgressBar, settingsVideoShowProgressBar, videoTrackPickerEnabled, settingsVideoTrackPickerEnabled, videoSpeedControlEnabled, settingsVideoSpeedControlEnabled, videoAutoPlayNext, settingsVideoAutoPlayNext, audiobookPlayer, settingsAudiobookPlayer, keyboardHandling, settingsKeyboardHandling, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, showSidebarSort, settingsShowSidebarSort, videoPlayer, settingsVideoPlayer, videoShowProgressBar, settingsVideoShowProgressBar, videoTrackPickerEnabled, settingsVideoTrackPickerEnabled, videoSpeedControlEnabled, settingsVideoSpeedControlEnabled, videoAutoPlayNext, settingsVideoAutoPlayNext, audiobookPlayer, settingsAudiobookPlayer, personalLayout, settingsPersonalLayout, keyboardHandling, settingsKeyboardHandling, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
@@ -855,7 +870,7 @@ export default function SettingsPrompt() {
       case 'appearance':
         return `${labelFor(appColorSchemeOptions, appColorScheme)} theme · ${labelFor(uiTypeOptions, viewOrientation)} view`;
       case 'browsing':
-        return `Opens ${labelFor(defaultPageOptions, defaultPage)} · ${labelFor(sortOrderOptions, sortOrder)}`;
+        return `Opens ${labelFor(defaultPageOptions, defaultPage)} · ${labelFor(sortOrderOptions, sortOrder)} · Personal ${labelFor(personalLayoutOptions, personalLayout).toLowerCase()}`;
       case 'video':
         return videoPlayer === 'external' ? 'External app' : 'In-app player';
       case 'audiobook':
@@ -910,11 +925,11 @@ export default function SettingsPrompt() {
               <View key={source.uri} style={styles.sourceRow}>
                 <View style={styles.sourceInfo}>
                   <ThemedText style={styles.sourceType}>
-                    {`Library ${index + 1} · ${source.contentType === 'tv' ? '📺 TV' : source.contentType === 'audiobook' ? '🎧 Audiobooks' : '🎬 Movies'}`}
+                    {`Library ${index + 1} · ${source.contentType === 'tv' ? '📺 TV' : source.contentType === 'audiobook' ? '🎧 Audiobooks' : source.contentType === 'personal' ? '🎞️ Personal' : '🎬 Movies'}`}
                   </ThemedText>
                   <ThemedText style={styles.sourceUri} numberOfLines={1}>{safeDecodeUri(source.uri)}</ThemedText>
                 </View>
-                {source.contentType !== 'audiobook' && (
+                {source.contentType !== 'audiobook' && source.contentType !== 'personal' && (
                   <Dropdown
                     compact
                     options={metadataSourceOptions}
@@ -1075,6 +1090,9 @@ export default function SettingsPrompt() {
             />
             <SettingRow label="TV show structure" description={viewTypeOptions.find(o => o.id === mediaStructure)?.title}>
               <Dropdown options={viewTypeOptions} value={mediaStructure} onChange={setLocalMediaStructure} />
+            </SettingRow>
+            <SettingRow label="Personal library layout" description={personalLayoutOptions.find(o => o.id === personalLayout)?.title}>
+              <Dropdown options={personalLayoutOptions} value={personalLayout} onChange={setLocalPersonalLayout} />
             </SettingRow>
           </>
         );

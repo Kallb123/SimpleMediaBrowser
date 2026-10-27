@@ -1,4 +1,5 @@
 import { episodeDisplayLabel, movieDisplayLabel, showDisplayLabel } from '@/scripts/mediaLabels';
+import { nextPersonalVideo, personalDisplayTitle } from '@/scripts/personalLibrary';
 // Type-only imports, so this module (and the tests that load it) never pulls in the store.
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { IMediaOverride, IMediaSeason, LibraryState } from '@/store/libraryReducer';
@@ -32,7 +33,7 @@ function episodeTitle(showName: string, season: IMediaSeason, ep: IMediaObject, 
  * something to play. Returns null when there is no key or the library has no such file.
  */
 export function resolveVideoRequest(
-    library: Pick<LibraryState, 'mediaLibrary' | 'movies' | 'mediaOverrides'>,
+    library: Pick<LibraryState, 'mediaLibrary' | 'movies' | 'mediaOverrides'> & Partial<Pick<LibraryState, 'personal'>>,
     parsedPath: string | undefined,
     startAt: string | undefined,
 ): VideoRequest | null {
@@ -58,6 +59,9 @@ export function resolveVideoRequest(
             }
         }
     }
+
+    const personalVideo = library.personal?.find((v) => v.parsedPath === parsedPath);
+    if (personalVideo) return request(personalVideo, personalDisplayTitle(personalVideo, mediaOverrides));
     return null;
 }
 
@@ -81,24 +85,27 @@ function compareEpisodes(a: IMediaObject, b: IMediaObject, overrides: { [key: st
     return (a.resolvedTitle ?? a.title ?? a.filename).localeCompare(b.resolvedTitle ?? b.title ?? b.filename, undefined, NATURAL_SORT_OPTS);
 }
 
-/** The episode the player offers after the one that just played. */
+/** The episode (or Personal video) the player offers after the one that just played. */
 export interface NextEpisode {
-    /** The file's SAF `content://` URI (for `setEpisodeLastOpened`). */
+    /** The file's SAF `content://` URI (for `setEpisodeLastOpened` / `setPersonalLastOpened`). */
     path: string;
     /** The file's library key; also what the player route takes. */
     parsedPath: string;
     /** Display label, as `resolveVideoRequest` gives it. */
     title: string;
+    /** True for a Personal video, which is recorded with `setPersonalLastOpened` and locked with the Personal section. */
+    isPersonal?: boolean;
 }
 
 /**
  * The episode that follows `parsedPath` in browse order: the next one in its season, else the
  * first of the next season (by season number). Hidden episodes are skipped, so a season that is
- * hidden episode by episode is passed over. Null for a movie, a key the library does not have,
- * or the last episode of the show.
+ * hidden episode by episode is passed over. A Personal video is followed by the next one in its
+ * folder (see `nextPersonalVideo`), skipping hidden and unavailable ones. Null for a movie, a key the
+ * library does not have, or the last episode of the show / folder.
  */
 export function nextEpisode(
-    library: Pick<LibraryState, 'mediaLibrary' | 'mediaOverrides'>,
+    library: Pick<LibraryState, 'mediaLibrary' | 'mediaOverrides'> & Partial<Pick<LibraryState, 'personal'>>,
     parsedPath: string | undefined,
 ): NextEpisode | null {
     if (!parsedPath) return null;
@@ -116,6 +123,11 @@ export function nextEpisode(
         const next = ordered.slice(index + 1).find(({ ep }) => !mediaOverrides[`episode:${ep.parsedPath}`]?.hidden);
         if (!next) return null;
         return { path: next.ep.path, parsedPath: next.ep.parsedPath, title: episodeTitle(showName, next.season, next.ep, mediaOverrides) };
+    }
+    const available = (library.personal ?? []).filter((v) => !v.unavailable);
+    const nextVideo = nextPersonalVideo(available, parsedPath, mediaOverrides);
+    if (nextVideo) {
+        return { path: nextVideo.path, parsedPath: nextVideo.parsedPath, title: personalDisplayTitle(nextVideo, mediaOverrides), isPersonal: true };
     }
     return null;
 }

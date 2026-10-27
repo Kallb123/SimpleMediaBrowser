@@ -10,6 +10,7 @@ const MEDIA_TYPE_OPTIONS: { id: contentTypes; label: string }[] = [
   { id: 'tv', label: '📺 TV' },
   { id: 'movie', label: '🎬 Movies' },
   { id: 'audiobook', label: '🎧 Audiobooks' },
+  { id: 'personal', label: '🎞️ Personal' },
 ];
 
 /**
@@ -50,7 +51,8 @@ export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
     const source: IMediaSource = {
       uri,
       contentType: selectedType,
-      metadataSource: selectedMetadataSource === 'auto' ? undefined : selectedMetadataSource,
+      // Personal folders aren't matched against TMDB/TVDB, so they have no metadata source.
+      metadataSource: selectedType === 'personal' || selectedMetadataSource === 'auto' ? undefined : selectedMetadataSource,
     };
     dispatch(addMediaSource(source));
     logger.log('AddMediaSource', `Dispatched addMediaSource for uri=${uri}`);
@@ -67,13 +69,15 @@ export function AddMediaSource({ onAdded }: AddMediaSourceProps) {
           onChange={setSelectedType}
           accessibilityLabel="Folder type"
         />
-        <Dropdown
-          compact
-          options={METADATA_SOURCE_OPTIONS}
-          value={selectedMetadataSource}
-          onChange={setSelectedMetadataSource}
-          accessibilityLabel="Metadata source"
-        />
+        {selectedType !== 'personal' && (
+          <Dropdown
+            compact
+            options={METADATA_SOURCE_OPTIONS}
+            value={selectedMetadataSource}
+            onChange={setSelectedMetadataSource}
+            accessibilityLabel="Metadata source"
+          />
+        )}
         <Button title="Add Source" onPress={pickDirectory} accessibilityLabel="Add media source directory" />
       </View>
     </View>

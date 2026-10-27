@@ -10,8 +10,8 @@ import { Link, Stack, router } from 'expo-router';
 import { useRoute } from '@react-navigation/native';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder, selectAudiobookPlayer, selectVideoPlayer } from '@/store/settingsReducer';
-import { clearEpisodeMetadata, clearMovieMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, markWatched, markUnwatched, getShowWatchKeys, getSeasonWatchKeys, getAudiobookWatchKeys, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectMediaOverrides } from '@/store/libraryReducer';
+import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder, selectAudiobookPlayer, selectVideoPlayer, selectPersonalLayout } from '@/store/settingsReducer';
+import { clearEpisodeMetadata, clearMovieMetadata, clearPersonalMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, markWatched, markUnwatched, getShowWatchKeys, getSeasonWatchKeys, getAudiobookWatchKeys, setEpisodeLastOpened, setMovieLastOpened, setPersonalLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectPersonal, selectPersonalFolderPosters, selectMediaOverrides } from '@/store/libraryReducer';
 import { selectIsScanning, selectScanProgress } from '@/store/scanReducer';
 import { store } from '@/store/store';
 import { FlashList } from '@shopify/flash-list';
@@ -23,9 +23,13 @@ import { formatClock } from '@/utils/formatClock';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { useThumbnailVersion } from '@/hooks/useThumbnailVersion';
 import { audioPartFiles } from '@/scripts/libraryUtils';
+import { personalDisplayTitle, personalOverrideKey, personalWatchKeys } from '@/scripts/personalLibrary';
+import type { IPersonalVideo } from '@/scripts/personalLibrary';
+import { personalBrowseLevel, personalSortKey } from '@/scripts/personalBrowse';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { IMediaLibrary, IMediaAudiobook, IMediaOverride } from '@/store/libraryReducer';
-import type { viewTypes, sortOrders } from '@/store/settingsReducer';
+import type { viewTypes, sortOrders, personalLayouts } from '@/store/settingsReducer';
+import type { EditItemType } from '@/hooks/useEditTarget';
 import { logger } from '@/scripts/Logger';
 import { useEditMode } from '@/contexts/EditModeContext';
 import { PosterBox } from '@/components/ui/PosterBox';
@@ -34,20 +38,22 @@ import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, POR
 
 // ── Navigation types ─────────────────────────────────────────────────────────
 
-/** One folder level of the browser hierarchy (a show, a season, or a multi-part audiobook). */
+/** One folder level of the browser hierarchy (a show, a season, a multi-part audiobook, or a Personal folder). */
 export type NavLevel = {
   label: string;
   showName?: string;
   seasonKey?: string;
   /** Set when navigating into a multi-part audiobook to list its files. */
   audiobookKey?: string;
+  /** Set when navigating into a Personal folder: its folder key (`folderPath.join('/')`). */
+  personalFolder?: string;
 };
 
 type ThumbnailSource = VideoThumbnail | string;
 
 type DisplayItem =
-  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook'; count?: number; /** Watch keys of the files below this folder (resolved lazily; drives its tick and bulk toggle). */ watchKeys: () => readonly string[]; /** The audiobook a root multi-part entry stands for (drives its progress bar). */ audiobook?: IMediaAudiobook }
-  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook'; /** 1-based position in `audioPartFiles` of an audiobook part row (absent on a root single-file book). */ partNumber?: number; /** The audiobook this file belongs to (set for every audiobook file; the in-app player and progress bar use it). */ audiobook?: IMediaAudiobook };
+  | { kind: 'folder'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; onPress: () => void; mediaType: 'show' | 'season' | 'audiobook' | 'personalFolder'; count?: number; /** What `count` counts, singular (default "episode"). */ countNoun?: string; /** Watch keys of the files below this folder (resolved lazily; drives its tick and bulk toggle). */ watchKeys: () => readonly string[]; /** The audiobook a root multi-part entry stands for (drives its progress bar). */ audiobook?: IMediaAudiobook }
+  | { kind: 'file'; label: string; sortKey?: string; lastOpened?: number; firstDetected?: number; key: string; thumbnailUri?: ThumbnailSource; posterUri?: string; mediaObject: IMediaObject; mediaType: 'movie' | 'episode' | 'audiobook' | 'personal'; /** Secondary line under the label (a Personal video's channel). */ subtitle?: string; /** 1-based position in `audioPartFiles` of an audiobook part row (absent on a root single-file book). */ partNumber?: number; /** The audiobook this file belongs to (set for every audiobook file; the in-app player and progress bar use it). */ audiobook?: IMediaAudiobook };
 
 // ── Helper: pick a representative thumbnail for a show folder ─────────────────
 
@@ -559,6 +565,61 @@ function buildBaseDisplayItems(
   }
 }
 
+/**
+ * Display items for the Personal section: in the folders layout the child folders and videos at
+ * the location's folder, in the flat layout every video. Sorted together by the "Sorting"
+ * appearance setting, like shows and movies at the library root.
+ */
+function buildPersonalDisplayItems(
+  personal: IPersonalVideo[],
+  folderPosters: { [folderKey: string]: string },
+  layout: personalLayouts,
+  location: NavLevel | undefined,
+  overrides: { [key: string]: IMediaOverride },
+  navigateInto: (entry: NavLevel) => void,
+  sortOrder: sortOrders,
+): DisplayItem[] {
+  const level = personalBrowseLevel(personal, layout, location?.personalFolder, overrides);
+  const folderItems: DisplayItem[] = level.folders.map((folder) => {
+    // The folder's own image (folder.jpg etc.) wins; otherwise borrow the first video's.
+    let posterUri: string | undefined = folderPosters[folder.folderKey] || undefined;
+    let thumbnailUri: ThumbnailSource | undefined;
+    for (const video of folder.videos) {
+      posterUri ??= overrides[personalOverrideKey(video.parsedPath)]?.poster || video.poster || undefined;
+      thumbnailUri ??= thumbnailCache.get(video.path);
+      if (posterUri && thumbnailUri) break;
+    }
+    return {
+      kind: 'folder' as const,
+      label: folder.name,
+      lastOpened: folder.lastOpened,
+      firstDetected: folder.firstDetected,
+      key: `personalFolder:${folder.folderKey}`,
+      posterUri,
+      thumbnailUri,
+      onPress: () => navigateInto({ label: folder.name, personalFolder: folder.folderKey }),
+      mediaType: 'personalFolder' as const,
+      count: folder.videos.length,
+      countNoun: 'video',
+      watchKeys: () => personalWatchKeys(folder.videos, '', overrides),
+    };
+  });
+  const videoItems: DisplayItem[] = level.videos.map((video) => ({
+    kind: 'file' as const,
+    label: personalDisplayTitle(video, overrides),
+    sortKey: personalSortKey(video, overrides),
+    subtitle: video.channel || undefined,
+    lastOpened: video.lastOpened,
+    firstDetected: video.firstDetected,
+    key: video.path,
+    thumbnailUri: thumbnailCache.get(video.path),
+    posterUri: overrides[personalOverrideKey(video.parsedPath)]?.poster || video.poster || undefined,
+    mediaObject: video,
+    mediaType: 'personal' as const,
+  }));
+  return applySortOrder([...folderItems, ...videoItems], sortOrder);
+}
+
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 /** Stable empty collections, so filtered-out media types keep a constant identity across
@@ -566,6 +627,7 @@ function buildBaseDisplayItems(
 const EMPTY_LIBRARY: IMediaLibrary = {};
 const EMPTY_MOVIES: IMediaObject[] = [];
 const EMPTY_AUDIOBOOKS: IMediaAudiobook[] = [];
+const EMPTY_PERSONAL: IPersonalVideo[] = [];
 const EMPTY_SELECTION: Set<string> = new Set();
 
 const CARD_GAP = 8;
@@ -597,7 +659,7 @@ const PROGRESS_COLOR_THUMBNAILS = '#4CAF50';
 /** Progress bar colour used during the TMDB metadata enrichment phase. */
 const PROGRESS_COLOR_ENRICHING = '#2196F3';
 
-export type MediaFilter = 'all' | 'tv' | 'movies' | 'audiobooks';
+export type MediaFilter = 'all' | 'tv' | 'movies' | 'audiobooks' | 'personal';
 
 /** A folder screen's place in the hierarchy: the level it shows plus its header title
  *  (the labels of every level above it, e.g. "Show › Season 1"). */
@@ -609,6 +671,7 @@ const FOLDER_ROUTES = {
   tv: '/tv/folder',
   movies: '/movies/folder',
   audiobooks: '/audiobooks/folder',
+  personal: '/personal/folder',
 } as const satisfies Record<MediaFilter, string>;
 
 interface MediaBrowserScreenProps {
@@ -633,6 +696,9 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   const allLibrary = useSelector(selectMediaLibrary);
   const allMovies = useSelector(selectMovies);
   const allAudiobooks = useSelector(selectAudiobooks);
+  const allPersonal = useSelector(selectPersonal);
+  const personalFolderPosters = useSelector(selectPersonalFolderPosters);
+  const personalLayout = useSelector(selectPersonalLayout);
   const mediaOverrides = useSelector(selectMediaOverrides);
 
   const dispatch = useDispatch();
@@ -681,10 +747,13 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   // turn is FlashList's `data`: rebuilding the empty literals on every render would hand
   // FlashList a fresh array identity each time and make it re-run layout (which discards
   // any scroll position we just restored).
-  const mediaLibrary: IMediaLibrary = (mediaFilter === 'movies' || mediaFilter === 'audiobooks') ? EMPTY_LIBRARY : visibleLibrary;
-  const movies: IMediaObject[] = (mediaFilter === 'tv' || mediaFilter === 'audiobooks') ? EMPTY_MOVIES : visibleMovies;
-  // Audiobooks appear on the dedicated Audiobooks page and on Home (all).
+  const mediaLibrary: IMediaLibrary = (mediaFilter === 'movies' || mediaFilter === 'audiobooks' || mediaFilter === 'personal') ? EMPTY_LIBRARY : visibleLibrary;
+  const movies: IMediaObject[] = (mediaFilter === 'tv' || mediaFilter === 'audiobooks' || mediaFilter === 'personal') ? EMPTY_MOVIES : visibleMovies;
+  // Audiobooks appear on the dedicated Audiobooks page and on the Library (all) page.
   const audiobooks: IMediaAudiobook[] = (mediaFilter === 'all' || mediaFilter === 'audiobooks') ? visibleAudiobooks : EMPTY_AUDIOBOOKS;
+  // Personal videos appear only on the Personal page, never on the Library (all) page. The
+  // unavailable/hidden ones are filtered when the display items are built.
+  const personal: IPersonalVideo[] = mediaFilter === 'personal' ? allPersonal : EMPTY_PERSONAL;
 
   const [pressedKey, setPressedKey] = useState<string | null>(null);
 
@@ -699,6 +768,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     if (entry.showName !== undefined) params.showName = entry.showName;
     if (entry.seasonKey !== undefined) params.seasonKey = entry.seasonKey;
     if (entry.audiobookKey !== undefined) params.audiobookKey = entry.audiobookKey;
+    if (entry.personalFolder !== undefined) params.personalFolder = entry.personalFolder;
     router.push({ pathname: FOLDER_ROUTES[mediaFilter], params });
   }, [clearItemSelection, location, mediaFilter]);
 
@@ -717,13 +787,16 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   const listRowHeight = mapScaleToListRowHeight(viewScale);
 
   const displayItems = useMemo(
-    () => buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, sortOrder),
+    () => mediaFilter === 'personal'
+      ? buildPersonalDisplayItems(personal, personalFolderPosters, personalLayout, location, mediaOverrides, navigateInto, sortOrder)
+      : buildDisplayItems(mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, sortOrder),
     // thumbnailVersion changes (rate-limited) when thumbnailCache gains or loses entries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mediaLibrary, movies, audiobooks, viewType, location, mediaOverrides, navigateInto, thumbnailVersion, sortOrder],
+    [mediaFilter, mediaLibrary, movies, audiobooks, personal, personalFolderPosters, personalLayout, viewType, location, mediaOverrides, navigateInto, thumbnailVersion, sortOrder],
   );
 
-  const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0;
+  const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0 || personal.length > 0;
+  const hasPersonalSource = mediaSources.some((source) => source.contentType === 'personal');
 
   // Header title: the section name at the root, otherwise the path below it ("Show › Season 1").
   const sectionTitle = mediaFilter === 'tv'
@@ -732,7 +805,9 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       ? 'Movies'
       : mediaFilter === 'audiobooks'
         ? 'Audiobooks'
-        : 'Home';
+        : mediaFilter === 'personal'
+          ? 'Personal'
+          : 'Library';
   const headerTitle = `${editMode ? '✏️ ' : ''}${location?.title ?? sectionTitle}`;
 
   /** Records the current time as the `lastOpened` timestamp for a file display item. */
@@ -742,6 +817,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       dispatch(setEpisodeLastOpened({ path: item.mediaObject.path, lastOpened: now }));
     } else if (item.mediaType === 'movie') {
       dispatch(setMovieLastOpened({ path: item.mediaObject.path, lastOpened: now }));
+    } else if (item.mediaType === 'personal') {
+      dispatch(setPersonalLastOpened({ path: item.mediaObject.path, lastOpened: now }));
     } else if (item.mediaType === 'audiobook') {
       const folderKey = item.key.startsWith('audiobook:')
         ? item.key.slice('audiobook:'.length)
@@ -774,7 +851,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   }, []);
 
   /**
-   * Plays a movie or episode in the in-app video player and opens it. Unlike the external hand-off
+   * Plays a movie, episode or Personal video in the in-app video player and opens it. Unlike the external hand-off
    * nothing is ticked here: the player marks it watched once it gets near the end. With a saved resume
    * point it asks first whether to continue from there. It also records the file as last opened.
    */
@@ -809,7 +886,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
 
   /** Open the edit screen for a given display item. */
   const openEditScreen = useCallback((item: DisplayItem) => {
-    let itemType: 'show' | 'movie' | 'episode' | 'audiobook';
+    let itemType: EditItemType;
     let itemKey: string;
     if (item.mediaType === 'audiobook') {
       // Only root audiobook entries (key "audiobook:<folderKey>") are editable;
@@ -821,10 +898,10 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       itemType = 'show';
       itemKey = `show:${item.key}`;
     } else if (item.kind === 'file') {
-      itemType = item.mediaType === 'movie' ? 'movie' : 'episode';
+      itemType = item.mediaType === 'movie' ? 'movie' : item.mediaType === 'personal' ? 'personal' : 'episode';
       itemKey = `${item.mediaType}:${item.mediaObject.parsedPath}`;
     } else {
-      // Season folders are not editable
+      // Season and Personal folders are not editable
       return;
     }
     logger.log('MediaBrowserScreen', `Opening edit screen: type=${itemType} key=${itemKey}`);
@@ -840,7 +917,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
    *   "show:<showName>"      – for a TV show folder
    *   "movie:<parsedPath>"   – for a movie file
    *   "episode:<parsedPath>" – for an episode file
-   * Returns null for non-selectable items such as season folders.
+   *   "personal:<parsedPath>" – for a Personal video
+   * Returns null for non-selectable items such as season and Personal folders.
    */
   const getItemOverrideKey = useCallback((item: DisplayItem): string | null => {
     if (item.kind === 'folder' && item.mediaType === 'show') {
@@ -861,6 +939,11 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
 
   const selectedMoviePaths = useMemo(
     () => (Array.from(selectedItems) as string[]).filter((k) => k.startsWith('movie:')).map((k) => k.slice(6)),
+    [selectedItems],
+  );
+
+  const selectedPersonalPaths = useMemo(
+    () => (Array.from(selectedItems) as string[]).filter((k) => k.startsWith('personal:')).map((k) => k.slice(9)),
     [selectedItems],
   );
 
@@ -909,6 +992,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     const shows = selectedShowKeys.filter((showName) => library[showName]);
     const movies = (state.libraryReducer.movies as IMediaObject[])
       .filter((movie) => selectedMoviePaths.includes(movie.parsedPath));
+    const personalVideos = (state.libraryReducer.personal as IPersonalVideo[] | undefined ?? [])
+      .filter((video) => selectedPersonalPaths.includes(video.parsedPath));
     const episodes = Object.values(library)
       .flatMap((show) => Object.values(show.seasons).flatMap((season) => Object.values(season.episodes)))
       .filter((ep) => selectedEpisodePaths.includes(ep.parsedPath));
@@ -916,8 +1001,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     const episodesOfSelectedShows = shows.flatMap((showName) =>
       Object.values(library[showName].seasons).flatMap((season) => Object.values(season.episodes)),
     );
-    return { shows, movies, episodes, episodesOfSelectedShows };
-  }, [selectedShowKeys, selectedMoviePaths, selectedEpisodePaths]);
+    return { shows, movies, personalVideos, episodes, episodesOfSelectedShows };
+  }, [selectedShowKeys, selectedMoviePaths, selectedPersonalPaths, selectedEpisodePaths]);
 
   /**
    * Clears cached provider metadata for the given selection — the poster/still URIs in
@@ -957,6 +1042,11 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       dispatch(clearMovieMetadata(movie.path));
     }
 
+    for (const video of selection.personalVideos) {
+      deleteLocalFile(video.poster);
+      dispatch(clearPersonalMetadata(video.path));
+    }
+
     for (const episode of selection.episodes) {
       deleteLocalFile(episode.resolvedThumbnail);
       dispatch(clearEpisodeMetadata(episode.path));
@@ -988,6 +1078,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       await FileScanner.getInstance().refetchMetadataFor(
         selection.shows,
         selection.movies.map((movie) => movie.parsedPath),
+        selection.personalVideos.map((video) => video.path),
       );
     } catch (e) {
       logger.warn('MediaBrowserScreen', 'Failed to refresh metadata for selected items', e);
@@ -1002,7 +1093,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     // Deduplicate by path so an episode that is both selected itself and covered by its
     // selected show is only regenerated once.
     const byPath = new Map<string, { path: string; filename: string }>();
-    for (const media of [...selection.movies, ...selection.episodes, ...selection.episodesOfSelectedShows]) {
+    for (const media of [...selection.movies, ...selection.personalVideos, ...selection.episodes, ...selection.episodesOfSelectedShows]) {
       byPath.set(media.path, { path: media.path, filename: media.filename });
     }
     clearItemSelection();
@@ -1139,6 +1230,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                 item.mediaType === 'show' ||
                 item.mediaType === 'movie' ||
                 item.mediaType === 'episode' ||
+                item.mediaType === 'personal' ||
                 // Root audiobook entries are editable; part files (key = file path) are not.
                 (item.mediaType === 'audiobook' && item.key.startsWith('audiobook:'))
               );
@@ -1163,7 +1255,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
               } else if (item.mediaType === 'audiobook' && item.audiobook && audiobookPlayer === 'inapp') {
                 const { audiobook, partNumber } = item;
                 handlePress = () => playAudiobookInApp(audiobook, partNumber);
-              } else if ((item.mediaType === 'movie' || item.mediaType === 'episode') && videoPlayer === 'inapp') {
+              } else if ((item.mediaType === 'movie' || item.mediaType === 'episode' || item.mediaType === 'personal') && videoPlayer === 'inapp') {
                 handlePress = () => playVideoInApp(item);
               } else {
                 handlePress = () => {
@@ -1191,6 +1283,8 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
                     isEditable={isEditable}
                     isSelected={isSelected}
                     count={item.kind === 'folder' ? item.count : undefined}
+                    countNoun={item.kind === 'folder' ? item.countNoun : undefined}
+                    subtitle={item.kind === 'file' ? item.subtitle : undefined}
                     partNumber={item.kind === 'file' ? item.partNumber : undefined}
                     watchKey={item.kind === 'file' ? item.mediaObject.parsedPath : undefined}
                     watchKeys={item.kind === 'folder' ? item.watchKeys : undefined}
@@ -1388,9 +1482,17 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
       ) : (
         <ThemedView style={styles.stepContainer}>
           <ThemedText type="subtitle">Problem</ThemedText>
-          {mediaSources.length > 0 ? (
+          {mediaFilter === 'personal' && !hasPersonalSource ? (
             <ThemedText>
-              Your library directories are empty or invalid, check them in{' '}
+              No Personal folders have been added yet. Add one with the Personal type in{' '}
+              <Link href="/settings">
+                Settings
+              </Link>
+              .
+            </ThemedText>
+          ) : mediaSources.length > 0 ? (
+            <ThemedText>
+              {mediaFilter === 'personal' ? 'Your Personal folders are empty or invalid, check them in' : 'Your library directories are empty or invalid, check them in'}{' '}
               <Link href="/settings">
                 Settings
               </Link>

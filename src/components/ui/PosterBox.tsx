@@ -29,6 +29,10 @@ export type PosterBoxItem = {
   thumbnailUri?: ThumbnailSource;
   posterUri?: string;
   count?: number;
+  /** What `count` counts, singular (default "episode"). */
+  countNoun?: string;
+  /** Secondary line under the label (a Personal video's channel). */
+  subtitle?: string;
   /** 1-based part number of an audiobook file; shown in place of the placeholder icon. */
   partNumber?: number;
 };
@@ -188,7 +192,7 @@ export function PosterBox({
         {item.kind === 'folder' && item.count !== undefined && (
           <View
             style={styles.countBadge}
-            accessibilityLabel={`${item.count} ${item.count === 1 ? 'episode' : 'episodes'}`}
+            accessibilityLabel={`${item.count} ${item.countNoun ?? 'episode'}${item.count === 1 ? '' : 's'}`}
           >
             <ThemedText style={styles.countBadgeText}>{item.count}</ThemedText>
           </View>
@@ -197,6 +201,11 @@ export function PosterBox({
       <ThemedText style={styles.cardLabel} numberOfLines={2}>
         {item.label}
       </ThemedText>
+      {item.subtitle ? (
+        <ThemedText style={styles.cardSubtitle} numberOfLines={1}>
+          {item.subtitle}
+        </ThemedText>
+      ) : null}
     </TouchableOpacity>
   );
 }
@@ -248,6 +257,12 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 6,
     fontSize: 12,
+  },
+  cardSubtitle: {
+    paddingHorizontal: 4,
+    paddingBottom: 6,
+    fontSize: 11,
+    opacity: 0.6,
   },
   editOverlay: {
     position: 'absolute',

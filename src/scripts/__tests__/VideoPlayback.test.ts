@@ -1,5 +1,6 @@
 import { nextEpisode, preferredTrack, resolveVideoRequest, sameTrack, trackLabel, trackLabels, unsupportedVideoTrack } from '../VideoPlayback';
 import type { IMediaObject } from '../libraryUtils';
+import type { IPersonalVideo } from '../personalLibrary';
 import type { LibraryState } from '@/store/libraryReducer';
 
 const file = (name: string, extra: Partial<IMediaObject> = {}): IMediaObject => ({
@@ -224,6 +225,79 @@ describe('trackLabels', () => {
       { label: 'English', language: 'en' },
       { label: 'English', name: 'English', language: 'en' },
     ])).toEqual(['English 1', 'English 2', 'English 3']);
+  });
+});
+
+const personalVideo = (name: string, folderPath: string[] = [], extra: Partial<IPersonalVideo> = {}): IPersonalVideo => ({
+  ...file(name),
+  parsedPath: [...folderPath, `${name}.mp4`].join('/'),
+  path: `content://p/${[...folderPath, name].join('/')}.mp4`,
+  filename: `${name}.mp4`,
+  folderPath,
+  ...extra,
+});
+
+describe('resolveVideoRequest (Personal)', () => {
+  const personal = [
+    personalVideo('Lesson 1', ['Art'], { resolvedTitle: 'Watercolour basics' }),
+    personalVideo('Lesson 2', ['Art']),
+  ];
+
+  it('finds a Personal video by its library key and uses its resolved title', () => {
+    expect(resolveVideoRequest({ ...makeLibrary(), personal }, 'Art/Lesson 1.mp4', '30')).toEqual({
+      path: 'content://p/Art/Lesson 1.mp4',
+      parsedPath: 'Art/Lesson 1.mp4',
+      filename: 'Lesson 1.mp4',
+      title: 'Watercolour basics',
+      startAt: 30,
+    });
+  });
+
+  it('lets a personal: title override win', () => {
+    const library = { ...makeLibrary({ 'personal:Art/Lesson 2.mp4': { title: 'Sketching' } }), personal };
+    expect(resolveVideoRequest(library, 'Art/Lesson 2.mp4', '0')?.title).toBe('Sketching');
+  });
+
+  it('is still null for an unknown key, and works when the library has no personal list', () => {
+    expect(resolveVideoRequest({ ...makeLibrary(), personal }, 'Art/missing.mp4', '0')).toBeNull();
+    expect(resolveVideoRequest(makeLibrary(), 'Art/Lesson 1.mp4', '0')).toBeNull();
+  });
+});
+
+describe('nextEpisode (Personal)', () => {
+  const lessons = [
+    personalVideo('Lesson 1', ['Art']),
+    personalVideo('Lesson 10', ['Art']),
+    personalVideo('Lesson 2', ['Art']),
+    personalVideo('Other', ['Home']),
+  ];
+  const library = (overrides: LibraryState['mediaOverrides'] = {}, personal = lessons) =>
+    ({ ...makeLibrary(overrides), personal });
+
+  it('returns the next video of the folder in natural order, flagged as Personal', () => {
+    expect(nextEpisode(library(), 'Art/Lesson 1.mp4')).toEqual({
+      path: 'content://p/Art/Lesson 2.mp4',
+      parsedPath: 'Art/Lesson 2.mp4',
+      title: 'Lesson 2',
+      isPersonal: true,
+    });
+    expect(nextEpisode(library(), 'Art/Lesson 2.mp4')?.parsedPath).toBe('Art/Lesson 10.mp4');
+  });
+
+  it('is null for the last video of its folder', () => {
+    expect(nextEpisode(library(), 'Art/Lesson 10.mp4')).toBeNull();
+    expect(nextEpisode(library(), 'Home/Other.mp4')).toBeNull();
+  });
+
+  it('skips hidden and unavailable videos', () => {
+    const hidden = library({ 'personal:Art/Lesson 2.mp4': { hidden: true } });
+    expect(nextEpisode(hidden, 'Art/Lesson 1.mp4')?.parsedPath).toBe('Art/Lesson 10.mp4');
+    const gone = library({}, lessons.map((v) => (v.filename === 'Lesson 2.mp4' ? { ...v, unavailable: true } : v)));
+    expect(nextEpisode(gone, 'Art/Lesson 1.mp4')?.parsedPath).toBe('Art/Lesson 10.mp4');
+  });
+
+  it('does not set isPersonal for an episode', () => {
+    expect(nextEpisode({ ...library(), mediaLibrary: makeLibrary().mediaLibrary }, 'tree/bluey-s02e01.mkv')?.isPersonal).toBeUndefined();
   });
 });
 
