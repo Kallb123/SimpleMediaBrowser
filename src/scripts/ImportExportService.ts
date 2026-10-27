@@ -54,8 +54,9 @@ import {
     setBedtimeStart,
     setBedtimeEnd,
     setBedtimeAllowedTypes,
+    setPersonalLayout,
 } from '@/store/settingsReducer';
-import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, videoPlayers, audiobookPlayers, contentTypes, sortOrders, videoAutoPlayNextModes } from '@/store/settingsReducer';
+import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, videoPlayers, audiobookPlayers, contentTypes, sortOrders, videoAutoPlayNextModes, personalLayouts } from '@/store/settingsReducer';
 import { formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
 import { logger } from '@/scripts/Logger';
 import type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData } from '@/scripts/SmbTypes';
@@ -63,6 +64,9 @@ import { smbThumbFilename } from '@/scripts/SmbTypes';
 
 // Mirrors the `sortOrders` union so an import can reject unknown values.
 const SORT_ORDERS: readonly sortOrders[] = ['alphabetical', 'reverseAlphabetical', 'lastOpened', 'reverseLastOpened', 'recentlyAdded'];
+
+// Mirrors the `defaultPages` union so an import can reject unknown values.
+const DEFAULT_PAGES: readonly defaultPages[] = ['home', 'tv', 'movies', 'audiobooks', 'personal'];
 
 // Re-export smb.json types so callers can import them from this module.
 export type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData };
@@ -261,6 +265,7 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             appColorScheme: s.appColorScheme,
             sortOrder: s.sortOrder,
             showSidebarSort: s.showSidebarSort,
+            personalLayout: s.personalLayout,
             videoPlayer: s.videoPlayer,
             audiobookPlayer: s.audiobookPlayer,
             audiobookPlaybackRate: s.audiobookPlaybackRate,
@@ -377,7 +382,7 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (s.tmdbApiKey === null || typeof s.tmdbApiKey === 'string') store.dispatch(setTmdbApiKey(s.tmdbApiKey as string | null));
         if (s.tvdbApiKey === null || typeof s.tvdbApiKey === 'string') store.dispatch(setTvdbApiKey(s.tvdbApiKey as string | null));
         if (s.tvdbPin === null || typeof s.tvdbPin === 'string') store.dispatch(setTvdbPin(s.tvdbPin as string | null));
-        if (typeof s.defaultPage === 'string') store.dispatch(setDefaultPage(s.defaultPage as defaultPages));
+        if (typeof s.defaultPage === 'string' && DEFAULT_PAGES.includes(s.defaultPage as defaultPages)) store.dispatch(setDefaultPage(s.defaultPage as defaultPages));
         if (typeof s.enablePosterFetching === 'boolean') store.dispatch(setEnablePosterFetching(s.enablePosterFetching));
         if (typeof s.enableThumbnailGeneration === 'boolean') store.dispatch(setEnableThumbnailGeneration(s.enableThumbnailGeneration));
         if (typeof s.rescanOnStartup === 'boolean') store.dispatch(setRescanOnStartup(s.rescanOnStartup));
@@ -386,6 +391,7 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (typeof s.appColorScheme === 'string') store.dispatch(setAppColorScheme(s.appColorScheme as appColorSchemes));
         if (typeof s.sortOrder === 'string' && SORT_ORDERS.includes(s.sortOrder as sortOrders)) store.dispatch(setSortOrder(s.sortOrder as sortOrders));
         if (typeof s.showSidebarSort === 'boolean') store.dispatch(setShowSidebarSort(s.showSidebarSort));
+        if (s.personalLayout === 'folders' || s.personalLayout === 'flat') store.dispatch(setPersonalLayout(s.personalLayout as personalLayouts));
         if (s.videoPlayer === 'inapp' || s.videoPlayer === 'external') store.dispatch(setVideoPlayer(s.videoPlayer as videoPlayers));
         if (s.audiobookPlayer === 'inapp' || s.audiobookPlayer === 'external') store.dispatch(setAudiobookPlayer(s.audiobookPlayer as audiobookPlayers));
         if (typeof s.audiobookPlaybackRate === 'number' && Number.isFinite(s.audiobookPlaybackRate)) store.dispatch(setAudiobookPlaybackRate(s.audiobookPlaybackRate));
@@ -405,7 +411,7 @@ export async function importJson(): Promise<{ applied: string[] }> {
         const bedtimeEnd = typeof s.bedtimeEnd === 'string' ? parseTimeOfDay(s.bedtimeEnd) : null;
         if (bedtimeEnd !== null) store.dispatch(setBedtimeEnd(formatTimeOfDay(bedtimeEnd)));
         if (Array.isArray(s.bedtimeAllowedTypes)) {
-            const validTypes: contentTypes[] = ['tv', 'movie', 'audiobook'];
+            const validTypes: contentTypes[] = ['tv', 'movie', 'audiobook', 'personal'];
             const allowed = validTypes.filter((t) => (s.bedtimeAllowedTypes as unknown[]).includes(t));
             if (allowed.length > 0) store.dispatch(setBedtimeAllowedTypes(allowed));
         }

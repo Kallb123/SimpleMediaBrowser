@@ -1,11 +1,13 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { RootState } from './store'
 
-export type contentTypes = 'tv' | 'movie' | 'audiobook';
+export type contentTypes = 'tv' | 'movie' | 'audiobook' | 'personal';
 export type dataSources = 'tmdb' | 'tvdb';
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'list';
-export type defaultPages = 'home' | 'tv' | 'movies' | 'audiobooks';
+export type defaultPages = 'home' | 'tv' | 'movies' | 'audiobooks' | 'personal';
+/** How the Personal library is browsed: mirroring the on-disk folder tree, or as one flat list of videos. */
+export type personalLayouts = 'folders' | 'flat';
 export type appColorSchemes = 'light' | 'dark' | 'system';
 /** How audiobooks are played: in the app's own player (with resume) or handed to an external app. */
 export type audiobookPlayers = 'inapp' | 'external';
@@ -85,6 +87,7 @@ interface SettingsState {
   videoAutoPlayNext: videoAutoPlayNextModes
   /** Show a sort-order dropdown in the drawer (sidebar) for quick switching. */
   showSidebarSort: boolean
+  personalLayout: personalLayouts
 }
 
 // Define the initial state using that type
@@ -123,6 +126,7 @@ const initialState: SettingsState = {
   videoPlaybackRate: 1,
   videoAutoPlayNext: 'prompt',
   showSidebarSort: false,
+  personalLayout: 'folders',
 }
 
 // Stable fallback for persisted state that predates bedtime mode, so selectors don't
@@ -249,10 +253,13 @@ export const settingsSlice = createSlice({
     setShowSidebarSort: (state, action: PayloadAction<boolean>) => {
       state.showSidebarSort = action.payload;
     },
+    setPersonalLayout: (state, action: PayloadAction<personalLayouts>) => {
+      state.personalLayout = action.payload;
+    },
   },
 })
 
-export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setKeyboardHandling, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage, setVideoShowProgressBar, setVideoTrackPickerEnabled, setVideoSpeedControlEnabled, setVideoPlaybackRate, setVideoAutoPlayNext, setShowSidebarSort } = settingsSlice.actions;
+export const { addMediaSource, removeMediaSource, updateMediaSourceMetadata, setPassword, setDataSource, setMediaStructure, setViewOrientation, setViewScale, setTmdbApiKey, setTvdbApiKey, setTvdbPin, setDefaultPage, setEnablePosterFetching, setEnableThumbnailGeneration, setRescanOnStartup, setFetchEpisodeNames, setFetchEpisodeThumbnails, setAppColorScheme, setSortOrder, setBedtimeEnabled, setBedtimeStart, setBedtimeEnd, setBedtimeAllowedTypes, setVideoPlayer, setAudiobookPlayer, setKeyboardHandling, setAudiobookPlaybackRate, setAudiobookRewindSeconds, setVideoSubtitleLanguage, setVideoAudioLanguage, setVideoShowProgressBar, setVideoTrackPickerEnabled, setVideoSpeedControlEnabled, setVideoPlaybackRate, setVideoAutoPlayNext, setShowSidebarSort, setPersonalLayout } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaSources = (state: RootState) => state.settingsReducer.mediaSources ?? [];
@@ -297,6 +304,9 @@ export const selectVideoAutoPlayNext = (state: RootState): videoAutoPlayNextMode
   return mode === 'off' || mode === 'countdown' ? mode : 'prompt';
 };
 export const selectShowSidebarSort = (state: RootState): boolean => state.settingsReducer.showSidebarSort ?? false;
+// Anything but 'flat' (missing, or a stale/corrupt persisted value) means the default ('folders').
+export const selectPersonalLayout = (state: RootState): personalLayouts =>
+  state.settingsReducer.personalLayout === 'flat' ? 'flat' : 'folders';
 export const selectBedtimeEnabled = (state: RootState) => state.settingsReducer.bedtimeEnabled ?? false;
 export const selectBedtimeStart = (state: RootState) => state.settingsReducer.bedtimeStart ?? '19:00';
 export const selectBedtimeEnd = (state: RootState) => state.settingsReducer.bedtimeEnd ?? '07:00';

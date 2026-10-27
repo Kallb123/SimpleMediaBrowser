@@ -94,6 +94,7 @@ SimpleMediaBrowser/
     │   ├── FileScanner.ts           # SAF directory scanning, streaming Redux dispatch, thumbnail generation
     │   ├── MetadataService.ts       # Orchestrates TMDB/TVDB/iTunes enrichment, fuzzy show dedup
     │   ├── libraryUtils.ts          # Pure, dependency-free helpers + shared types (IMediaObject, normalizeShowName, fuzzyKey, buildTmdbSearchQuery, filename/path parsers, extension checks)
+    │   ├── personalLibrary.ts       # Pure helpers + IPersonalVideo for the Personal library: yt-dlp filename/info.json/sidecar parsing, folder-tree grouping, watch keys, next-video order; type-only imports
     │   ├── librarySink.ts           # LibrarySink interface ({ dispatch, getState }) + setLibrarySink(); how scanner/enrichment reach Redux without importing the store
     │   ├── scanProgressDispatcher.ts # Shared throttled scan-progress dispatcher (built on throttledDispatch.ts, dispatches through the sink)
     │   ├── throttledDispatch.ts     # Pure leading/trailing rate limiter (scan progress, thumbnail-cache notifications)
@@ -122,7 +123,7 @@ SimpleMediaBrowser/
     │   ├── persistGuards.ts         # Pure, unit-testable guards used by store.ts: legacy-library capture, write gate, rehydrate-error guard
     │   ├── libraryPersistence.ts    # Startup: load/migrate the library from the SQLite store, hydrate Redux, start autosave (deps injectable)
     │   ├── rehydrateRecovery.ts     # Failure counter, "offer recovery" decision and Start fresh for an unreadable persist:root (#228)
-    │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, overrides (+ applyLibraryActions batch action)
+    │   ├── libraryReducer.ts        # Scanned library: shows/seasons/episodes, movies, audiobooks, Personal videos, overrides (+ applyLibraryActions batch action)
     │   ├── scanReducer.ts           # Transient scan state: isScanning + scanProgress (never persisted)
     │   └── settingsReducer.ts       # User settings: media sources, API keys, view options, parent-mode password
     │
@@ -232,10 +233,11 @@ rendering, and playback launch.
 Redux Toolkit with three slices, combined in `store/store.ts`:
 
 - **`settingsReducer`** — user configuration: `mediaSources` (array of SAF
-  folder URIs with a `contentType` of `tv`/`movie`/`audiobook` and an
+  folder URIs with a `contentType` of `tv`/`movie`/`audiobook`/`personal` and an
   optional per-source `metadataSource`), global `dataSource` (`tmdb`|`tvdb`),
   `viewType`, `viewScale`, `viewOrientation`, API keys/PIN, `defaultPage`,
-  feature toggles (`enablePosterFetching`, `enableThumbnailGeneration`,
+  `personalLayout` (`folders` | `flat`, default `folders` — how the Personal section is
+  browsed, see §6), feature toggles (`enablePosterFetching`, `enableThumbnailGeneration`,
   `rescanOnStartup`, `fetchEpisodeNames`, `fetchEpisodeThumbnails`),
   `audiobookPlayer` and `videoPlayer` (each `inapp` | `external`, default `inapp`),
   `audiobookPlaybackRate` (0.5–2, default 1, set from the player screen),
@@ -244,7 +246,8 @@ Redux Toolkit with three slices, combined in `store/store.ts`:
   track languages, default null = never chosen; subtitles can also be `'off'`, see §13),
   `appColorScheme`, and `settingsPassword` (parent-mode lock).
 - **`libraryReducer`** — everything produced by scanning/enrichment:
-  `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`,
+  `mediaLibrary` (shows → seasons → episodes), `movies`, `audiobooks`, `personal`
+  (Personal videos) with `personalFolderPosters`,
   `mediaOverrides` (user edits, keyed by namespaced string — see §7), `watched`
   (files marked watched/listened — see §6), `listenProgress` (audiobook resume
   points — see §6), `watchProgress` (video resume points — see §6) and the legacy `thumbnails` map. Everything in this slice is persisted (see below).
@@ -273,8 +276,9 @@ roughly 2,000 episodes):
   a SQLite database (`library.db`, expo-sqlite, WAL) with three tables —
   `meta` (the `version` row marks the store as initialised), `shows` (one
   JSON row per show, keyed by show name) and `kv` (one JSON row each for
-  `movies`, `audiobooks`, `mediaOverrides`, `thumbnails`, `watched`, `listenProgress`, `watchProgress`).
-  `watched`, `listenProgress` and `watchProgress` were added without a `LIBRARY_STORE_VERSION` bump: a
+  `movies`, `audiobooks`, `mediaOverrides`, `thumbnails`, `watched`, `listenProgress`, `watchProgress`,
+  `personal`, `personalFolderPosters`).
+  `watched`, `listenProgress`, `watchProgress`, `personal` and `personalFolderPosters` were added without a `LIBRARY_STORE_VERSION` bump: a
   store from before them simply lacks the row, which loads as empty and is created on the next save, and older apps ignore
   rows they don't know. Redux still holds
   the whole library in memory (same slice, reducers and selectors);
@@ -405,7 +409,24 @@ Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
   `folderKey` (stable grouping key derived from the relative folder path),
   `path` (first part), `files: IAudiobookFile[]` (all parts, naturally
   sorted), `poster`.
-- **`sourceUri` / `unavailable`** — `IMediaShow`, `IMediaObject`, and
+- **`IPersonalVideo`** (`scripts/personalLibrary.ts`, `libraryReducer.personal`) — a video
+  from a `personal` source (art tutorials, home videos, YouTube downloads); extends
+  `IMediaObject` the way movies use it (`episodeNumber` 0, null `ids`), plus `folderPath`
+  (folder names from the source root down to the file's folder; `[]` = at the root),
+  `youtubeId`, `channel`, `description` and `uploadDate`. `title`/`scannedTitle` come from
+  `personalTitleFromFilename` (extension and a trailing yt-dlp ` [id]` dropped), `resolvedTitle`
+  from a yt-dlp `.info.json` or YouTube oEmbed, `poster` is the cached local URI of a sidecar
+  image or downloaded YouTube thumbnail. The section is never part of Home. How it is shown
+  is the global `settingsReducer.personalLayout`: `folders` mirrors the on-disk tree under each
+  Personal source (same-named folders from different sources merge; `personalFolderLevel`
+  returns one level, `personalFolderKey` = `folderPath.join('/')`, `''` = root) and `flat`
+  lists every video. `libraryReducer.personalFolderPosters` maps a folder key to the cached
+  image of its `folder.jpg`/`poster.jpg`/… for the folder tile. Pure helpers in
+  `personalLibrary.ts` (all type-only imports, like `libraryUtils.ts`): `extractYoutubeId`,
+  `matchPersonalSidecars`, `parseYtDlpInfoJson`, `personalWatchKeys`, `personalDisplayTitle`,
+  `nextPersonalVideo` (next non-hidden video in the same folder by `sortTitle`, else display
+  title, in natural order — what in-app auto-play offers).
+- **`sourceUri` / `unavailable`** — `IMediaShow`, `IMediaObject`, `IPersonalVideo` and
   `IMediaAudiobook` all carry an optional `sourceUri` (the `IMediaSource.uri`
   they were scanned from) and an optional `unavailable` flag. When a
   source's root folder can't be read during a scan (e.g. its storage device
@@ -418,7 +439,7 @@ Defined across `store/libraryReducer.ts`, `store/settingsReducer.ts`, and
   `title`, `sortTitle`, `tmdbId`/`tvdbId`, `year`, `poster`, `hidden`,
   `metadataSourceOverride`. Stored in `mediaOverrides` keyed by a namespaced
   string: `show:<showName>`, `movie:<parsedPath>`, `episode:<parsedPath>`,
-  or `audiobook:<folderKey>`. Overrides are **additive and non-destructive**
+  `audiobook:<folderKey>`, or `personal:<parsedPath>` (a Personal video). Overrides are **additive and non-destructive**
   — clearing one restores the underlying scanned/provider value; nothing is
   deleted from the scan result itself.
 
@@ -619,7 +640,12 @@ import between the two).
 backup/restore** pair (`exportJson`/`importJson`, via
 `expo-document-picker`) that serializes settings + overrides + watched marks + matched
 metadata to a single file the user can save/share — this is a full app-state
-snapshot, separate from the filesystem `smb.json` export.
+snapshot, separate from the filesystem `smb.json` export. The settings section carries
+`personalLayout`; on import `defaultPage` must be one of the known pages (including
+`personal`) and `bedtimeAllowedTypes` may include `personal`. The `smb.json` filesystem export
+only reads `mediaLibrary` and `movies`, so Personal sources and videos are never written to or read
+from sidecars (their own sidecars are the yt-dlp `.info.json` and image files, see
+`personalLibrary.ts`).
 
 ## 10. Edit Mode, Overrides & Parent Lock
 
@@ -671,7 +697,9 @@ by the fuzzy-key pass.
 **Bedtime mode.** An optional second restriction on top of the parent lock:
 during a configured time window (`bedtimeEnabled`/`bedtimeStart`/`bedtimeEnd`/
 `bedtimeAllowedTypes` in settings; pure helpers in `utils/bedtime.ts`) only the
-allowed libraries (default: audiobooks) are reachable. `BedtimeContext`
+allowed libraries (default: audiobooks) are reachable. The drawer section `personal` is
+restricted unless `personal` is allowed; `(home)` depends only on tv/movie/audiobook, since it
+never shows Personal videos. `BedtimeContext`
 (mounted inside `EditModeProvider`) exposes `restrictedSections`, which is empty
 unless bedtime is active and neither lifted nor `drawerUnlocked`. Bedtime is
 (re)evaluated at an *entry check* — app mount, return to the foreground, a

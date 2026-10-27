@@ -2,6 +2,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { openDatabaseAsync } from 'expo-sqlite';
 import type { IMediaLibrary, IMediaShow, IMediaAudiobook, IMediaOverride, IListenProgress, IWatchProgress } from '@/store/libraryReducer';
 import type { IMediaObject } from '@/scripts/libraryUtils';
+import type { IPersonalVideo } from '@/scripts/personalLibrary';
 import { logger } from '@/scripts/Logger';
 
 const TAG = 'LibraryStore';
@@ -17,6 +18,10 @@ export interface PersistedLibrary {
     mediaLibrary: IMediaLibrary;
     movies: IMediaObject[];
     audiobooks: IMediaAudiobook[];
+    /** Videos from Personal sources (see `scripts/personalLibrary.ts`). */
+    personal: IPersonalVideo[];
+    /** Cached image URI of a Personal folder, keyed by `personalFolderKey`. */
+    personalFolderPosters: { [folderKey: string]: string };
     mediaOverrides: { [key: string]: IMediaOverride };
     thumbnails: { [path: string]: string };
     /** Watched/listened files: file `parsedPath` → timestamp it was marked (see `libraryReducer`). */
@@ -31,6 +36,8 @@ export const EMPTY_PERSISTED_LIBRARY: PersistedLibrary = Object.freeze({
     mediaLibrary: Object.freeze({}),
     movies: Object.freeze([]) as unknown as IMediaObject[],
     audiobooks: Object.freeze([]) as unknown as IMediaAudiobook[],
+    personal: Object.freeze([]) as unknown as IPersonalVideo[],
+    personalFolderPosters: Object.freeze({}),
     mediaOverrides: Object.freeze({}),
     thumbnails: Object.freeze({}),
     watched: Object.freeze({}),
@@ -50,6 +57,8 @@ export function pickPersistedLibrary(state: Partial<Record<string, unknown>> | n
         mediaLibrary: (s.mediaLibrary as IMediaLibrary | undefined) ?? EMPTY_PERSISTED_LIBRARY.mediaLibrary,
         movies: (s.movies as IMediaObject[] | undefined) ?? EMPTY_PERSISTED_LIBRARY.movies,
         audiobooks: (s.audiobooks as IMediaAudiobook[] | undefined) ?? EMPTY_PERSISTED_LIBRARY.audiobooks,
+        personal: (s.personal as IPersonalVideo[] | undefined) ?? EMPTY_PERSISTED_LIBRARY.personal,
+        personalFolderPosters: (s.personalFolderPosters as PersistedLibrary['personalFolderPosters'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.personalFolderPosters,
         mediaOverrides: (s.mediaOverrides as PersistedLibrary['mediaOverrides'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.mediaOverrides,
         thumbnails: (s.thumbnails as PersistedLibrary['thumbnails'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.thumbnails,
         watched: (s.watched as PersistedLibrary['watched'] | undefined) ?? EMPTY_PERSISTED_LIBRARY.watched,
@@ -61,14 +70,14 @@ export function pickPersistedLibrary(state: Partial<Record<string, unknown>> | n
 // ── Database abstraction ──────────────────────────────────────────────────────
 
 /** Whole-collection keys stored in the `kv` table, one JSON document each. */
-const KV_KEYS = ['movies', 'audiobooks', 'mediaOverrides', 'thumbnails', 'watched', 'listenProgress', 'watchProgress'] as const;
+const KV_KEYS = ['movies', 'audiobooks', 'mediaOverrides', 'thumbnails', 'watched', 'listenProgress', 'watchProgress', 'personal', 'personalFolderPosters'] as const;
 
 /**
  * kv keys added after the first release of this layout. Stores written by an older
  * app lack them, which is expected (not worth a warning) and needs no version bump:
  * the row is simply created on the next save, and older apps ignore rows they don't know.
  */
-const KV_KEYS_ADDED_LATER: ReadonlySet<string> = new Set(['watched', 'listenProgress', 'watchProgress']);
+const KV_KEYS_ADDED_LATER: ReadonlySet<string> = new Set(['watched', 'listenProgress', 'watchProgress', 'personal', 'personalFolderPosters']);
 
 /** Everything {@link LibraryDb.readAll} returns: raw rows, parsed and validated by {@link LibraryStore.load}. */
 export interface LibraryDbContents {
@@ -196,6 +205,8 @@ interface Baseline {
     library: IMediaLibrary | undefined;
     movies: IMediaObject[] | undefined;
     audiobooks: IMediaAudiobook[] | undefined;
+    personal: IPersonalVideo[] | undefined;
+    personalFolderPosters: PersistedLibrary['personalFolderPosters'] | undefined;
     mediaOverrides: PersistedLibrary['mediaOverrides'] | undefined;
     thumbnails: PersistedLibrary['thumbnails'] | undefined;
     watched: PersistedLibrary['watched'] | undefined;
@@ -226,6 +237,8 @@ const baselineOf = (lib: PersistedLibrary): Baseline => ({
     library: lib.mediaLibrary,
     movies: lib.movies,
     audiobooks: lib.audiobooks,
+    personal: lib.personal,
+    personalFolderPosters: lib.personalFolderPosters,
     mediaOverrides: lib.mediaOverrides,
     thumbnails: lib.thumbnails,
     watched: lib.watched,
@@ -235,7 +248,7 @@ const baselineOf = (lib: PersistedLibrary): Baseline => ({
 });
 
 const summarize = (lib: PersistedLibrary) =>
-    `${Object.keys(lib.mediaLibrary).length} show(s), ${lib.movies.length} movie(s), ${lib.audiobooks.length} audiobook(s)`;
+    `${Object.keys(lib.mediaLibrary).length} show(s), ${lib.movies.length} movie(s), ${lib.audiobooks.length} audiobook(s), ${lib.personal.length} personal video(s)`;
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
@@ -299,6 +312,8 @@ export class LibraryStore {
             mediaLibrary,
             movies: [],
             audiobooks: [],
+            personal: [],
+            personalFolderPosters: {},
             mediaOverrides: {},
             thumbnails: {},
             watched: {},
@@ -307,7 +322,7 @@ export class LibraryStore {
         };
         const baseline = baselineOf(lib);
         // A missing key stays "unwritten" in the baseline so the next save recreates it.
-        baseline.movies = baseline.audiobooks = baseline.mediaOverrides = baseline.thumbnails = baseline.watched = baseline.listenProgress = baseline.watchProgress = undefined;
+        baseline.movies = baseline.audiobooks = baseline.mediaOverrides = baseline.thumbnails = baseline.watched = baseline.listenProgress = baseline.watchProgress = baseline.personal = baseline.personalFolderPosters = undefined;
         for (const key of KV_KEYS) {
             const row = contents.kv.find(r => r.key === key);
             if (!row) {
@@ -419,6 +434,8 @@ export class LibraryStore {
         return lib.mediaLibrary !== b.library
             || lib.movies !== b.movies
             || lib.audiobooks !== b.audiobooks
+            || lib.personal !== b.personal
+            || lib.personalFolderPosters !== b.personalFolderPosters
             || lib.mediaOverrides !== b.mediaOverrides
             || lib.thumbnails !== b.thumbnails
             || lib.watched !== b.watched

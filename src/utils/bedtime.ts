@@ -6,15 +6,19 @@
 import type { contentTypes, defaultPages } from '@/store/settingsReducer';
 
 /** Drawer route names of the media sections, in drawer order. */
-export type BedtimeSection = '(home)' | 'tv' | 'movies' | 'audiobooks';
-export const BEDTIME_SECTIONS: readonly BedtimeSection[] = ['(home)', 'tv', 'movies', 'audiobooks'];
+export type BedtimeSection = '(home)' | 'tv' | 'movies' | 'audiobooks' | 'personal';
+export const BEDTIME_SECTIONS: readonly BedtimeSection[] = ['(home)', 'tv', 'movies', 'audiobooks', 'personal'];
 
-/** Section -> the content type it shows ('(home)' shows all, so it is handled separately). */
+/** Section -> the content type it shows ('(home)' shows tv/movie/audiobook, so it is handled separately). */
 const SECTION_CONTENT_TYPE = {
   tv: 'tv',
   movies: 'movie',
   audiobooks: 'audiobook',
+  personal: 'personal',
 } as const satisfies Record<Exclude<BedtimeSection, '(home)'>, contentTypes>;
+
+/** The sections whose content '(home)' combines; Personal is deliberately not among them. */
+const HOME_CONTENT_SECTIONS: readonly BedtimeSection[] = ['tv', 'movies', 'audiobooks'];
 
 const TIME_RE = /^(\d{1,2}):(\d{2})$/;
 
@@ -51,16 +55,17 @@ export function isWithinBedtime(now: Date, start: string, end: string): boolean 
 }
 
 /**
- * Sections locked while bedtime is in effect. tv→'tv', movies→'movie', audiobooks→'audiobook'
- * are restricted when their content type is not in `allowedTypes`. '(home)' shows every
- * library, so it is restricted whenever ANY of the three types is not allowed.
+ * Sections locked while bedtime is in effect. tv→'tv', movies→'movie', audiobooks→'audiobook',
+ * personal→'personal' are restricted when their content type is not in `allowedTypes`. '(home)'
+ * shows the tv, movie and audiobook libraries (never Personal), so it is restricted whenever ANY
+ * of those three types is not allowed.
  */
 export function bedtimeRestrictedSections(allowedTypes: readonly contentTypes[]): Set<BedtimeSection> {
   const restricted = new Set<BedtimeSection>();
   for (const [section, type] of Object.entries(SECTION_CONTENT_TYPE) as [keyof typeof SECTION_CONTENT_TYPE, contentTypes][]) {
     if (!allowedTypes.includes(type)) restricted.add(section);
   }
-  if (restricted.size > 0) restricted.add('(home)');
+  if (HOME_CONTENT_SECTIONS.some((section) => restricted.has(section))) restricted.add('(home)');
   return restricted;
 }
 
@@ -71,7 +76,7 @@ export function firstAllowedSection(restricted: ReadonlySet<BedtimeSection>): Be
 
 /** The drawer section a "default page" setting opens ('home' is the '(home)' route; unknown values fall back to it). */
 export function defaultPageSection(page: defaultPages): BedtimeSection {
-  return page === 'tv' || page === 'movies' || page === 'audiobooks' ? page : '(home)';
+  return page === 'tv' || page === 'movies' || page === 'audiobooks' || page === 'personal' ? page : '(home)';
 }
 
 /**

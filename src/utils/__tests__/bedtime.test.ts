@@ -77,12 +77,24 @@ describe('isWithinBedtime', () => {
 });
 
 describe('bedtimeRestrictedSections', () => {
-  it('audiobooks only restricts home, tv and movies', () => {
-    expect([...bedtimeRestrictedSections(['audiobook'])].sort()).toEqual(['(home)', 'movies', 'tv']);
+  it('audiobooks only restricts home, tv, movies and personal', () => {
+    expect([...bedtimeRestrictedSections(['audiobook'])].sort()).toEqual(['(home)', 'movies', 'personal', 'tv']);
   });
 
   it('restricts nothing when every type is allowed', () => {
-    expect(bedtimeRestrictedSections(['tv', 'movie', 'audiobook']).size).toBe(0);
+    expect(bedtimeRestrictedSections(['tv', 'movie', 'audiobook', 'personal']).size).toBe(0);
+  });
+
+  it('does not restrict home just because personal is not allowed (home never shows personal videos)', () => {
+    expect([...bedtimeRestrictedSections(['tv', 'movie', 'audiobook'])]).toEqual(['personal']);
+  });
+
+  it('restricts home when a library it shows is not allowed, even with personal allowed', () => {
+    expect([...bedtimeRestrictedSections(['tv', 'movie', 'personal'])].sort()).toEqual(['(home)', 'audiobooks']);
+  });
+
+  it('allowing only personal restricts everything else', () => {
+    expect([...bedtimeRestrictedSections(['personal'])].sort()).toEqual(['(home)', 'audiobooks', 'movies', 'tv']);
   });
 
   it('restricts everything when nothing is allowed', () => {
@@ -90,7 +102,7 @@ describe('bedtimeRestrictedSections', () => {
   });
 
   it('restricts home and audiobooks when only tv and movies are allowed', () => {
-    expect([...bedtimeRestrictedSections(['tv', 'movie'])].sort()).toEqual(['(home)', 'audiobooks']);
+    expect([...bedtimeRestrictedSections(['tv', 'movie'])].sort()).toEqual(['(home)', 'audiobooks', 'personal']);
   });
 });
 
@@ -99,6 +111,7 @@ describe('firstAllowedSection', () => {
     expect(firstAllowedSection(new Set())).toBe('(home)');
     expect(firstAllowedSection(bedtimeRestrictedSections(['audiobook']))).toBe('audiobooks');
     expect(firstAllowedSection(bedtimeRestrictedSections(['movie']))).toBe('movies');
+    expect(firstAllowedSection(bedtimeRestrictedSections(['personal']))).toBe('personal');
   });
 
   it('returns null when everything is restricted', () => {
@@ -112,6 +125,7 @@ describe('defaultPageSection', () => {
     expect(defaultPageSection('tv')).toBe('tv');
     expect(defaultPageSection('movies')).toBe('movies');
     expect(defaultPageSection('audiobooks')).toBe('audiobooks');
+    expect(defaultPageSection('personal')).toBe('personal');
   });
 
   it('falls back to home for an unknown value', () => {
@@ -124,11 +138,13 @@ describe('initialSection', () => {
     expect(initialSection('home', new Set())).toBe('(home)');
     expect(initialSection('movies', new Set())).toBe('movies');
     expect(initialSection('tv', bedtimeRestrictedSections(['tv', 'movie']))).toBe('tv');
+    expect(initialSection('personal', bedtimeRestrictedSections(['personal']))).toBe('personal');
   });
 
   it('falls back to the first allowed section when the default is restricted', () => {
     expect(initialSection('home', bedtimeRestrictedSections(['audiobook']))).toBe('audiobooks');
     expect(initialSection('tv', bedtimeRestrictedSections(['movie']))).toBe('movies');
+    expect(initialSection('personal', bedtimeRestrictedSections(['audiobook']))).toBe('audiobooks');
   });
 
   it("returns the default's section when nothing is allowed", () => {

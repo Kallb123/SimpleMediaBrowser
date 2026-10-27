@@ -3,6 +3,8 @@ import type { Action, UnknownAction } from '@reduxjs/toolkit';
 import type { RootState } from './store';
 import { audioPartFiles } from '@/scripts/libraryUtils';
 import type { IMediaObject, dataSources } from '@/scripts/libraryUtils';
+// Type-only, like the LibraryStore import below: personalLibrary imports types from this module.
+import type { IPersonalVideo } from '@/scripts/personalLibrary';
 // Type-only: LibraryStore imports types from this module, so a value import would be a cycle.
 import type { PersistedLibrary } from '@/scripts/LibraryStore';
 
@@ -199,7 +201,7 @@ export interface MergeEpisodePayload {
   metadataSource?: dataSources;
 }
 
-export type contentTypes = 'tv' | 'movie' | 'audiobook';
+export type contentTypes = 'tv' | 'movie' | 'audiobook' | 'personal';
 export type { dataSources };
 export type viewTypes = 'flat' | 'show' | 'show+season' | 'show/season';
 export type viewOrientations = 'poster' | 'banner';
@@ -209,12 +211,18 @@ export interface LibraryState {
   mediaLibrary: IMediaLibrary;
   movies: IMediaObject[];
   audiobooks: IMediaAudiobook[];
+  /** Videos from Personal sources (see `scripts/personalLibrary.ts`); never shown in the Library (home) section. */
+  personal: IPersonalVideo[];
+  /** Cached image URI of a Personal folder (`folder.jpg` etc.), keyed by `personalFolderKey` ('' = a source root). */
+  personalFolderPosters: { [folderKey: string]: string };
   thumbnails: { [path: string]: string };
   /**
    * User-supplied overrides keyed by a namespaced string:
    *   "show:<showName>"      – for a TV show folder
    *   "movie:<path>"         – for a movie file
    *   "episode:<path>"       – for an episode file
+   *   "audiobook:<folderKey>" – for an audiobook
+   *   "personal:<parsedPath>" – for a Personal video
    */
   mediaOverrides: { [key: string]: IMediaOverride };
   /**
@@ -244,6 +252,8 @@ const initialState: LibraryState = {
   mediaLibrary: {},
   movies: [],
   audiobooks: [],
+  personal: [],
+  personalFolderPosters: {},
   thumbnails: {},
   mediaOverrides: {},
   watched: {},
@@ -265,6 +275,8 @@ export const settingsSlice = createSlice({
       state.mediaLibrary = action.payload.mediaLibrary;
       state.movies = action.payload.movies;
       state.audiobooks = action.payload.audiobooks;
+      state.personal = action.payload.personal ?? [];
+      state.personalFolderPosters = action.payload.personalFolderPosters ?? {};
       state.mediaOverrides = action.payload.mediaOverrides;
       state.thumbnails = action.payload.thumbnails;
       state.watched = action.payload.watched ?? {};
@@ -279,6 +291,25 @@ export const settingsSlice = createSlice({
     },
     setAudiobooks: (state, action: PayloadAction<IMediaAudiobook[]>) => {
       state.audiobooks = action.payload;
+    },
+    setPersonal: (state, action: PayloadAction<IPersonalVideo[]>) => {
+      state.personal = action.payload;
+    },
+    setPersonalFolderPosters: (state, action: PayloadAction<{ [folderKey: string]: string }>) => {
+      state.personalFolderPosters = action.payload;
+    },
+    /** Updates a Personal video's looked-up metadata by file path; only the fields provided are set. */
+    updatePersonalMetadata: (state, action: PayloadAction<{
+      path: string;
+      resolvedTitle?: string;
+      channel?: string;
+      poster?: string;
+    }>) => {
+      const video = state.personal.find((v) => v.path === action.payload.path);
+      if (!video) return;
+      if (action.payload.resolvedTitle !== undefined) video.resolvedTitle = action.payload.resolvedTitle;
+      if (action.payload.channel !== undefined) video.channel = action.payload.channel;
+      if (action.payload.poster !== undefined) video.poster = action.payload.poster;
     },
     /**
      * Appends a batch of audiobooks, deduplicating by folderKey so re-scanning
@@ -467,6 +498,14 @@ export const settingsSlice = createSlice({
       if (!movie) return;
       movie.poster = '';
     },
+    /** Drops a Personal video's looked-up title, channel and poster; the next scan restores sidecar data. */
+    clearPersonalMetadata: (state, action: PayloadAction<string>) => {
+      const video = state.personal.find((v) => v.path === action.payload);
+      if (!video) return;
+      video.resolvedTitle = undefined;
+      video.channel = undefined;
+      video.poster = '';
+    },
     clearEpisodeMetadata: (state, action: PayloadAction<string>) => {
       for (const show of Object.values(state.mediaLibrary) as IMediaShow[]) {
         for (const season of Object.values(show.seasons) as IMediaSeason[]) {
@@ -496,19 +535,26 @@ export const settingsSlice = createSlice({
       const movie = state.movies.find((m) => m.path === action.payload.path);
       if (movie) movie.lastOpened = action.payload.lastOpened;
     },
+    /** Records when a Personal video was last opened, keyed by its file path. */
+    setPersonalLastOpened: (state, action: PayloadAction<{ path: string; lastOpened: number }>) => {
+      const video = state.personal.find((v) => v.path === action.payload.path);
+      if (video) video.lastOpened = action.payload.lastOpened;
+    },
     /** Records when an audiobook (any of its parts) was last opened in an external player. */
     setAudiobookLastOpened: (state, action: PayloadAction<{ folderKey: string; lastOpened: number }>) => {
       const audiobook = state.audiobooks.find((a) => a.folderKey === action.payload.folderKey);
       if (audiobook) audiobook.lastOpened = action.payload.lastOpened;
     },
     /**
-     * Clears both the TV library and the movie list.  Dispatched at the start
+     * Clears the TV library, movie list, audiobooks and Personal videos.  Dispatched at the start
      * of each scan so stale data is not shown before streaming results arrive.
      */
     clearLibraryAndMovies: (state) => {
       state.mediaLibrary = {};
       state.movies = [];
       state.audiobooks = [];
+      state.personal = [];
+      state.personalFolderPosters = {};
     },
     /**
      * Incrementally upserts a batch of TV episodes into the library.
@@ -646,7 +692,8 @@ export const settingsSlice = createSlice({
     /**
      * Clears all cached poster data:
      * - Removes the `poster` field from every entry in `mediaOverrides`.
-     * - Resets the poster URI to an empty string for every show and movie in the library.
+     * - Resets the poster URI to an empty string for every show, movie, audiobook and Personal video
+     *   (and drops the Personal folder posters).
      * - Clears provider-sourced episode thumbnails from every episode.
      * Call this after deleting the smb_posters and smb_thumbnails_tmdb directories from disk.
      */
@@ -668,6 +715,10 @@ export const settingsSlice = createSlice({
       for (const audiobook of state.audiobooks) {
         audiobook.poster = '';
       }
+      for (const video of state.personal) {
+        video.poster = '';
+      }
+      state.personalFolderPosters = {};
     },
     /**
      * Batch-updates episode metadata (title and/or thumbnail) for all
@@ -714,12 +765,14 @@ export const settingsSlice = createSlice({
   },
 })
 
-export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, markWatched, markUnwatched, mergeWatched, setListenProgress, clearListenProgress, mergeListenProgress, setWatchProgress, clearWatchProgress, mergeWatchProgress, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
+export const { hydrateLibrary, setMediaLibrary, setMovies, setAudiobooks, setPersonal, setPersonalFolderPosters, updatePersonalMetadata, clearPersonalMetadata, setPersonalLastOpened, appendAudiobookBatch, setAudiobookPoster, updateAudiobookMetadata, clearAudiobookMetadata, setThumbnail, clearThumbnails, updateShowMetadata, updateMovieMetadata, setMediaOverride, clearMediaOverride, markWatched, markUnwatched, mergeWatched, setListenProgress, clearListenProgress, mergeListenProgress, setWatchProgress, clearWatchProgress, mergeWatchProgress, clearShowMetadata, clearMovieMetadata, clearEpisodeMetadata, setEpisodeLastOpened, setMovieLastOpened, setAudiobookLastOpened, clearLibraryAndMovies, mergeEpisodeBatch, appendMovieBatch, updateShowPoster, setMoviePoster, mergeDuplicateShows, clearPosterOverrides, clearTvdbPosterOverrides, clearAllOverrides, updateSeasonEpisodeMetadata, clearShowEpisodeMetadata } = settingsSlice.actions;
 
 // Other code such as selectors can use the imported `RootState` type
 export const selectMediaLibrary = (state: RootState) => state.libraryReducer.mediaLibrary;
 export const selectMovies = (state: RootState) => state.libraryReducer.movies;
 export const selectAudiobooks = (state: RootState) => state.libraryReducer.audiobooks ?? [];
+export const selectPersonal = (state: RootState) => state.libraryReducer.personal ?? [];
+export const selectPersonalFolderPosters = (state: RootState) => state.libraryReducer.personalFolderPosters ?? {};
 export const selectThumbnails = (state: RootState) => state.libraryReducer.thumbnails;
 export const selectMediaOverrides = (state: RootState) => state.libraryReducer.mediaOverrides;
 export const selectWatched = (state: RootState) => state.libraryReducer.watched;
