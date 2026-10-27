@@ -6,10 +6,16 @@ import { logger } from '@/scripts/Logger';
 import {
   selectBedtimeAllowedTypes,
   selectBedtimeEnabled,
-  selectBedtimeEnd,
-  selectBedtimeStart,
+  selectBedtimeSlots,
+  type BedtimeSlot,
 } from '@/store/settingsReducer';
-import { bedtimeRestrictedSections, firstAllowedSection, isWithinBedtime, type BedtimeSection } from '@/utils/bedtime';
+import {
+  activeBedtimeSlot,
+  bedtimeRestrictedSections,
+  firstAllowedSection,
+  formatBedtimeDays,
+  type BedtimeSection,
+} from '@/utils/bedtime';
 
 /** How often bedtimeActive is re-evaluated while bedtime mode is enabled. */
 const BEDTIME_TICK_MS = 60_000;
@@ -27,13 +33,15 @@ interface BedtimeContextType {
    * the drawer needs at least one screen, so bedtime then restricts nothing.
    */
   restrictedSections: ReadonlySet<BedtimeSection>;
-  /** "HH:MM" at which bedtime ends, for messages like "locked until 07:00". */
+  /** "HH:MM" at which the currently active time slot ends ('' when none), for messages like "locked until 07:00". */
   bedtimeEnd: string;
   /** Parent entered the password: lift the restrictions until the next entry check. */
   liftBedtime: () => void;
   /** Entry check: re-evaluate bedtime and clear any lift (e.g. after the parent re-locks). */
   recheckBedtime: () => void;
 }
+
+const describeSlot = (slot: BedtimeSlot) => `${formatBedtimeDays(slot.days)} ${slot.start}-${slot.end}`;
 
 const BedtimeContext = createContext<BedtimeContextType>({
   bedtimeActive: false,
@@ -45,26 +53,34 @@ const BedtimeContext = createContext<BedtimeContextType>({
 
 export function BedtimeProvider({ children }: { children: React.ReactNode }) {
   const enabled = useSelector(selectBedtimeEnabled);
-  const start = useSelector(selectBedtimeStart);
-  const end = useSelector(selectBedtimeEnd);
+  const slots = useSelector(selectBedtimeSlots);
   const allowedTypes = useSelector(selectBedtimeAllowedTypes);
   const { drawerUnlocked } = useEditMode();
 
-  const [evaluatedActive, setEvaluatedActive] = useState(() => enabled && isWithinBedtime(new Date(), start, end));
+  const [evaluated, setEvaluated] = useState(() => {
+    const slot = enabled ? activeBedtimeSlot(new Date(), slots) : null;
+    return { active: slot !== null, end: slot?.end ?? '' };
+  });
   const [lifted, setLifted] = useState(false);
   // Mirrors of the state above so transitions can be logged without side effects in updaters.
-  const activeRef = useRef(evaluatedActive);
+  const evaluatedRef = useRef(evaluated);
   const liftedRef = useRef(false);
 
   // Re-evaluates the clock only; does not touch `lifted`.
   const evaluate = useCallback((reason: string) => {
-    const next = enabled && isWithinBedtime(new Date(), start, end);
-    if (next !== activeRef.current) {
-      logger.log('Bedtime', `Bedtime ${next ? 'started' : 'ended'} (${reason}, window ${start}-${end})`);
-      activeRef.current = next;
-      setEvaluatedActive(next);
+    const slot = enabled ? activeBedtimeSlot(new Date(), slots) : null;
+    const next = { active: slot !== null, end: slot?.end ?? '' };
+    const prev = evaluatedRef.current;
+    if (next.active !== prev.active || next.end !== prev.end) {
+      if (slot) {
+        logger.log('Bedtime', `Bedtime ${prev.active ? 'moved to another time slot' : 'started'} (${reason}, ${describeSlot(slot)})`);
+      } else {
+        logger.log('Bedtime', `Bedtime ended (${reason})`);
+      }
+      evaluatedRef.current = next;
+      setEvaluated(next);
     }
-  }, [enabled, start, end]);
+  }, [enabled, slots]);
 
   // Entry check: evaluate and clear the lift.
   const entryCheck = useCallback((reason: string) => {
@@ -109,7 +125,8 @@ export function BedtimeProvider({ children }: { children: React.ReactNode }) {
   }, [enabled, evaluate]);
 
   // evaluatedActive can lag one render behind a settings change until the entry check runs.
-  const bedtimeActive = enabled && evaluatedActive;
+  const bedtimeActive = enabled && evaluated.active;
+  const bedtimeEnd = bedtimeActive ? evaluated.end : '';
 
   const configuredRestriction = useMemo(() => bedtimeRestrictedSections(allowedTypes), [allowedTypes]);
   const enforced = bedtimeActive && !lifted && !drawerUnlocked;
@@ -125,8 +142,8 @@ export function BedtimeProvider({ children }: { children: React.ReactNode }) {
 
   // Memoised for the same reason as EditModeContext's value: consumers use these as hook dependencies.
   const value = useMemo(
-    () => ({ bedtimeActive, restrictedSections, bedtimeEnd: end, liftBedtime, recheckBedtime }),
-    [bedtimeActive, restrictedSections, end, liftBedtime, recheckBedtime],
+    () => ({ bedtimeActive, restrictedSections, bedtimeEnd, liftBedtime, recheckBedtime }),
+    [bedtimeActive, restrictedSections, bedtimeEnd, liftBedtime, recheckBedtime],
   );
 
   return (

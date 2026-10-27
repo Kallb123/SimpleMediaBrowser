@@ -51,13 +51,13 @@ import {
     setVideoPlaybackRate,
     setVideoAutoPlayNext,
     setBedtimeEnabled,
-    setBedtimeStart,
-    setBedtimeEnd,
+    setBedtimeSlots,
+    selectBedtimeSlots,
     setBedtimeAllowedTypes,
     setPersonalLayout,
 } from '@/store/settingsReducer';
 import type { IMediaSource, dataSources, viewTypes, viewOrientations, defaultPages, appColorSchemes, videoPlayers, audiobookPlayers, contentTypes, sortOrders, videoAutoPlayNextModes, personalLayouts } from '@/store/settingsReducer';
-import { formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
+import { ALL_BEDTIME_DAYS, formatTimeOfDay, parseTimeOfDay, sanitizeBedtimeSlots } from '@/utils/bedtime';
 import { logger } from '@/scripts/Logger';
 import type { SmbJsonData, SmbJsonShowData, SmbJsonMovieData } from '@/scripts/SmbTypes';
 import { smbThumbFilename } from '@/scripts/SmbTypes';
@@ -278,8 +278,7 @@ export async function exportJson(options: JsonExportOptions): Promise<void> {
             videoPlaybackRate: s.videoPlaybackRate,
             videoAutoPlayNext: s.videoAutoPlayNext,
             bedtimeEnabled: s.bedtimeEnabled,
-            bedtimeStart: s.bedtimeStart,
-            bedtimeEnd: s.bedtimeEnd,
+            bedtimeSlots: selectBedtimeSlots(state),
             bedtimeAllowedTypes: s.bedtimeAllowedTypes,
         };
     }
@@ -404,12 +403,19 @@ export async function importJson(): Promise<{ applied: string[] }> {
         if (typeof s.videoPlaybackRate === 'number' && Number.isFinite(s.videoPlaybackRate)) store.dispatch(setVideoPlaybackRate(s.videoPlaybackRate));
         if (s.videoAutoPlayNext === 'off' || s.videoAutoPlayNext === 'prompt' || s.videoAutoPlayNext === 'countdown') store.dispatch(setVideoAutoPlayNext(s.videoAutoPlayNext as videoAutoPlayNextModes));
         if (typeof s.bedtimeEnabled === 'boolean') store.dispatch(setBedtimeEnabled(s.bedtimeEnabled));
-        // Times and allowed types are validated: a malformed window or an empty list would
+        // Slots and allowed types are validated: a malformed window or an empty list would
         // otherwise lock every library (or none) without the user noticing.
-        const bedtimeStart = typeof s.bedtimeStart === 'string' ? parseTimeOfDay(s.bedtimeStart) : null;
-        if (bedtimeStart !== null) store.dispatch(setBedtimeStart(formatTimeOfDay(bedtimeStart)));
-        const bedtimeEnd = typeof s.bedtimeEnd === 'string' ? parseTimeOfDay(s.bedtimeEnd) : null;
-        if (bedtimeEnd !== null) store.dispatch(setBedtimeEnd(formatTimeOfDay(bedtimeEnd)));
+        const bedtimeSlots = sanitizeBedtimeSlots(s.bedtimeSlots);
+        if (bedtimeSlots) {
+            store.dispatch(setBedtimeSlots(bedtimeSlots));
+        } else {
+            // Files exported before per-day slots carry a single window, which applies every day.
+            const legacyStart = typeof s.bedtimeStart === 'string' ? parseTimeOfDay(s.bedtimeStart) : null;
+            const legacyEnd = typeof s.bedtimeEnd === 'string' ? parseTimeOfDay(s.bedtimeEnd) : null;
+            if (legacyStart !== null && legacyEnd !== null) {
+                store.dispatch(setBedtimeSlots([{ days: [...ALL_BEDTIME_DAYS], start: formatTimeOfDay(legacyStart), end: formatTimeOfDay(legacyEnd) }]));
+            }
+        }
         if (Array.isArray(s.bedtimeAllowedTypes)) {
             const validTypes: contentTypes[] = ['tv', 'movie', 'audiobook', 'personal'];
             const allowed = validTypes.filter((t) => (s.bedtimeAllowedTypes as unknown[]).includes(t));

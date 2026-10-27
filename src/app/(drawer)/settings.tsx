@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { router, useFocusEffect } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeStart, setBedtimeStart, selectBedtimeEnd, setBedtimeEnd, selectBedtimeAllowedTypes, setBedtimeAllowedTypes, videoAutoPlayNextModes, selectVideoShowProgressBar, setVideoShowProgressBar, selectVideoTrackPickerEnabled, setVideoTrackPickerEnabled, selectVideoSpeedControlEnabled, setVideoSpeedControlEnabled, selectVideoAutoPlayNext, setVideoAutoPlayNext, selectShowSidebarSort, setShowSidebarSort, personalLayouts, selectPersonalLayout, setPersonalLayout } from '@/store/settingsReducer';
+import { dataSources, IMediaSource, selectDataSource, selectMediaSources, selectMediaStructure, selectPassword, selectViewOrientation, selectViewScale, setDataSource, setMediaStructure, setPassword, setViewOrientation, setViewScale, viewOrientations, viewTypes, removeMediaSource, updateMediaSourceMetadata, selectTmdbApiKey, setTmdbApiKey, selectTvdbApiKey, setTvdbApiKey, selectTvdbPin, setTvdbPin, defaultPages, selectDefaultPage, setDefaultPage, selectEnablePosterFetching, setEnablePosterFetching, selectEnableThumbnailGeneration, setEnableThumbnailGeneration, selectRescanOnStartup, setRescanOnStartup, selectFetchEpisodeNames, setFetchEpisodeNames, selectFetchEpisodeThumbnails, setFetchEpisodeThumbnails, appColorSchemes, selectAppColorScheme, setAppColorScheme, videoPlayers, selectVideoPlayer, setVideoPlayer, audiobookPlayers, selectAudiobookPlayer, setAudiobookPlayer, keyboardHandlingModes, selectKeyboardHandling, setKeyboardHandling, selectAudiobookRewindSeconds, setAudiobookRewindSeconds, sortOrders, selectSortOrder, setSortOrder, contentTypes, selectBedtimeEnabled, setBedtimeEnabled, selectBedtimeSlots, setBedtimeSlots, type BedtimeSlot, selectBedtimeAllowedTypes, setBedtimeAllowedTypes, videoAutoPlayNextModes, selectVideoShowProgressBar, setVideoShowProgressBar, selectVideoTrackPickerEnabled, setVideoTrackPickerEnabled, selectVideoSpeedControlEnabled, setVideoSpeedControlEnabled, selectVideoAutoPlayNext, setVideoAutoPlayNext, selectShowSidebarSort, setShowSidebarSort, personalLayouts, selectPersonalLayout, setPersonalLayout } from '@/store/settingsReducer';
 import { clearLibraryAndMovies, clearPosterOverrides, clearTvdbPosterOverrides, clearThumbnails, clearAllOverrides } from '@/store/libraryReducer';
 import Slider from '@react-native-community/slider';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -25,7 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { exportJson, importJson, exportToFilesystem } from '@/scripts/ImportExportService';
 import type { JsonExportOptions } from '@/scripts/ImportExportService';
-import { formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
+import { ALL_BEDTIME_DAYS, BEDTIME_DAY_ORDER, BEDTIME_DAY_SHORT_LABELS, DEFAULT_BEDTIME_SLOT, formatBedtimeDays, formatTimeOfDay, parseTimeOfDay } from '@/utils/bedtime';
 import { LANDSCAPE_MAX_COLUMNS, LANDSCAPE_MIN_COLUMNS, PORTRAIT_MAX_COLUMNS, PORTRAIT_MIN_COLUMNS, mapScaleToColumns } from '@/utils/viewScale';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
@@ -154,6 +154,14 @@ const buildBedtimeTimeOptions = (...stored: string[]): { id: string; label: stri
     .map(id => ({ id, label: id }));
 };
 
+// A copy of the slots with times normalised to "HH:MM" and days sorted, so drafts and saved values compare reliably.
+const normaliseBedtimeSlots = (slots: readonly BedtimeSlot[]): BedtimeSlot[] =>
+  slots.map(slot => ({
+    days: [...slot.days].sort((a, b) => a - b),
+    start: normaliseBedtimeTime(slot.start),
+    end: normaliseBedtimeTime(slot.end),
+  }));
+
 // Canonical-ordered, de-duplicated copy of an allowed-types selection.
 const canonicalBedtimeTypes = (types: readonly contentTypes[]): contentTypes[] =>
   bedtimeTypeOptions.map(o => o.id).filter(id => types.includes(id));
@@ -229,14 +237,21 @@ function GroupHeading({ children }: { children: string }) {
 }
 
 /** A tappable row for a one-off action (export, clear a cache...). */
-function ActionRow({ title, description, onPress, destructive }: {
+function ActionRow({ title, description, onPress, destructive, disabled }: {
   title: string;
   description: string;
   onPress: () => void;
   destructive?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <TouchableOpacity style={styles.actionRow} onPress={onPress} accessibilityRole="button">
+    <TouchableOpacity
+      style={[styles.actionRow, disabled && styles.disabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
+    >
       <ThemedText style={[styles.actionTitle, destructive && styles.destructiveText]}>{title}</ThemedText>
       <ThemedText style={styles.settingDescription}>{description}</ThemedText>
     </TouchableOpacity>
@@ -297,8 +312,7 @@ export default function SettingsPrompt() {
   const [keyboardHandling, setLocalKeyboardHandling] = useState('legacy' as keyboardHandlingModes);
   const [audiobookRewindSeconds, setLocalAudiobookRewindSeconds] = useState(10);
   const [bedtimeEnabled, setLocalBedtimeEnabled] = useState(false);
-  const [bedtimeStart, setLocalBedtimeStart] = useState('19:00');
-  const [bedtimeEnd, setLocalBedtimeEnd] = useState('07:00');
+  const [bedtimeSlots, setLocalBedtimeSlots] = useState([DEFAULT_BEDTIME_SLOT] as BedtimeSlot[]);
   const [bedtimeAllowedTypes, setLocalBedtimeAllowedTypes] = useState(['audiobook'] as contentTypes[]);
   const [scanning, setScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
@@ -336,13 +350,12 @@ export default function SettingsPrompt() {
   const settingsKeyboardHandling = useSelector(selectKeyboardHandling);
   const settingsAudiobookRewindSeconds = useSelector(selectAudiobookRewindSeconds);
   const settingsBedtimeEnabled = useSelector(selectBedtimeEnabled);
-  const settingsBedtimeStart = useSelector(selectBedtimeStart);
-  const settingsBedtimeEnd = useSelector(selectBedtimeEnd);
+  const settingsBedtimeSlots = useSelector(selectBedtimeSlots);
   const settingsBedtimeAllowedTypes = useSelector(selectBedtimeAllowedTypes);
 
   const bedtimeTimeOptions = useMemo(
-    () => buildBedtimeTimeOptions(settingsBedtimeStart, settingsBedtimeEnd),
-    [settingsBedtimeStart, settingsBedtimeEnd],
+    () => buildBedtimeTimeOptions(...settingsBedtimeSlots.flatMap(slot => [slot.start, slot.end])),
+    [settingsBedtimeSlots],
   );
 
   const safeDecodeUri = useCallback((uri: string) => {
@@ -420,13 +433,12 @@ export default function SettingsPrompt() {
       setLocalKeyboardHandling(settingsKeyboardHandling);
       setLocalAudiobookRewindSeconds(settingsAudiobookRewindSeconds);
       setLocalBedtimeEnabled(settingsBedtimeEnabled);
-      setLocalBedtimeStart(normaliseBedtimeTime(settingsBedtimeStart));
-      setLocalBedtimeEnd(normaliseBedtimeTime(settingsBedtimeEnd));
+      setLocalBedtimeSlots(normaliseBedtimeSlots(settingsBedtimeSlots));
       setLocalBedtimeAllowedTypes(canonicalBedtimeTypes(settingsBedtimeAllowedTypes));
     } catch (e) {
       logger.error('Settings', 'Exception while syncing local settings state', e as Error);
     }
-  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsShowSidebarSort, settingsVideoPlayer, settingsVideoShowProgressBar, settingsVideoTrackPickerEnabled, settingsVideoSpeedControlEnabled, settingsVideoAutoPlayNext, settingsAudiobookPlayer, settingsPersonalLayout, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeStart, settingsBedtimeEnd, settingsBedtimeAllowedTypes]));
+  }, [settingsPassword, settingsTmdbApiKey, settingsTvdbApiKey, settingsTvdbPin, settingsDataSource, settingsMediaStructure, settingsViewOrientation, settingsViewScale, settingsDefaultPage, settingsEnablePosterFetching, settingsEnableThumbnailGeneration, settingsRescanOnStartup, settingsFetchEpisodeNames, settingsFetchEpisodeThumbnails, settingsAppColorScheme, settingsSortOrder, settingsShowSidebarSort, settingsVideoPlayer, settingsVideoShowProgressBar, settingsVideoTrackPickerEnabled, settingsVideoSpeedControlEnabled, settingsVideoAutoPlayNext, settingsAudiobookPlayer, settingsPersonalLayout, settingsKeyboardHandling, settingsAudiobookRewindSeconds, settingsBedtimeEnabled, settingsBedtimeSlots, settingsBedtimeAllowedTypes]));
 
   // Leaving Settings closes any open category, so the next visit starts at the category list.
   useFocusEffect(useCallback(() => () => setActiveSection(null), []));
@@ -581,15 +593,14 @@ export default function SettingsPrompt() {
         dispatch(setBedtimeEnabled(bedtimeEnabled));
         changeCount++;
       }
-      if (bedtimeStart && bedtimeStart !== normaliseBedtimeTime(settingsBedtimeStart)) {
-        logger.log('Settings', `Persisting: bedtimeStart changed ${settingsBedtimeStart} → ${bedtimeStart}`);
-        dispatch(setBedtimeStart(bedtimeStart));
-        changeCount++;
-      }
-      if (bedtimeEnd && bedtimeEnd !== normaliseBedtimeTime(settingsBedtimeEnd)) {
-        logger.log('Settings', `Persisting: bedtimeEnd changed ${settingsBedtimeEnd} → ${bedtimeEnd}`);
-        dispatch(setBedtimeEnd(bedtimeEnd));
-        changeCount++;
+      if (bedtimeSlots.length > 0) {
+        const draftSlots = JSON.stringify(normaliseBedtimeSlots(bedtimeSlots));
+        const savedSlots = JSON.stringify(normaliseBedtimeSlots(settingsBedtimeSlots));
+        if (draftSlots !== savedSlots) {
+          logger.log('Settings', `Persisting: bedtimeSlots changed ${savedSlots} → ${draftSlots}`);
+          dispatch(setBedtimeSlots(JSON.parse(draftSlots) as BedtimeSlot[]));
+          changeCount++;
+        }
       }
       if (bedtimeAllowedTypes.length > 0 && bedtimeAllowedTypes.join(',') !== canonicalBedtimeTypes(settingsBedtimeAllowedTypes).join(',')) {
         logger.log('Settings', `Persisting: bedtimeAllowedTypes changed ${settingsBedtimeAllowedTypes.join(',')} → ${bedtimeAllowedTypes.join(',')}`);
@@ -601,7 +612,7 @@ export default function SettingsPrompt() {
     } catch (e) {
       logger.error('Settings', 'Exception while saving settings', e as Error);
     }
-  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, showSidebarSort, settingsShowSidebarSort, videoPlayer, settingsVideoPlayer, videoShowProgressBar, settingsVideoShowProgressBar, videoTrackPickerEnabled, settingsVideoTrackPickerEnabled, videoSpeedControlEnabled, settingsVideoSpeedControlEnabled, videoAutoPlayNext, settingsVideoAutoPlayNext, audiobookPlayer, settingsAudiobookPlayer, personalLayout, settingsPersonalLayout, keyboardHandling, settingsKeyboardHandling, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeStart, settingsBedtimeStart, bedtimeEnd, settingsBedtimeEnd, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
+  }, [dispatch, password, settingsPassword, dataSource, settingsDataSource, mediaStructure, settingsMediaStructure, viewOrientation, settingsViewOrientation, viewScale, settingsViewScale, tmdbApiKey, settingsTmdbApiKey, tvdbApiKey, settingsTvdbApiKey, tvdbPin, settingsTvdbPin, defaultPage, settingsDefaultPage, enablePosterFetching, settingsEnablePosterFetching, enableThumbnailGeneration, settingsEnableThumbnailGeneration, rescanOnStartup, settingsRescanOnStartup, fetchEpisodeNames, settingsFetchEpisodeNames, fetchEpisodeThumbnails, settingsFetchEpisodeThumbnails, appColorScheme, settingsAppColorScheme, sortOrder, settingsSortOrder, showSidebarSort, settingsShowSidebarSort, videoPlayer, settingsVideoPlayer, videoShowProgressBar, settingsVideoShowProgressBar, videoTrackPickerEnabled, settingsVideoTrackPickerEnabled, videoSpeedControlEnabled, settingsVideoSpeedControlEnabled, videoAutoPlayNext, settingsVideoAutoPlayNext, audiobookPlayer, settingsAudiobookPlayer, personalLayout, settingsPersonalLayout, keyboardHandling, settingsKeyboardHandling, audiobookRewindSeconds, settingsAudiobookRewindSeconds, bedtimeEnabled, settingsBedtimeEnabled, bedtimeSlots, settingsBedtimeSlots, bedtimeAllowedTypes, settingsBedtimeAllowedTypes]);
 
   const navigation = useNavigation();
   const saveRef = useRef(save);
@@ -798,7 +809,51 @@ export default function SettingsPrompt() {
     }
   }, []);
 
-  const bedtimeStartsEqualEnd = parseTimeOfDay(bedtimeStart) !== null && parseTimeOfDay(bedtimeStart) === parseTimeOfDay(bedtimeEnd);
+  // Edits one time slot's start or end.
+  const updateBedtimeSlotTime = useCallback((index: number, field: 'start' | 'end', value: string) => {
+    try {
+      setLocalBedtimeSlots(prev => prev.map((slot, i) => (i === index ? { ...slot, [field]: value } : slot)));
+    } catch (e) {
+      logger.error('Settings', 'Exception while changing bedtime time', e as Error);
+    }
+  }, []);
+
+  // A weekday belongs to at most one time slot: switching it on here takes it away from the others.
+  const toggleBedtimeDay = useCallback((index: number, day: number, value: boolean) => {
+    try {
+      setLocalBedtimeSlots(prev => prev.map((slot, i) => {
+        if (i === index) {
+          const days = value ? [...slot.days.filter(d => d !== day), day] : slot.days.filter(d => d !== day);
+          return { ...slot, days: days.sort((a, b) => a - b) };
+        }
+        return value && slot.days.includes(day) ? { ...slot, days: slot.days.filter(d => d !== day) } : slot;
+      }));
+    } catch (e) {
+      logger.error('Settings', 'Exception while toggling bedtime day', e as Error);
+    }
+  }, []);
+
+  const addBedtimeSlot = useCallback(() => {
+    try {
+      setLocalBedtimeSlots(prev => {
+        const used = new Set(prev.flatMap(slot => slot.days));
+        return [...prev, { days: ALL_BEDTIME_DAYS.filter(d => !used.has(d)), start: DEFAULT_BEDTIME_SLOT.start, end: DEFAULT_BEDTIME_SLOT.end }];
+      });
+    } catch (e) {
+      logger.error('Settings', 'Exception while adding bedtime time slot', e as Error);
+    }
+  }, []);
+
+  const removeBedtimeSlot = useCallback((index: number) => {
+    try {
+      // The last remaining time slot can't be removed (its Remove control is hidden).
+      setLocalBedtimeSlots(prev => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+    } catch (e) {
+      logger.error('Settings', 'Exception while removing bedtime time slot', e as Error);
+    }
+  }, []);
+
+  const bedtimeUnusedDays = ALL_BEDTIME_DAYS.filter(d => !bedtimeSlots.some(slot => slot.days.includes(d)));
 
   const handleExportJson = useCallback(async () => {
     try {
@@ -855,6 +910,10 @@ export default function SettingsPrompt() {
     }
   }, [safeMediaSources]);
 
+  const bedtimeSummary = bedtimeSlots.length === 1 && bedtimeSlots[0].days.length === ALL_BEDTIME_DAYS.length
+    ? `bedtime ${bedtimeSlots[0].start}–${bedtimeSlots[0].end}`
+    : `bedtime ${bedtimeSlots.length} time slots`;
+
   // One-line summary under each category in the list, built from the (possibly unsaved) drafts.
   const sectionSummary = (id: SectionId): string => {
     switch (id) {
@@ -877,7 +936,7 @@ export default function SettingsPrompt() {
         if (audiobookPlayer === 'external') return 'External app';
         return `In-app player${audiobookRewindSeconds > 0 ? ` · rewinds ${audiobookRewindSeconds} s on resume` : ''}`;
       case 'parental':
-        return `${password ? 'Password set' : 'No password'} · ${bedtimeEnabled ? `bedtime ${bedtimeStart}–${bedtimeEnd}` : 'bedtime off'}`;
+        return `${password ? 'Password set' : 'No password'} · ${bedtimeEnabled ? bedtimeSummary : 'bedtime off'}`;
       case 'backup':
         return 'Export or restore settings and metadata';
       case 'troubleshooting':
@@ -1192,15 +1251,93 @@ export default function SettingsPrompt() {
                 No settings password is set, so anyone can unlock the bedtime libraries. Set one above.
               </ThemedText>
             )}
-            <SettingRow label="Start time" disabled={!bedtimeEnabled}>
-              <Dropdown options={bedtimeTimeOptions} value={bedtimeStart} onChange={setLocalBedtimeStart} disabled={!bedtimeEnabled} />
-            </SettingRow>
-            <SettingRow label="End time" description="An end before the start runs overnight (for example 19:00 to 07:00)." disabled={!bedtimeEnabled}>
-              <Dropdown options={bedtimeTimeOptions} value={bedtimeEnd} onChange={setLocalBedtimeEnd} disabled={!bedtimeEnabled} />
-            </SettingRow>
-            {bedtimeStartsEqualEnd && (
-              <ThemedText style={styles.warningText}>
-                Start and end time are the same, so bedtime will never apply.
+            <ThemedText style={[styles.settingLabel, !bedtimeEnabled && styles.disabled]}>Time slots</ThemedText>
+            <ThemedText style={[styles.settingDescription, !bedtimeEnabled && styles.disabled]}>
+              Each time slot applies on the days chosen. An end before the start runs overnight into the next day (for example 19:00 to 07:00).
+            </ThemedText>
+            {bedtimeSlots.map((slot, index) => {
+              const sameTimes = parseTimeOfDay(slot.start) !== null && parseTimeOfDay(slot.start) === parseTimeOfDay(slot.end);
+              return (
+                <View
+                  key={index}
+                  style={[styles.slotCard, { backgroundColor: surfaces.backgroundElement }]}
+                >
+                  <View style={styles.slotHeader}>
+                    <ThemedText style={[styles.slotTitle, !bedtimeEnabled && styles.disabled]}>{`Time slot ${index + 1} · ${formatBedtimeDays(slot.days)}`}</ThemedText>
+                    {bedtimeSlots.length > 1 && (
+                      <TouchableOpacity
+                        style={[styles.slotRemove, !bedtimeEnabled && styles.disabled]}
+                        onPress={() => removeBedtimeSlot(index)}
+                        disabled={!bedtimeEnabled}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove time slot ${index + 1}`}
+                      >
+                        <Ionicons name="trash-outline" size={20} color={DESTRUCTIVE_COLOR} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <View style={[styles.dayRow, !bedtimeEnabled && styles.disabled]}>
+                    {BEDTIME_DAY_ORDER.map(day => {
+                      const selected = slot.days.includes(day);
+                      return (
+                        <TouchableOpacity
+                          key={day}
+                          style={[styles.dayChip, { backgroundColor: selected ? theme.tint : surfaces.backgroundSelected }]}
+                          onPress={() => toggleBedtimeDay(index, day, !selected)}
+                          disabled={!bedtimeEnabled}
+                          accessibilityRole="checkbox"
+                          accessibilityLabel={BEDTIME_DAY_SHORT_LABELS[day]}
+                          accessibilityState={{ checked: selected, disabled: !bedtimeEnabled }}
+                        >
+                          <ThemedText style={[styles.dayChipText, { color: selected ? theme.background : surfaces.text }]} numberOfLines={1}>
+                            {BEDTIME_DAY_SHORT_LABELS[day]}
+                          </ThemedText>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  <SettingRow label="Start time" disabled={!bedtimeEnabled}>
+                    <Dropdown
+                      options={bedtimeTimeOptions}
+                      value={slot.start}
+                      onChange={(value) => updateBedtimeSlotTime(index, 'start', value)}
+                      disabled={!bedtimeEnabled}
+                      accessibilityLabel={`Time slot ${index + 1} start time`}
+                    />
+                  </SettingRow>
+                  <SettingRow label="End time" disabled={!bedtimeEnabled}>
+                    <Dropdown
+                      options={bedtimeTimeOptions}
+                      value={slot.end}
+                      onChange={(value) => updateBedtimeSlotTime(index, 'end', value)}
+                      disabled={!bedtimeEnabled}
+                      accessibilityLabel={`Time slot ${index + 1} end time`}
+                    />
+                  </SettingRow>
+                  {slot.days.length === 0 && (
+                    <ThemedText style={styles.warningText}>
+                      No days selected, so this time slot never applies.
+                    </ThemedText>
+                  )}
+                  {sameTimes && (
+                    <ThemedText style={styles.warningText}>
+                      Start and end time are the same, so this time slot never applies.
+                    </ThemedText>
+                  )}
+                </View>
+              );
+            })}
+            <ActionRow
+              title="Add time slot"
+              description="Use a different time on other days, for example later on weekends."
+              onPress={addBedtimeSlot}
+              disabled={!bedtimeEnabled}
+            />
+            {bedtimeUnusedDays.length > 0 && (
+              <ThemedText style={styles.hintText}>
+                {bedtimeUnusedDays.length === ALL_BEDTIME_DAYS.length
+                  ? 'No bedtime on any day.'
+                  : `No bedtime on ${formatBedtimeDays(bedtimeUnusedDays)}.`}
               </ThemedText>
             )}
             <ThemedText style={[styles.settingLabel, !bedtimeEnabled && styles.disabled]}>Available during bedtime</ThemedText>
@@ -1406,6 +1543,39 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.4,
+  },
+  slotCard: {
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+  },
+  slotHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  slotTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  slotRemove: {
+    padding: 6,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  dayChip: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayChipText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   scanStatus: {
     opacity: 0.7,

@@ -806,9 +806,20 @@ distinct show folders should be one library entry but weren't auto-merged
 by the fuzzy-key pass.
 
 **Bedtime mode.** An optional second restriction on top of the parent lock:
-during a configured time window (`bedtimeEnabled`/`bedtimeStart`/`bedtimeEnd`/
+during a configured time window (`bedtimeEnabled`/`bedtimeSlots`/
 `bedtimeAllowedTypes` in settings; pure helpers in `utils/bedtime.ts`) only the
-allowed libraries (default: audiobooks) are reachable. The drawer section `personal` is
+allowed libraries (default: audiobooks) are reachable. `bedtimeSlots` is a list of
+`BedtimeSlot`s (`{ days, start, end }`, days in `Date#getDay()` numbering with 0 =
+Sunday), so different days can have different hours (e.g. Mon–Thu 19:00–07:00,
+Fri–Sat 21:00–07:00). A slot belongs to the day its window *starts* on: an overnight
+slot (end before start) for Monday covers Monday evening and Tuesday's early
+morning. `activeBedtimeSlot(now, slots)` returns the first slot containing `now`
+(checking both today's and yesterday's days for overnight windows), and bedtime is
+active when there is one; `BedtimeContext.bedtimeEnd` is that slot's end, for the
+"locked until" messages. Settings keeps each weekday in at most one slot (days in no
+slot have no bedtime); the pure logic itself just unions overlaps. Pre-slot installs
+persisted `bedtimeStart`/`bedtimeEnd`; `selectBedtimeSlots` turns those into a single
+every-day slot until the user saves slots. The drawer section `personal` is
 restricted unless `personal` is allowed; `(home)` depends only on tv/movie/audiobook, since it
 never shows Personal videos. `BedtimeContext`
 (mounted inside `EditModeProvider`) exposes `restrictedSections`, which is empty
