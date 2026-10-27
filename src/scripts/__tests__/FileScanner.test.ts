@@ -1,13 +1,84 @@
+import { configureStore } from '@reduxjs/toolkit';
 import { FileScanner } from '@/scripts/FileScanner';
 import type { SmbJsonData } from '@/scripts/SmbTypes';
+import libraryReducer, { setPersonal, setPersonalFolderPosters } from '@/store/libraryReducer';
+import scanReducer from '@/store/scanReducer';
+import settingsReducer, { setEnablePosterFetching, setEnableThumbnailGeneration, setTmdbApiKey } from '@/store/settingsReducer';
+import type { IMediaSource } from '@/store/settingsReducer';
+import { setLibrarySink } from '@/scripts/librarySink';
+import type { LibrarySink } from '@/scripts/librarySink';
+import type { IPersonalVideo } from '@/scripts/personalLibrary';
 
 // FileScanner imports native-backed modules at the top level; stub them so the module loads
-// under Jest. None of the methods tested here touch video or image APIs, and the scanner is
-// not wired to a store (only the pure build* methods are exercised).
+// under Jest. The pure build* tests never touch video, image or file APIs; the scanAllSources
+// tests below drive an in-memory SAF tree (`mockFs`) through a store built from the real reducers.
 jest.mock('expo-video', () => ({ createVideoPlayer: jest.fn() }));
 jest.mock('expo-image-manipulator', () => ({ ImageManipulator: {}, SaveFormat: {} }));
 jest.mock('@/scripts/Logger', () => ({
   logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
+
+/** In-memory stand-in for SAF and the app's document directory. */
+const mockFs = {
+  /** SAF directory uri → its child entry uris. A directory that is absent cannot be read. */
+  dirs: new Map<string, string[]>(),
+  /** SAF file uri → its text content. */
+  texts: new Map<string, string>(),
+  /** Local uris for which `new File(uri).exists` is true. */
+  existing: new Set<string>(),
+  /** [source, destination] of every File.copy. */
+  copied: [] as [string, string][],
+};
+jest.mock('expo-file-system', () => {
+  class MockFile {
+    uri: string;
+    constructor(base: string | { uri: string }, name?: string) {
+      const root = typeof base === 'string' ? base : base.uri;
+      this.uri = name === undefined ? root : `${root}/${name}`;
+    }
+    get exists() { return mockFs.existing.has(this.uri); }
+    copy(dest: { uri: string }) {
+      mockFs.copied.push([this.uri, dest.uri]);
+      mockFs.existing.add(dest.uri);
+    }
+    write() { /* not used by these tests */ }
+    delete() { mockFs.existing.delete(this.uri); }
+    textSync() { return '{}'; }
+  }
+  class MockDirectory {
+    uri: string;
+    constructor(base: string | { uri: string }, name: string) {
+      this.uri = `${typeof base === 'string' ? base : base.uri}/${name}`;
+    }
+    get exists() { return true; }
+    create() { /* always exists */ }
+  }
+  return { File: MockFile, Directory: MockDirectory, Paths: { document: 'file:///doc' } };
+});
+jest.mock('expo-file-system/legacy', () => ({
+  StorageAccessFramework: {
+    readDirectoryAsync: async (dir: string) => {
+      const entries = mockFs.dirs.get(dir);
+      if (!entries) throw new Error(`cannot read ${dir}`);
+      return entries;
+    },
+    readAsStringAsync: async (uri: string) => {
+      const text = mockFs.texts.get(uri);
+      if (text === undefined) throw new Error(`cannot read ${uri}`);
+      return text;
+    },
+  },
+}));
+
+const mockEnrichAll = jest.fn();
+const mockEnrichSelection = jest.fn();
+jest.mock('@/scripts/MetadataService', () => ({
+  MetadataService: {
+    getInstance: () => ({
+      enrichAll: (...args: unknown[]) => mockEnrichAll(...args),
+      enrichSelection: (...args: unknown[]) => mockEnrichSelection(...args),
+    }),
+  },
 }));
 
 type ScannedFile = Parameters<FileScanner['buildLibrary']>[0][number];
@@ -470,6 +541,468 @@ describe('FileScanner', () => {
 
     it('returns an empty list for no files', () => {
       expect(scanner.buildAudiobookList([])).toEqual([]);
+    });
+  });
+});
+
+
+// ── scanAllSources: Personal sources ─────────────────────────────────────────
+
+describe('FileScanner.scanAllSources (personal sources)', () => {
+  const ROOT = 'content://tree/root';
+  const OTHER_ROOT = 'content://tree/other';
+  const POSTER_URI = /^file:\/\/\/doc\/smb_posters\/personal_(?:folder_)?[0-9a-f]{16}_local\.jpg$/;
+
+  const makeStore = () => configureStore({
+    reducer: { libraryReducer, settingsReducer, scanReducer },
+    middleware: (getDefault) => getDefault({ serializableCheck: false, immutableCheck: false }),
+  });
+
+  let store: ReturnType<typeof makeStore>;
+  let scanner: FileScanner;
+  const lib = () => store.getState().libraryReducer;
+
+  /** The SAF uri of the entry `name` inside `dir` (names are percent-encoded like real SAF uris). */
+  const child = (dir: string, name: string) => `${dir}/${encodeURIComponent(name)}`;
+  const addDir = (dir: string, names: string[]) => mockFs.dirs.set(dir, names.map((n) => child(dir, n)));
+  const personalSource = (uri: string): IMediaSource => ({ uri, contentType: 'personal' });
+  const video = (name: string): IPersonalVideo => lib().personal.find((v) => v.filename === name)!;
+
+  /** A tree with a root file, a nested folder and assorted files that must be ignored. */
+  const buildTree = () => {
+    addDir(ROOT, [
+      'Intro [dQw4w9WgXcQ].mp4', 'Intro [dQw4w9WgXcQ].jpg', 'Intro [dQw4w9WgXcQ].info.json',
+      'home movie.mp4', 'folder.jpg',
+      'notes.txt', 'smb.json', 'smb_thumb_s01e01.jpg', 'song.mp3', '.hidden.mp4',
+      'Drawing',
+    ]);
+    addDir(child(ROOT, 'Drawing'), ['Lesson 1.mp4', 'Lesson 1-thumb.png', 'poster.jpg', 'Perspective']);
+    addDir(child(child(ROOT, 'Drawing'), 'Perspective'), ['Vanishing Points [1080p].mkv', 'Vanishing Points [1080p].info.json']);
+    mockFs.texts.set(child(ROOT, 'Intro [dQw4w9WgXcQ].info.json'), JSON.stringify({
+      id: 'dQw4w9WgXcQ',
+      extractor_key: 'Youtube',
+      title: 'Never Gonna Give You Up',
+      channel: 'Rick Astley',
+      description: 'The official video.',
+      upload_date: '20091025',
+    }));
+    mockFs.texts.set(child(child(child(ROOT, 'Drawing'), 'Perspective'), 'Vanishing Points [1080p].info.json'), JSON.stringify({
+      id: 'abc123',
+      extractor: 'generic',
+      title: 'Vanishing Points',
+      uploader: 'Art Teacher',
+    }));
+  };
+
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(NOW);
+    jest.clearAllMocks();
+    mockFs.dirs.clear();
+    mockFs.texts.clear();
+    mockFs.existing.clear();
+    mockFs.copied.length = 0;
+    store = makeStore();
+    setLibrarySink(store as unknown as LibrarySink);
+    scanner = new FileScanner();
+  });
+
+  afterEach(() => {
+    setLibrarySink(null);
+    jest.restoreAllMocks();
+  });
+
+  describe('collection', () => {
+    it('collects only video files, mirroring the folder tree in folderPath', async () => {
+      buildTree();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      const byName = Object.fromEntries(lib().personal.map((v) => [v.filename, v.folderPath]));
+      expect(byName).toEqual({
+        'Intro [dQw4w9WgXcQ].mp4': [],
+        'home movie.mp4': [],
+        'Lesson 1.mp4': ['Drawing'],
+        'Vanishing Points [1080p].mkv': ['Drawing', 'Perspective'],
+      });
+      // Nothing the scanner doesn't understand leaks into the other content types.
+      expect(lib().movies).toEqual([]);
+      expect(lib().audiobooks).toEqual([]);
+      expect(lib().mediaLibrary).toEqual({});
+    });
+
+    it('builds the video objects like movies, with a filename-derived title and the source uri', async () => {
+      buildTree();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(video('Lesson 1.mp4')).toEqual({
+        ids: { tvdb: null, imdb: null, tmdb: null },
+        title: 'Lesson 1',
+        scannedTitle: 'Lesson 1',
+        episodeNumber: 0,
+        filename: 'Lesson 1.mp4',
+        path: child(child(ROOT, 'Drawing'), 'Lesson 1.mp4'),
+        parsedPath: `${ROOT}/Drawing/Lesson 1.mp4`,
+        isDirectory: false,
+        poster: expect.stringMatching(POSTER_URI),
+        folderPath: ['Drawing'],
+        sourceUri: ROOT,
+        firstDetected: NOW,
+      });
+      // "Title [id]" drops the id from the display title.
+      expect(video('Intro [dQw4w9WgXcQ].mp4').title).toBe('Intro');
+    });
+
+    it('merges the videos of several personal sources and ignores other source types', async () => {
+      buildTree();
+      addDir(OTHER_ROOT, ['Drawing']);
+      addDir(child(OTHER_ROOT, 'Drawing'), ['Lesson 2.mp4']);
+      addDir('content://tree/movies', ['Heat.mkv']);
+
+      await scanner.scanAllSources([
+        personalSource(ROOT),
+        personalSource(OTHER_ROOT),
+        { uri: 'content://tree/movies', contentType: 'movie' },
+      ]);
+
+      expect(lib().personal.filter((v) => v.folderPath[0] === 'Drawing').map((v) => v.filename).sort())
+        .toEqual(['Lesson 1.mp4', 'Lesson 2.mp4', 'Vanishing Points [1080p].mkv']);
+      expect(video('Lesson 2.mp4').sourceUri).toBe(OTHER_ROOT);
+      expect(lib().movies.map((m) => m.filename)).toEqual(['Heat.mkv']);
+    });
+
+    it('clears the personal list when there are no personal sources', async () => {
+      store.dispatch(setPersonal([{ ...(await scanOne()), title: 'stale' }]));
+      store.dispatch(setPersonalFolderPosters({ Drawing: 'file:///doc/x.jpg' }));
+
+      await scanner.scanAllSources([]);
+
+      expect(lib().personal).toEqual([]);
+      expect(lib().personalFolderPosters).toEqual({});
+    });
+
+    async function scanOne(): Promise<IPersonalVideo> {
+      addDir(ROOT, ['a.mp4']);
+      await scanner.scanAllSources([personalSource(ROOT)]);
+      return lib().personal[0];
+    }
+  });
+
+  describe('sidecars', () => {
+    it('copies the sidecar image into persistent storage as the poster', async () => {
+      buildTree();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      const intro = video('Intro [dQw4w9WgXcQ].mp4');
+      expect(intro.poster).toMatch(POSTER_URI);
+      expect(mockFs.copied).toContainEqual([child(ROOT, 'Intro [dQw4w9WgXcQ].jpg'), intro.poster]);
+      // The Kodi-style "<base>-thumb.png" form works too; a video with no image has no poster.
+      expect(video('Lesson 1.mp4').poster).toMatch(POSTER_URI);
+      expect(video('Lesson 1.mp4').poster).not.toBe(intro.poster);
+      expect(video('home movie.mp4').poster).toBe('');
+    });
+
+    it('reads the yt-dlp info.json for title, channel, description, upload date and YouTube id', async () => {
+      buildTree();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(video('Intro [dQw4w9WgXcQ].mp4')).toMatchObject({
+        title: 'Intro',
+        resolvedTitle: 'Never Gonna Give You Up',
+        channel: 'Rick Astley',
+        description: 'The official video.',
+        uploadDate: '20091025',
+        youtubeId: 'dQw4w9WgXcQ',
+      });
+    });
+
+    it('uses the info.json id as the YouTube id only for YouTube downloads', async () => {
+      addDir(ROOT, ['Clip [aaaaaaaaaaa].mp4', 'Clip [aaaaaaaaaaa].info.json', 'Other.mp4', 'Other.info.json']);
+      // A YouTube info.json wins over a different id in the filename.
+      mockFs.texts.set(child(ROOT, 'Clip [aaaaaaaaaaa].info.json'), JSON.stringify({
+        id: 'bbbbbbbbbbb', webpage_url: 'https://www.youtube.com/watch?v=bbbbbbbbbbb', title: 'Clip',
+      }));
+      mockFs.texts.set(child(ROOT, 'Other.info.json'), JSON.stringify({
+        id: 'abc123', extractor: 'generic', title: 'Vanishing Points', uploader: 'Art Teacher',
+      }));
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(video('Clip [aaaaaaaaaaa].mp4').youtubeId).toBe('bbbbbbbbbbb');
+      // A non-YouTube extractor id is not a YouTube id; the title and uploader still come through.
+      expect(video('Other.mp4')).toMatchObject({ resolvedTitle: 'Vanishing Points', channel: 'Art Teacher' });
+      expect(video('Other.mp4').youtubeId).toBeUndefined();
+    });
+
+    it('takes the YouTube id from a trailing "[id]" in the filename, but not from other brackets', async () => {
+      buildTree();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(video('Intro [dQw4w9WgXcQ].mp4').youtubeId).toBe('dQw4w9WgXcQ');
+      expect(video('Vanishing Points [1080p].mkv').youtubeId).toBeUndefined();
+      expect(video('home movie.mp4').youtubeId).toBeUndefined();
+    });
+
+    it('survives an unreadable or malformed info.json and an image that cannot be copied', async () => {
+      addDir(ROOT, ['A.mp4', 'A.info.json', 'B.mp4', 'B.info.json', 'B.jpg']);
+      mockFs.texts.set(child(ROOT, 'B.info.json'), '{ not json');
+      const copyError = jest.spyOn(Object.getPrototypeOf(new (jest.requireMock('expo-file-system').File)('x')), 'copy')
+        .mockImplementation(() => { throw new Error('copy failed'); });
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(copyError).toHaveBeenCalled();
+      expect(lib().personal.map((v) => v.filename).sort()).toEqual(['A.mp4', 'B.mp4']);
+      expect(video('A.mp4').resolvedTitle).toBeUndefined();
+      expect(video('B.mp4').resolvedTitle).toBeUndefined();
+    });
+  });
+
+  describe('folder posters', () => {
+    it('records folder.jpg / poster.jpg per folder key, root as the empty key', async () => {
+      buildTree();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(Object.keys(lib().personalFolderPosters).sort()).toEqual(['', 'Drawing']);
+      expect(lib().personalFolderPosters['']).toMatch(POSTER_URI);
+      expect(lib().personalFolderPosters.Drawing).toMatch(POSTER_URI);
+      expect(mockFs.copied).toContainEqual([child(ROOT, 'folder.jpg'), lib().personalFolderPosters['']]);
+      expect(mockFs.copied).toContainEqual([child(child(ROOT, 'Drawing'), 'poster.jpg'), lib().personalFolderPosters.Drawing]);
+    });
+
+    it('does not treat a video sidecar image as a folder poster', async () => {
+      addDir(ROOT, ['Lesson.mp4', 'Lesson.jpg', 'Lesson-thumb.png']);
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(lib().personalFolderPosters).toEqual({});
+      expect(video('Lesson.mp4').poster).toMatch(POSTER_URI);
+    });
+
+    it('keeps the first folder poster when several sources have the same folder', async () => {
+      addDir(ROOT, ['Drawing']);
+      addDir(child(ROOT, 'Drawing'), ['cover.jpg', 'a.mp4']);
+      addDir(OTHER_ROOT, ['Drawing']);
+      addDir(child(OTHER_ROOT, 'Drawing'), ['folder.jpg', 'b.mp4']);
+
+      await scanner.scanAllSources([personalSource(ROOT), personalSource(OTHER_ROOT)]);
+
+      expect(mockFs.copied.filter(([, dest]) => dest === lib().personalFolderPosters.Drawing)).toHaveLength(1);
+      expect(mockFs.copied[0][0]).toBe(child(child(ROOT, 'Drawing'), 'cover.jpg'));
+    });
+  });
+
+  describe('carry-over from the previous scan', () => {
+    const CACHED = 'file:///doc/smb_posters/personal_yt_homeHOMEhom.jpg';
+
+    const seedPrevious = (extra: Partial<IPersonalVideo> = {}) => {
+      store.dispatch(setPersonal([{
+        ids: { tvdb: null, imdb: null, tmdb: null },
+        title: 'home movie',
+        scannedTitle: 'home movie',
+        episodeNumber: 0,
+        filename: 'home movie.mp4',
+        path: child(ROOT, 'home movie.mp4'),
+        parsedPath: `${ROOT}/home movie.mp4`,
+        isDirectory: false,
+        poster: CACHED,
+        folderPath: [],
+        sourceUri: ROOT,
+        firstDetected: 111,
+        lastOpened: 222,
+        resolvedTitle: 'Home Movie (online)',
+        channel: 'Me',
+        description: 'desc',
+        uploadDate: '20200101',
+        youtubeId: 'homeHOMEhom',
+        ...extra,
+      }]));
+    };
+
+    it('carries online metadata, timestamps and the cached poster over', async () => {
+      buildTree();
+      mockFs.existing.add(CACHED);
+      seedPrevious();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(video('home movie.mp4')).toMatchObject({
+        resolvedTitle: 'Home Movie (online)',
+        channel: 'Me',
+        description: 'desc',
+        uploadDate: '20200101',
+        youtubeId: 'homeHOMEhom',
+        firstDetected: 111,
+        lastOpened: 222,
+        poster: CACHED,
+      });
+    });
+
+    it('drops the carried poster when its file is gone', async () => {
+      buildTree();
+      seedPrevious();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(video('home movie.mp4').poster).toBe('');
+      expect(video('home movie.mp4').resolvedTitle).toBe('Home Movie (online)');
+    });
+
+    it('prefers a freshly found sidecar image and info.json over carried data', async () => {
+      buildTree();
+      mockFs.existing.add(CACHED);
+      store.dispatch(setPersonal([]));
+      seedPrevious({
+        filename: 'Intro [dQw4w9WgXcQ].mp4',
+        path: child(ROOT, 'Intro [dQw4w9WgXcQ].mp4'),
+        parsedPath: `${ROOT}/Intro [dQw4w9WgXcQ].mp4`,
+        resolvedTitle: 'Old title',
+        channel: 'Old channel',
+      });
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      const intro = video('Intro [dQw4w9WgXcQ].mp4');
+      expect(intro.resolvedTitle).toBe('Never Gonna Give You Up');
+      expect(intro.channel).toBe('Rick Astley');
+      expect(intro.poster).toMatch(POSTER_URI);
+      expect(intro.poster).not.toBe(CACHED);
+      expect(intro.firstDetected).toBe(111);
+    });
+
+    it('forgets videos that are no longer on a readable source', async () => {
+      buildTree();
+      seedPrevious({ filename: 'gone.mp4', path: child(ROOT, 'gone.mp4'), parsedPath: `${ROOT}/gone.mp4` });
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(lib().personal.find((v) => v.filename === 'gone.mp4')).toBeUndefined();
+    });
+  });
+
+  describe('unreachable sources', () => {
+    const prevVideo = (name: string, sourceUri: string | undefined, folderPath: string[] = []): IPersonalVideo => ({
+      ids: { tvdb: null, imdb: null, tmdb: null },
+      title: name,
+      scannedTitle: name,
+      episodeNumber: 0,
+      filename: `${name}.mp4`,
+      path: `${sourceUri ?? 'content://legacy'}/${name}.mp4`,
+      parsedPath: `${sourceUri ?? 'content://legacy'}/${name}.mp4`,
+      isDirectory: false,
+      poster: '',
+      folderPath,
+      ...(sourceUri ? { sourceUri } : {}),
+    });
+
+    it('carries a failed source\'s videos and folder posters forward as unavailable', async () => {
+      addDir(ROOT, ['a.mp4']);
+      // OTHER_ROOT is not in mockFs.dirs, so its root cannot be read.
+      store.dispatch(setPersonal([
+        prevVideo('old', OTHER_ROOT, ['Drawing', 'Perspective']),
+        prevVideo('removed', ROOT),
+      ]));
+      store.dispatch(setPersonalFolderPosters({ Drawing: 'file:///doc/d.jpg', Other: 'file:///doc/o.jpg' }));
+
+      await scanner.scanAllSources([personalSource(ROOT), personalSource(OTHER_ROOT)]);
+
+      expect(lib().personal.map((v) => [v.filename, v.unavailable])).toEqual([
+        ['a.mp4', undefined],
+        ['old.mp4', true],
+      ]);
+      // Only the folders of the carried videos keep their poster.
+      expect(lib().personalFolderPosters).toEqual({ Drawing: 'file:///doc/d.jpg' });
+    });
+
+    it('only restores videos from before sourceUri existed when every personal source failed', async () => {
+      store.dispatch(setPersonal([prevVideo('legacy', undefined)]));
+
+      addDir(ROOT, ['a.mp4']);
+      await scanner.scanAllSources([personalSource(ROOT), personalSource(OTHER_ROOT)]);
+      expect(lib().personal.map((v) => v.filename)).toEqual(['a.mp4']);
+
+      store.dispatch(setPersonal([prevVideo('legacy', undefined)]));
+      mockFs.dirs.clear();
+      await scanner.scanAllSources([personalSource(ROOT), personalSource(OTHER_ROOT)]);
+      expect(lib().personal).toEqual([expect.objectContaining({ filename: 'legacy.mp4', unavailable: true })]);
+    });
+  });
+
+  describe('metadata enrichment', () => {
+    it('runs enrichAll without any API key when a personal video has a YouTube id', async () => {
+      buildTree();
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(mockEnrichAll).toHaveBeenCalledTimes(1);
+      const personalArg = mockEnrichAll.mock.calls[0][4] as IPersonalVideo[];
+      expect(personalArg.map((v) => v.filename).sort()).toEqual(lib().personal.map((v) => v.filename).sort());
+    });
+
+    it('skips enrichment when no video has a YouTube id and there is no API key or audiobook', async () => {
+      addDir(ROOT, ['home movie.mp4']);
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(mockEnrichAll).not.toHaveBeenCalled();
+    });
+
+    it('still enriches personal videos alongside a provider key', async () => {
+      addDir(ROOT, ['home movie.mp4']);
+      store.dispatch(setTmdbApiKey('key'));
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(mockEnrichAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips enrichment when poster fetching is disabled', async () => {
+      buildTree();
+      store.dispatch(setEnablePosterFetching(false));
+
+      await scanner.scanAllSources([personalSource(ROOT)]);
+
+      expect(mockEnrichAll).not.toHaveBeenCalled();
+      expect(lib().personal).toHaveLength(4);
+    });
+  });
+
+  describe('thumbnail generation', () => {
+    it('includes freshly scanned personal videos, but not unavailable carried-forward ones', async () => {
+      store.dispatch(setEnableThumbnailGeneration(true));
+      store.dispatch(setPersonal([{
+        ids: { tvdb: null, imdb: null, tmdb: null }, title: 'old', scannedTitle: 'old', episodeNumber: 0,
+        filename: 'old.mp4', path: `${OTHER_ROOT}/old.mp4`, parsedPath: `${OTHER_ROOT}/old.mp4`,
+        isDirectory: false, poster: '', folderPath: [], sourceUri: OTHER_ROOT,
+      }]));
+      addDir(ROOT, ['a.mp4', 'Sub']);
+      addDir(child(ROOT, 'Sub'), ['b.mp4']);
+      const generate = jest
+        .spyOn(scanner as unknown as { generateThumbnailsFor: (files: { filename: string }[]) => Promise<void> }, 'generateThumbnailsFor')
+        .mockResolvedValue(undefined);
+
+      await scanner.scanAllSources([personalSource(ROOT), personalSource(OTHER_ROOT)]);
+
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(generate.mock.calls[0][0].map((f) => f.filename).sort()).toEqual(['a.mp4', 'b.mp4']);
+    });
+  });
+
+  describe('refetchMetadataFor', () => {
+    it('forwards the selected personal paths to the metadata service', async () => {
+      await scanner.refetchMetadataFor([], [], ['content://p/a.mp4']);
+
+      expect(mockEnrichSelection).toHaveBeenCalledWith([], [], expect.any(Function), ['content://p/a.mp4']);
+    });
+
+    it('does nothing for an empty selection', async () => {
+      await scanner.refetchMetadataFor([], [], []);
+
+      expect(mockEnrichSelection).not.toHaveBeenCalled();
     });
   });
 });

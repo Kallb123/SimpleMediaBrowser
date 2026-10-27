@@ -4,14 +4,16 @@ import libraryReducer, {
   setMediaLibrary,
   setMediaOverride,
   setMovies,
+  setPersonal,
 } from '@/store/libraryReducer';
 import type { IMediaAudiobook, IMediaLibrary, IMediaShow } from '@/store/libraryReducer';
 import scanReducer from '@/store/scanReducer';
-import settingsReducer, { setDataSource, setTmdbApiKey, setTvdbApiKey } from '@/store/settingsReducer';
+import settingsReducer, { setDataSource, setEnablePosterFetching, setTmdbApiKey, setTvdbApiKey } from '@/store/settingsReducer';
 import { setLibrarySink } from '@/scripts/librarySink';
 import type { LibrarySink } from '@/scripts/librarySink';
 import type { IMediaObject } from '@/scripts/libraryUtils';
 import type { IMetadataProvider } from '@/scripts/providers/IMetadataProvider';
+import type { IPersonalVideo } from '@/scripts/personalLibrary';
 import { logger } from '@/scripts/Logger';
 import { MetadataService } from '@/scripts/MetadataService';
 
@@ -82,6 +84,16 @@ jest.mock('@/scripts/providers/AudiobookProvider', () => ({
   },
 }));
 
+/** The YouTube client is faked too: oEmbed and thumbnail downloads are scripted per test. */
+const mockYoutube = {
+  fetchYoutubeOEmbed: jest.fn(),
+  downloadYoutubeThumbnail: jest.fn(),
+};
+jest.mock('@/scripts/providers/YouTubeProvider', () => ({
+  fetchYoutubeOEmbed: (...a: unknown[]) => mockYoutube.fetchYoutubeOEmbed(...a),
+  downloadYoutubeThumbnail: (...a: unknown[]) => mockYoutube.downloadYoutubeThumbnail(...a),
+}));
+
 const realFetch = global.fetch;
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -127,6 +139,13 @@ const makeAudiobook = (folderKey: string, extra: Partial<IMediaAudiobook> = {}):
   path: `content://a/${folderKey}/1.mp3`,
   files: [],
   poster: '',
+  ...extra,
+});
+
+const makePersonal = (name: string, extra: Partial<IPersonalVideo> = {}): IPersonalVideo => ({
+  ...makeEpisode(name, 0, { title: name, filename: `${name}.mp4`, path: `content://p/${name}.mp4`, parsedPath: `p/${name}.mp4` }),
+  folderPath: [],
+  youtubeId: 'dQw4w9WgXcQ',
   ...extra,
 });
 
@@ -739,6 +758,164 @@ describe('MetadataService', () => {
 
   // ── enrichAll (end to end with fake providers) ─────────────────────────────
 
+  // ── enrichPersonal ─────────────────────────────────────────────────────────
+
+  describe('enrichPersonal', () => {
+    const run = async (isCancelled?: () => boolean) => {
+      const progress = { done: 0 };
+      const dispatchProgress = jest.fn();
+      await service.enrichPersonal(lib().personal, progress, dispatchProgress, isCancelled);
+      return { progress, dispatchProgress };
+    };
+    const video = (name: string) => lib().personal.find((v) => v.filename === `${name}.mp4`)!;
+
+    it('fetches the title, channel and thumbnail for a video with only a YouTube id', async () => {
+      store.dispatch(setPersonal([makePersonal('Intro')]));
+      mockYoutube.fetchYoutubeOEmbed.mockResolvedValue({ title: 'Never Gonna Give You Up', channel: 'Rick Astley' });
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue('file:///yt/Intro.jpg');
+
+      const { progress } = await run();
+
+      expect(mockYoutube.fetchYoutubeOEmbed).toHaveBeenCalledWith('dQw4w9WgXcQ');
+      expect(mockYoutube.downloadYoutubeThumbnail).toHaveBeenCalledWith('dQw4w9WgXcQ');
+      expect(video('Intro')).toMatchObject({
+        title: 'Intro', // the filename title is untouched; the online one goes in resolvedTitle
+        resolvedTitle: 'Never Gonna Give You Up',
+        channel: 'Rick Astley',
+        poster: 'file:///yt/Intro.jpg',
+      });
+      expect(progress.done).toBe(1);
+    });
+
+    it('skips the oEmbed lookup when title and channel are already known, but still fetches a missing thumbnail', async () => {
+      store.dispatch(setPersonal([makePersonal('Intro', { resolvedTitle: 'From info.json', channel: 'Channel' })]));
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue('file:///yt/Intro.jpg');
+
+      await run();
+
+      expect(mockYoutube.fetchYoutubeOEmbed).not.toHaveBeenCalled();
+      expect(video('Intro')).toMatchObject({ resolvedTitle: 'From info.json', channel: 'Channel', poster: 'file:///yt/Intro.jpg' });
+    });
+
+    it('only fills in the field that is missing, never overwriting sidecar data', async () => {
+      store.dispatch(setPersonal([
+        makePersonal('TitleOnly', { resolvedTitle: 'Sidecar title', youtubeId: 'aaaaaaaaaaa' }),
+        makePersonal('ChannelOnly', { channel: 'Sidecar channel', youtubeId: 'bbbbbbbbbbb' }),
+      ]));
+      mockYoutube.fetchYoutubeOEmbed.mockResolvedValue({ title: 'Online title', channel: 'Online channel' });
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue(null);
+
+      await run();
+
+      expect(video('TitleOnly')).toMatchObject({ resolvedTitle: 'Sidecar title', channel: 'Online channel' });
+      expect(video('ChannelOnly')).toMatchObject({ resolvedTitle: 'Online title', channel: 'Sidecar channel' });
+    });
+
+    it('does nothing for a video that already has everything, including a cached poster', async () => {
+      store.dispatch(setPersonal([makePersonal('Full', { resolvedTitle: 'T', channel: 'C', poster: 'file:///yt/Full.jpg' })]));
+      mockExistingFiles.add('file:///yt/Full.jpg');
+
+      const { progress } = await run();
+
+      expect(mockYoutube.fetchYoutubeOEmbed).not.toHaveBeenCalled();
+      expect(mockYoutube.downloadYoutubeThumbnail).not.toHaveBeenCalled();
+      expect(progress.done).toBe(1);
+    });
+
+    it('downloads the thumbnail again when the cached poster file has disappeared', async () => {
+      store.dispatch(setPersonal([makePersonal('Gone', { resolvedTitle: 'T', channel: 'C', poster: 'file:///yt/missing.jpg' })]));
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue('file:///yt/new.jpg');
+
+      await run();
+
+      expect(video('Gone').poster).toBe('file:///yt/new.jpg');
+    });
+
+    it('does not download a thumbnail for a video with a poster override', async () => {
+      store.dispatch(setPersonal([makePersonal('Mine', { resolvedTitle: 'T', channel: 'C' })]));
+      store.dispatch(setMediaOverride({ key: 'personal:p/Mine.mp4', override: { poster: 'file:///mine.jpg' } }));
+      mockExistingFiles.add('file:///mine.jpg');
+
+      await run();
+
+      expect(mockYoutube.downloadYoutubeThumbnail).not.toHaveBeenCalled();
+      // The override stays an override: the video's own poster is not rewritten.
+      expect(video('Mine').poster).toBe('');
+    });
+
+    it('still gets a thumbnail when oEmbed has nothing (private video), and changes nothing when both fail', async () => {
+      store.dispatch(setPersonal([
+        makePersonal('Private', { youtubeId: 'aaaaaaaaaaa' }),
+        makePersonal('Dead', { youtubeId: 'bbbbbbbbbbb' }),
+      ]));
+      mockYoutube.fetchYoutubeOEmbed.mockResolvedValue(null);
+      mockYoutube.downloadYoutubeThumbnail.mockImplementation(async (id: string) => (id === 'aaaaaaaaaaa' ? 'file:///yt/p.jpg' : null));
+
+      const { progress } = await run();
+
+      expect(video('Private')).toMatchObject({ poster: 'file:///yt/p.jpg' });
+      expect(video('Private').resolvedTitle).toBeUndefined();
+      expect(video('Dead')).toMatchObject({ poster: '' });
+      expect(video('Dead').resolvedTitle).toBeUndefined();
+      expect(progress.done).toBe(2);
+    });
+
+    it('counts, but does not look up, videos without a YouTube id', async () => {
+      store.dispatch(setPersonal([makePersonal('Home', { youtubeId: undefined })]));
+
+      const { progress } = await run();
+
+      expect(mockYoutube.fetchYoutubeOEmbed).not.toHaveBeenCalled();
+      expect(mockYoutube.downloadYoutubeThumbnail).not.toHaveBeenCalled();
+      expect(progress.done).toBe(1);
+    });
+
+    it('logs and continues past an error for one video', async () => {
+      store.dispatch(setPersonal([
+        makePersonal('Bad', { youtubeId: 'aaaaaaaaaaa' }),
+        makePersonal('Good', { youtubeId: 'bbbbbbbbbbb' }),
+      ]));
+      mockYoutube.fetchYoutubeOEmbed.mockImplementation(async (id: string) => {
+        if (id === 'aaaaaaaaaaa') throw new Error('boom');
+        return { title: 'Good title', channel: 'Good channel' };
+      });
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue(null);
+
+      const { progress } = await run();
+
+      expect(logger.warn).toHaveBeenCalledWith('MetadataService', expect.stringContaining('Bad'), expect.any(Error));
+      expect(video('Good').resolvedTitle).toBe('Good title');
+      expect(progress.done).toBe(2);
+    });
+
+    it('applies its updates in batches rather than one store notification per video', async () => {
+      store.dispatch(setPersonal(['a', 'b', 'c'].map((n) => makePersonal(n, { youtubeId: `${n}`.repeat(11) }))));
+      mockYoutube.fetchYoutubeOEmbed.mockResolvedValue({ title: 'T', channel: 'C' });
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue('file:///yt/x.jpg');
+      const libraryStates = new Set<unknown>();
+      store.subscribe(() => libraryStates.add(store.getState().libraryReducer));
+
+      await run();
+
+      // All three updates land in one library state change (the other notifications are progress ticks).
+      expect(libraryStates.size).toBe(1);
+      expect(lib().personal.every((v) => v.resolvedTitle === 'T')).toBe(true);
+    });
+
+    it('stops processing when cancelled', async () => {
+      store.dispatch(setPersonal([makePersonal('A'), makePersonal('B', { youtubeId: 'bbbbbbbbbbb' })]));
+      mockYoutube.fetchYoutubeOEmbed.mockResolvedValue({ title: 'T', channel: 'C' });
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue(null);
+      let calls = 0;
+
+      await run(() => ++calls > 1);
+
+      expect(mockYoutube.fetchYoutubeOEmbed).toHaveBeenCalledTimes(1);
+      expect(video('A').resolvedTitle).toBe('T');
+      expect(video('B').resolvedTitle).toBeUndefined();
+    });
+  });
+
   describe('enrichAll', () => {
     it('dedupes by name, enriches through the configured provider, fills in episode titles and ends with a progress update', async () => {
       store.dispatch(setTmdbApiKey('tmdb-key'));
@@ -794,6 +971,72 @@ describe('MetadataService', () => {
       await service.enrichAll(lib().mediaLibrary, [], [], () => true);
 
       expect(mockTmdb.searchShow).not.toHaveBeenCalled();
+    });
+
+    describe('personal videos', () => {
+      beforeEach(() => {
+        mockYoutube.fetchYoutubeOEmbed.mockResolvedValue({ title: 'Online', channel: 'Chan' });
+        mockYoutube.downloadYoutubeThumbnail.mockResolvedValue('file:///yt/a.jpg');
+      });
+
+      it('enriches videos with a YouTube id without any API key, counting them in the progress total', async () => {
+        store.dispatch(setPersonal([makePersonal('A'), makePersonal('B', { youtubeId: undefined })]));
+        seedLibrary({ Bluey: makeShow('Bluey') });
+
+        await service.enrichAll(lib().mediaLibrary, [], [], undefined, lib().personal);
+
+        expect(mockYoutube.fetchYoutubeOEmbed).toHaveBeenCalledTimes(1);
+        expect(lib().personal.find((v) => v.filename === 'A.mp4')).toMatchObject({ resolvedTitle: 'Online', channel: 'Chan', poster: 'file:///yt/a.jpg' });
+        expect(lib().personal.find((v) => v.filename === 'B.mp4')!.resolvedTitle).toBeUndefined();
+        // 1 show + 1 personal video with an id; the other video has nothing to look up.
+        expect(store.getState().scanReducer.scanProgress).toMatchObject({ phase: 'enriching', metadataDone: 2, metadataTotal: 2 });
+      });
+
+      it('makes no YouTube or network requests when poster fetching is disabled', async () => {
+        store.dispatch(setEnablePosterFetching(false));
+        store.dispatch(setPersonal([makePersonal('A')]));
+
+        await service.enrichAll({}, [], [], undefined, lib().personal);
+
+        expect(mockYoutube.fetchYoutubeOEmbed).not.toHaveBeenCalled();
+        expect(mockYoutube.downloadYoutubeThumbnail).not.toHaveBeenCalled();
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(lib().personal[0].resolvedTitle).toBeUndefined();
+        expect(store.getState().scanReducer.scanProgress).toMatchObject({ metadataDone: 0, metadataTotal: 0 });
+      });
+
+      it('leaves existing callers working: no personal argument means no YouTube lookups', async () => {
+        await service.enrichAll({}, [], []);
+        expect(mockYoutube.fetchYoutubeOEmbed).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  // ── enrichSelection ────────────────────────────────────────────────────────
+
+  describe('enrichSelection', () => {
+    it('enriches only the selected personal videos', async () => {
+      store.dispatch(setPersonal([
+        makePersonal('A', { youtubeId: 'aaaaaaaaaaa' }),
+        makePersonal('B', { youtubeId: 'bbbbbbbbbbb' }),
+        makePersonal('C', { youtubeId: undefined }),
+      ]));
+      mockYoutube.fetchYoutubeOEmbed.mockResolvedValue({ title: 'Online', channel: 'Chan' });
+      mockYoutube.downloadYoutubeThumbnail.mockResolvedValue('file:///yt/b.jpg');
+
+      await service.enrichSelection([], [], () => false, ['content://p/B.mp4', 'content://p/C.mp4']);
+
+      expect(mockYoutube.fetchYoutubeOEmbed).toHaveBeenCalledTimes(1);
+      expect(mockYoutube.fetchYoutubeOEmbed).toHaveBeenCalledWith('bbbbbbbbbbb');
+      expect(lib().personal.map((v) => v.resolvedTitle)).toEqual([undefined, 'Online', undefined]);
+    });
+
+    it('does nothing for an empty selection', async () => {
+      store.dispatch(setPersonal([makePersonal('A')]));
+
+      await service.enrichSelection([], [], () => false, []);
+
+      expect(mockYoutube.fetchYoutubeOEmbed).not.toHaveBeenCalled();
     });
   });
 });
