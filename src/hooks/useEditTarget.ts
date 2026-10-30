@@ -97,6 +97,8 @@ export function useEditTarget(itemType: EditItemType, itemKey: string) {
   return {
     override,
     currentPoster,
+    /** The Personal video's YouTube id from its filename or info.json, if any. */
+    personalYoutubeId: personalVideo?.youtubeId,
     currentTmdbId,
     currentTvdbId,
     resolvedProvider,

@@ -635,8 +635,12 @@ after collection (`setPersonal`, `setPersonalFolderPosters`):
   `<base>.info.json` is read through the same `StorageAccessFramework` call as
   `smb.json` and parsed with `parseYtDlpInfoJson` into `resolvedTitle`,
   `channel`, `description` and `uploadDate`. `youtubeId` is the info.json `id`
-  when the download is from YouTube, else the trailing `[id]` of the filename
-  (`extractYoutubeId`). A sidecar image is *not* a folder poster.
+  when the download is from YouTube, else the trailing id of the filename
+  (`extractYoutubeId`: yt-dlp's `[id]`, or — only when the token looks like a
+  random id, not a word — `(id)`, `-id`, ` id` or a bare `id`; only the
+  bracketed form is dropped from `title`). A sidecar image is *not* a folder
+  poster. The Edit Item screen's *Fetch YouTube thumbnail* takes an id or link
+  (`parseYoutubeIdInput`) and applies the thumbnail as a poster override.
 - **Folder posters** use the same filename list as other posters
   (`folder.jpg`, `poster.jpg`, ...) and are stored per folder in
   `personalFolderPosters[personalFolderKey(folderPath)]` (`''` = a source
