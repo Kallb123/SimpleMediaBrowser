@@ -104,6 +104,7 @@ SimpleMediaBrowser/
     │   ├── throttledDispatch.ts     # Pure leading/trailing rate limiter (scan progress, thumbnail-cache notifications)
     │   ├── batchedDispatch.ts       # Pure accumulator: queue items, send as one batch every N items / T ms (metadata enrichment)
     │   ├── thumbnailCache.ts        # Observable Map of generated video thumbnails (path → URI); subscribe/getVersion for useSyncExternalStore
+    │   ├── imageAspectCache.ts      # Observable Map of image aspect ratios (URI → width/height) that sizes the poster grid; measures unseen images via expo-image
     │   ├── SmbTypes.ts              # Shared types for the smb.json sidecar file format
     │   ├── ImportExportService.ts   # JSON state backup/restore + filesystem (smb.json) metadata export
     │   ├── LibraryStore.ts          # SQLite-backed library persistence (one row per show), incremental autosave
@@ -136,8 +137,9 @@ SimpleMediaBrowser/
     ├── contexts/BedtimeContext.tsx  # React context: bedtime-mode state (active / lifted) and the drawer sections it locks
     ├── contexts/FirstTimeSetupContext.tsx  # React context: whether first-time setup is done (drives the root Stack's guards)
     ├── constants/                   # Colors.ts, theme.ts (spacing/typography tokens), StorageKeys.ts (AsyncStorage keys)
-    ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks), useThumbnailVersion, useVideoTracks (player track state + remembered languages)
+    ├── hooks/                       # useColorScheme, useThemeColor, useTheme, useRedux (typed dispatch/selector hooks), useThumbnailVersion, useGridImageHeight (poster-grid cell height), useVideoTracks (player track state + remembered languages)
     ├── utils/viewScale.ts           # Maps the user's view-scale setting to a grid column count
+    ├── utils/posterFit.ts           # Pure aspect-ratio helpers: PosterBox backdrop decision, grid image-box height
     └── types/                       # Ambient type declarations (require.context, *.css modules)
 ```
 
@@ -428,6 +430,19 @@ browse rebuilds to scan-progress state). `smb_thumbnails/index.json` stays the
 persistence layer; `FileScanner` loads it into the cache. The `thumbnails` field
 of `libraryReducer` (and its `kv` row) is a leftover that the scanner and UI no
 longer use.
+
+**Poster grid cell height follows the art.** Every cell of a poster grid shares
+one image-box height: `gridImageHeight` (`utils/posterFit.ts`) takes the tallest
+image the view shows (each cell's poster, else its thumbnail) and fits it at the
+card width, between the 2:3 poster shape and 16:9. A view of only landscape stills
+or YouTube thumbnails, or square audiobook covers, gets short cells; one portrait
+poster makes them all poster-shaped. Ratios come from `scripts/imageAspectCache.ts`
+(an observable Map like `thumbnailCache`, session-only): `PosterBox` records each
+image's size on load, and `hooks/useGridImageHeight.ts` measures the view's
+not-yet-seen images in the background (downscaled `Image.loadAsync`, four at a
+time), stopping once it finds a poster-tall one. Until a ratio is known the cell
+height is based on the known ones, or 2:3 when none are, so a first visit can
+settle from 2:3 to shorter cells.
 
 ## 6. Core Data Model
 

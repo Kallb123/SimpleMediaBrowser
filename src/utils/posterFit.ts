@@ -29,3 +29,35 @@ export function needsBackdrop(
   if (imageAspect === undefined) return !assumeBoxShaped;
   return Math.abs(imageAspect - boxAspect) / boxAspect > ASPECT_TOLERANCE;
 }
+
+/** Width / height of the classic 2:3 portrait poster: the tallest box a grid cell gets. */
+export const POSTER_ASPECT = 2 / 3;
+
+/** Widest box a grid cell shrinks to; wider art (banners) letterboxes inside it instead. */
+const WIDEST_BOX_ASPECT = 16 / 9;
+
+/**
+ * Whether an image is as tall as a portrait poster (within tolerance, so 680x1000 TVDB posters
+ * and downscaled measurements count). Once a grid shows one, its cells are as tall as they get.
+ */
+export function isPosterTall(imageAspect: number | undefined): boolean {
+  return imageAspect !== undefined && imageAspect <= POSTER_ASPECT * (1 + ASPECT_TOLERANCE);
+}
+
+/**
+ * Height of the image box shared by every cell of a poster grid: tall enough to show the
+ * tallest of the grid's images at `cardWidth` without letterboxing, so a grid of only
+ * landscape stills or square covers gets matching short cells instead of portrait ones.
+ * Bounded by the 2:3 poster shape and 16:9; images whose size isn't known yet (undefined)
+ * are skipped, and with none known the box stays poster-shaped.
+ */
+export function gridImageHeight(cardWidth: number, imageAspects: Iterable<number | undefined>): number {
+  let narrowest: number | undefined;
+  for (const aspect of imageAspects) {
+    if (aspect !== undefined && (narrowest === undefined || aspect < narrowest)) narrowest = aspect;
+  }
+  const boxAspect = narrowest === undefined || isPosterTall(narrowest)
+    ? POSTER_ASPECT
+    : Math.min(narrowest, WIDEST_BOX_ASPECT);
+  return Math.round(cardWidth / boxAspect);
+}
