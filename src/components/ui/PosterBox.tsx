@@ -9,18 +9,13 @@ import { WatchProgressBar } from '@/components/ui/WatchProgressBar';
 import { WatchedBadge } from '@/components/ui/WatchedBadge';
 import type { ToggleWatched } from '@/components/ui/WatchedBadge';
 import type { IMediaAudiobook } from '@/store/libraryReducer';
-import { aspectRatio, needsBackdrop } from '@/utils/posterFit';
+import { imageAspectCache } from '@/scripts/imageAspectCache';
+import { aspectRatio, isPosterTall, needsBackdrop } from '@/utils/posterFit';
 
 type ThumbnailSource = VideoThumbnail | string;
 
 /** Blur strength for the backdrop that fills the letterbox area behind non-portrait art. */
 const BACKDROP_BLUR_RADIUS = 24;
-
-/**
- * Aspect ratios learned from onLoad, by image URI. Survives cell recycling and remounts so a
- * poster seen once never needs to re-decide whether it wants a backdrop.
- */
-const loadedAspectByUri = new Map<string, number>();
 
 export type PosterBoxItem = {
   kind: 'folder' | 'file';
@@ -93,21 +88,23 @@ export function PosterBox({
   const sourceUri = displaySource && 'uri' in displaySource ? displaySource.uri : undefined;
 
   // The blurred backdrop only shows in letterbox bars, and costs a second (blurred) decode per
-  // cell, so skip it when the image already fills the poster-shaped box. VideoThumbnails carry
-  // their size; URI images report theirs via onLoad (until then, assume posters fit and
-  // thumbnails/stills do not, so non-poster art never shows bare bars).
+  // cell, so skip it when the image already fills the box. VideoThumbnails carry their size;
+  // URI images report theirs via onLoad into the shared aspect cache, which also sizes the grid
+  // (until then, assume posters fit a poster-shaped box and thumbnails/stills do not, so
+  // non-poster art never shows bare bars).
   const [loaded, setLoaded] = useState<{ key: string; aspect: number } | null>(null);
   const knownAspect =
     typeof item.thumbnailUri === 'object' && displaySource === item.thumbnailUri
       ? aspectRatio(item.thumbnailUri.width, item.thumbnailUri.height)
-      : (sourceUri !== undefined ? loadedAspectByUri.get(sourceUri) : undefined)
+      : (sourceUri !== undefined ? imageAspectCache.get(sourceUri) : undefined)
         ?? (loaded?.key === recyclingKey ? loaded.aspect : undefined);
-  const showBackdrop = needsBackdrop(knownAspect, cardWidth / thumbnailHeight, isPosterShown);
+  const boxAspect = cardWidth / thumbnailHeight;
+  const showBackdrop = needsBackdrop(knownAspect, boxAspect, isPosterShown && isPosterTall(boxAspect));
 
   const handleImageLoad = (e: ImageLoadEventData) => {
     const aspect = aspectRatio(e.source.width, e.source.height);
     if (aspect === undefined) return;
-    if (sourceUri !== undefined) loadedAspectByUri.set(sourceUri, aspect);
+    if (sourceUri !== undefined) imageAspectCache.set(sourceUri, aspect);
     setLoaded({ key: recyclingKey, aspect });
   };
 

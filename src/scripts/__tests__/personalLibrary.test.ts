@@ -9,6 +9,7 @@ import {
   personalOverrideKey,
   personalTitleFromFilename,
   personalWatchKeys,
+  parseYoutubeIdInput,
   type IPersonalVideo,
 } from '../personalLibrary';
 import type { IMediaOverride } from '@/store/libraryReducer';
@@ -70,8 +71,25 @@ describe('extractYoutubeId', () => {
   it('only matches the form at the end of the base name', () => {
     expect(extractYoutubeId('[dQw4w9WgXcQ] Clip.mp4')).toBeNull();
     expect(extractYoutubeId('Clip [dQw4w9WgXcQ] part 2.mp4')).toBeNull();
-    expect(extractYoutubeId('Clip (dQw4w9WgXcQ).mp4')).toBeNull();
-    expect(extractYoutubeId('Clip dQw4w9WgXcQ.mp4')).toBeNull();
+    expect(extractYoutubeId('dQw4w9WgXcQ - Clip.mp4')).toBeNull();
+  });
+
+  it('reads an id that looks random in parentheses, after a hyphen or space, or as the whole name', () => {
+    expect(extractYoutubeId('Clip (dQw4w9WgXcQ).mp4')).toBe('dQw4w9WgXcQ');
+    expect(extractYoutubeId('Clip-dQw4w9WgXcQ.mp4')).toBe('dQw4w9WgXcQ');
+    expect(extractYoutubeId('Clip - dQw4w9WgXcQ.mp4')).toBe('dQw4w9WgXcQ');
+    expect(extractYoutubeId('Clip dQw4w9WgXcQ.mp4')).toBe('dQw4w9WgXcQ');
+    expect(extractYoutubeId('dQw4w9WgXcQ.mp4')).toBe('dQw4w9WgXcQ');
+    expect(extractYoutubeId('Clip-a_b-c_d-e_f.webm')).toBe('a_b-c_d-e_f');
+    expect(extractYoutubeId('Clip abcDEFghijk.mp4')).toBe('abcDEFghijk'); // letters only, mixed case
+  });
+
+  it('does not take an ordinary word or an unseparated tail as an unbracketed id', () => {
+    expect(extractYoutubeId('Trip Switzerland.mp4')).toBeNull();
+    expect(extractYoutubeId('Film (Documentary).mp4')).toBeNull();
+    expect(extractYoutubeId('Clip-ABCDEFGHIJK.mp4')).toBeNull(); // all capitals
+    expect(extractYoutubeId('ClipdQw4w9WgXcQ.mp4')).toBeNull();
+    expect(extractYoutubeId('Clip (dQw4w9WgXcQ.mp4')).toBeNull();
   });
 
   it('does not take the id from a longer bracketed run', () => {
@@ -81,6 +99,31 @@ describe('extractYoutubeId', () => {
   it('returns null for a plain filename', () => {
     expect(extractYoutubeId('Holiday 2019.mp4')).toBeNull();
     expect(extractYoutubeId('')).toBeNull();
+  });
+});
+
+describe('parseYoutubeIdInput', () => {
+  it('accepts a bare id, trimmed', () => {
+    expect(parseYoutubeIdInput(' dQw4w9WgXcQ ')).toBe('dQw4w9WgXcQ');
+  });
+
+  it.each([
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtube.com/watch?feature=share&v=dQw4w9WgXcQ&t=42',
+    'https://m.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtu.be/dQw4w9WgXcQ?si=abc',
+    'https://www.youtube.com/shorts/dQw4w9WgXcQ',
+    'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+    'youtube.com/live/dQw4w9WgXcQ',
+  ])('reads the id from %s', (url) => {
+    expect(parseYoutubeIdInput(url)).toBe('dQw4w9WgXcQ');
+  });
+
+  it('rejects anything else', () => {
+    expect(parseYoutubeIdInput('')).toBeNull();
+    expect(parseYoutubeIdInput('dQw4w9WgXc')).toBeNull();
+    expect(parseYoutubeIdInput('https://example.com/watch?v=dQw4w9WgXcQ')).toBeNull();
+    expect(parseYoutubeIdInput('https://youtu.be/dQw4w9WgXcQx')).toBeNull();
   });
 });
 
@@ -100,6 +143,10 @@ describe('personalTitleFromFilename', () => {
 
   it('trims surrounding whitespace', () => {
     expect(personalTitleFromFilename('  Clip   [dQw4w9WgXcQ] .mp4')).toBe('Clip');
+  });
+
+  it('keeps an unbracketed id in the title', () => {
+    expect(personalTitleFromFilename('Clip-dQw4w9WgXcQ.mp4')).toBe('Clip-dQw4w9WgXcQ');
   });
 
   it('falls back to the base name when only the id is left', () => {

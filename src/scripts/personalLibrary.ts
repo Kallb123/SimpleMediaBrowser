@@ -18,7 +18,7 @@ import type { IMediaOverride } from '@/store/libraryReducer';
 export interface IPersonalVideo extends IMediaObject {
   /** Folder names from the source root down to the file's folder; [] = file sits at the root. */
   folderPath: string[];
-  /** 11-character YouTube video id, from the filename (`Title [id].mp4`) or the yt-dlp info.json. */
+  /** 11-character YouTube video id, from the filename (see {@link extractYoutubeId}) or the yt-dlp info.json. */
   youtubeId?: string;
   /** Channel / uploader (info.json `channel` ?? `uploader`, or oEmbed `author_name`). */
   channel?: string;
@@ -37,6 +37,13 @@ const YOUTUBE_ID_PATTERN = '[A-Za-z0-9_-]{11}';
 /** An 11-character YouTube id in square brackets at the very end (yt-dlp's default `Title [id]`). */
 const TRAILING_YOUTUBE_ID = new RegExp(`\\s*\\[(${YOUTUBE_ID_PATTERN})\\]$`);
 const YOUTUBE_ID_ONLY = new RegExp(`^${YOUTUBE_ID_PATTERN}$`);
+/**
+ * An 11-character id at the very end in parentheses, after a space or hyphen (youtube-dl's old
+ * `Title-id` default and other downloaders' templates), or as the whole name.
+ */
+const LOOSE_TRAILING_YOUTUBE_ID = new RegExp(`(?:\\((${YOUTUBE_ID_PATTERN})\\)|(?:^|[\\s-])(${YOUTUBE_ID_PATTERN}))$`);
+/** The id in a youtube.com / youtu.be link (watch?v=, youtu.be/, shorts/, embed/, live/, v/). */
+const YOUTUBE_URL_ID = new RegExp(`(?:youtube(?:-nocookie)?\\.com/(?:watch\\?(?:.*&)?v=|shorts/|embed/|live/|v/)|youtu\\.be/)(${YOUTUBE_ID_PATTERN})(?![A-Za-z0-9_-])`);
 const EXTENSION = /\.[A-Za-z0-9]{1,5}$/;
 
 /** The filename without its extension. */
@@ -45,12 +52,40 @@ function baseName(filename: string): string {
 }
 
 /**
- * The YouTube id yt-dlp puts in its default filename: 11 `[A-Za-z0-9_-]` characters in square
- * brackets at the end of the base name ("Title [dQw4w9WgXcQ].mp4"). Brackets of any other length
- * ("[1080p]", a 10- or 12-character tag) and brackets that are not last do not match.
+ * The YouTube id at the end of a filename's base name: 11 `[A-Za-z0-9_-]` characters in square
+ * brackets, as in yt-dlp's default "Title [dQw4w9WgXcQ].mp4"; or, when the token looks like a
+ * random id, in parentheses ("Title (id)"), after a hyphen or space (youtube-dl's old "Title-id",
+ * "Title id") or as the whole name ("id.mp4"). Brackets of any other length ("[1080p]", a 10- or
+ * 12-character tag) and ids that are not last do not match.
  */
 export function extractYoutubeId(filename: string): string | null {
-  const match = TRAILING_YOUTUBE_ID.exec(baseName(filename).trimEnd());
+  const base = baseName(filename).trimEnd();
+  const match = TRAILING_YOUTUBE_ID.exec(base);
+  if (match) return match[1];
+  // Unbracketed forms ("Title-id", "Title (id)", "id") also fit ordinary words ("Trip
+  // Switzerland"), so only accept a token that looks like a random id.
+  const loose = LOOSE_TRAILING_YOUTUBE_ID.exec(base);
+  const id = loose ? loose[1] ?? loose[2] : undefined;
+  return id && looksLikeYoutubeId(id) ? id : null;
+}
+
+/**
+ * Whether an 11-character token reads as a random YouTube id rather than a word: it has a digit,
+ * `-` or `_`, or mixes case with at least two capitals. About 0.1% of real ids fail this.
+ */
+function looksLikeYoutubeId(token: string): boolean {
+  if (/[0-9_-]/.test(token)) return true;
+  return (token.match(/[A-Z]/g)?.length ?? 0) >= 2 && /[a-z]/.test(token);
+}
+
+/**
+ * The YouTube id in what a user typed or pasted: a bare 11-character id or a YouTube link
+ * (youtube.com/watch?v=…, youtu.be/…, /shorts/…, /embed/…). Returns null for anything else.
+ */
+export function parseYoutubeIdInput(input: string): string | null {
+  const text = input.trim();
+  if (YOUTUBE_ID_ONLY.test(text)) return text;
+  const match = YOUTUBE_URL_ID.exec(text);
   return match ? match[1] : null;
 }
 

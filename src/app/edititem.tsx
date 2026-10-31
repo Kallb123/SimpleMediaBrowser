@@ -1,7 +1,7 @@
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { usePreventRemove, useNavigation } from '@react-navigation/native';
-import { Alert, Button, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Button, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedTextInput } from '@/components/ThemedTextInput';
@@ -14,6 +14,8 @@ import { useEditTarget, itemTypeLabel, type EditItemType } from '@/hooks/useEdit
 import { KeyboardAwareForm } from '@/components/KeyboardAwareForm';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { logger } from '@/scripts/Logger';
+import { parseYoutubeIdInput } from '@/scripts/personalLibrary';
+import { downloadYoutubeThumbnail } from '@/scripts/providers/YouTubeProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DIVIDER_COLOR = 'rgba(128,128,128,0.35)';
@@ -38,7 +40,7 @@ export default function EditItemScreen() {
   const keyboard = useKeyboardAwareScroll();
   const { handleInputFocus, handleInputBlur } = keyboard;
 
-  const { override: existingOverride, currentPoster, currentTmdbId, currentTvdbId, hasProviderSupport } =
+  const { override: existingOverride, currentPoster, personalYoutubeId, currentTmdbId, currentTvdbId, hasProviderSupport, applyPoster } =
     useEditTarget(itemType, itemKey);
 
   const [titleInput, setTitleInput] = useState(existingOverride.title ?? currentTitle ?? '');
@@ -46,6 +48,9 @@ export default function EditItemScreen() {
   // Year override – used for audiobooks as an edition/narrator proxy (different
   // narrator releases usually have different years and different cover art).
   const [yearInput, setYearInput] = useState(existingOverride.year ? String(existingOverride.year) : '');
+  // YouTube id or link to fetch a Personal video's thumbnail from; not part of Save.
+  const [youtubeInput, setYoutubeInput] = useState(personalYoutubeId ?? '');
+  const [fetchingYoutube, setFetchingYoutube] = useState(false);
   // Set by Save; lets the unsaved-changes guard step aside before navigating back.
   const [saved, setSaved] = useState(false);
 
@@ -111,6 +116,26 @@ export default function EditItemScreen() {
       pathname: '/editposter',
       params: { itemType, itemKey, currentTitle, query: titleInput.trim(), year: yearInput.trim() },
     });
+  };
+
+  const handleFetchYoutubeThumbnail = async () => {
+    const youtubeId = parseYoutubeIdInput(youtubeInput);
+    if (!youtubeId) {
+      Alert.alert('Not a YouTube video', 'Enter an 11-character YouTube video ID or paste a YouTube link.');
+      return;
+    }
+    logger.log('EditItem', `Fetching YouTube thumbnail ${youtubeId} for ${itemKey}`);
+    setFetchingYoutube(true);
+    try {
+      const poster = await downloadYoutubeThumbnail(youtubeId);
+      if (poster) {
+        applyPoster(poster);
+      } else {
+        Alert.alert('No thumbnail', `Couldn't download a thumbnail for ${youtubeId}. Check the ID and your connection.`);
+      }
+    } finally {
+      setFetchingYoutube(false);
+    }
   };
 
   const handleRematch = () => {
@@ -207,6 +232,33 @@ export default function EditItemScreen() {
             <ThemedText style={styles.hint}>
               Picking a {isAudiobook ? 'cover' : 'poster'} applies it immediately; it isn&apos;t part of Save.
             </ThemedText>
+
+            {itemType === 'personal' && (
+              <View style={styles.field}>
+                <ThemedText style={styles.label}>YouTube Thumbnail</ThemedText>
+                <ThemedTextInput
+                  value={youtubeInput}
+                  onChangeText={setYoutubeInput}
+                  onFocus={handleInputFocus}
+                  onBlur={handleInputBlur}
+                  placeholder="YouTube video ID or link"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={[styles.actionButton, fetchingYoutube && styles.actionButtonDisabled]}
+                  onPress={handleFetchYoutubeThumbnail}
+                  disabled={fetchingYoutube}
+                >
+                  {fetchingYoutube
+                    ? <ActivityIndicator color="#fff" />
+                    : <ThemedText style={styles.actionButtonText}>Fetch YouTube thumbnail</ThemedText>}
+                </TouchableOpacity>
+                <ThemedText style={styles.hint}>
+                  Downloads the video&apos;s YouTube thumbnail as the poster; applies immediately.
+                </ThemedText>
+              </View>
+            )}
           </View>
         )}
 
@@ -303,6 +355,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     alignItems: 'center',
+  },
+  actionButtonDisabled: {
+    opacity: 0.6,
   },
   actionButtonText: {
     color: '#fff',

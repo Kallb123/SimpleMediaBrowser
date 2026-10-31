@@ -22,6 +22,7 @@ import { resumePosition } from '@/scripts/videoProgress';
 import { formatClock } from '@/utils/formatClock';
 import { thumbnailCache } from '@/scripts/thumbnailCache';
 import { useThumbnailVersion } from '@/hooks/useThumbnailVersion';
+import { useGridImageHeight } from '@/hooks/useGridImageHeight';
 import { audioPartFiles } from '@/scripts/libraryUtils';
 import { personalDisplayTitle, personalOverrideKey, personalWatchKeys } from '@/scripts/personalLibrary';
 import type { IPersonalVideo } from '@/scripts/personalLibrary';
@@ -629,6 +630,7 @@ const EMPTY_MOVIES: IMediaObject[] = [];
 const EMPTY_AUDIOBOOKS: IMediaAudiobook[] = [];
 const EMPTY_PERSONAL: IPersonalVideo[] = [];
 const EMPTY_SELECTION: Set<string> = new Set();
+const EMPTY_GRID_IMAGES: (ThumbnailSource | undefined)[] = [];
 
 const CARD_GAP = 8;
 /** Portrait mode: minimum number of grid columns shown at the lowest viewScale. */
@@ -780,9 +782,6 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
   // In list mode use a single column; in poster mode use the scale-mapped column count.
   const numColumns = isListMode ? 1 : mapScaleToColumns(viewScale, minColumns, maxColumns);
   const cardWidth = (screenWidth - CARD_GAP * (numColumns + 1)) / numColumns;
-  // Poster card uses a 2:3 portrait ratio for posters; video thumbnails may render wider
-  // later in PosterBox if they are being shown instead of a portrait poster.
-  const thumbnailHeight = Math.round(cardWidth * 3 / 2);
   // List mode row height scales with viewScale (lower scale = taller rows, matching poster behaviour).
   const listRowHeight = mapScaleToListRowHeight(viewScale);
 
@@ -794,6 +793,15 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mediaFilter, mediaLibrary, movies, audiobooks, personal, personalFolderPosters, personalLayout, viewType, location, mediaOverrides, navigateInto, thumbnailVersion, sortOrder],
   );
+
+  // Poster cells share one image box height: the tallest image this view shows (a portrait
+  // poster gives the classic 2:3 box; a view of only landscape stills or square covers gets
+  // shorter cells). Each cell's image is the one PosterBox shows: the poster, else the thumbnail.
+  const gridImages = useMemo(
+    () => (isListMode ? EMPTY_GRID_IMAGES : displayItems.map((item) => item.posterUri || item.thumbnailUri)),
+    [isListMode, displayItems],
+  );
+  const thumbnailHeight = useGridImageHeight(cardWidth, gridImages);
 
   const hasLibraryContent = Object.keys(mediaLibrary).length > 0 || movies.length > 0 || audiobooks.length > 0 || personal.length > 0;
   const hasPersonalSource = mediaSources.some((source) => source.contentType === 'personal');

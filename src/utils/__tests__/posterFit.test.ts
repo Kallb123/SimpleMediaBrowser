@@ -1,4 +1,4 @@
-import { aspectRatio, needsBackdrop } from '@/utils/posterFit';
+import { aspectRatio, gridImageHeight, isPosterTall, needsBackdrop } from '@/utils/posterFit';
 
 const BOX = 2 / 3;
 
@@ -29,5 +29,50 @@ describe('needsBackdrop', () => {
   it('falls back to the assumption while the size is unknown', () => {
     expect(needsBackdrop(undefined, BOX, true)).toBe(false);
     expect(needsBackdrop(undefined, BOX, false)).toBe(true);
+  });
+});
+
+describe('isPosterTall', () => {
+  it('is true for 2:3 posters (within tolerance) and anything taller', () => {
+    expect(isPosterTall(500 / 750)).toBe(true);
+    expect(isPosterTall(680 / 1000)).toBe(true);
+    expect(isPosterTall(1 / 2)).toBe(true);
+  });
+  it('is false for square, landscape or unknown images', () => {
+    expect(isPosterTall(1)).toBe(false);
+    expect(isPosterTall(16 / 9)).toBe(false);
+    expect(isPosterTall(undefined)).toBe(false);
+  });
+});
+
+describe('gridImageHeight', () => {
+  const WIDTH = 120;
+
+  it('keeps the 2:3 poster box when nothing is known yet', () => {
+    expect(gridImageHeight(WIDTH, [])).toBe(180);
+    expect(gridImageHeight(WIDTH, [undefined, undefined])).toBe(180);
+  });
+
+  it('fits a grid of only landscape images', () => {
+    expect(gridImageHeight(WIDTH, [16 / 9, 16 / 9])).toBe(68);
+    expect(gridImageHeight(WIDTH, [16 / 9, 4 / 3])).toBe(90); // the tallest wins
+  });
+
+  it('fits square covers', () => {
+    expect(gridImageHeight(WIDTH, [1, 1, 16 / 9])).toBe(120);
+  });
+
+  it('stays poster-shaped once any image is poster-tall', () => {
+    expect(gridImageHeight(WIDTH, [16 / 9, 2 / 3, 1])).toBe(180);
+    expect(gridImageHeight(WIDTH, [680 / 1000, 16 / 9])).toBe(180);
+    expect(gridImageHeight(WIDTH, [1 / 2])).toBe(180);
+  });
+
+  it('never goes wider than 16:9', () => {
+    expect(gridImageHeight(WIDTH, [3])).toBe(68);
+  });
+
+  it('skips images whose size is unknown', () => {
+    expect(gridImageHeight(WIDTH, [undefined, 16 / 9, undefined])).toBe(68);
   });
 });
