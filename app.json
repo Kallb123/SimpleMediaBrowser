@@ -3,7 +3,7 @@
     "name": "Zibo",
     "owner": "kallb123",
     "slug": "SimpleMediaBrowser",
-    "version": "2.5.1",
+    "version": "2.5.2",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "zibo",
@@ -26,7 +26,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "package": "net.nawt.simplemediabrowser",
-      "versionCode": 69
+      "versionCode": 70
     },
     "web": {
       "output": "static",
