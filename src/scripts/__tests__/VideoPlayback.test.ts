@@ -1,4 +1,4 @@
-import { nextEpisode, preferredTrack, resolveVideoRequest, sameTrack, trackLabel, trackLabels, unsupportedVideoTrack } from '../VideoPlayback';
+import { clampSeek, nextEpisode, preferredTrack, resolveVideoRequest, sameTrack, scrubTime, trackLabel, trackLabels, unsupportedVideoTrack } from '../VideoPlayback';
 import type { IMediaObject } from '../libraryUtils';
 import type { IPersonalVideo } from '../personalLibrary';
 import type { LibraryState } from '@/store/libraryReducer';
@@ -384,5 +384,35 @@ describe('nextEpisode', () => {
   it('applies title overrides to the label', () => {
     const library = makeShows({ 'show:Bluey': { title: 'Bluey!' }, 'episode:tree/s01e02.mkv': { title: 'Renamed' } });
     expect(nextEpisode(library, 'tree/s01e01.mkv')?.title).toBe('Bluey! S01E02 - Renamed');
+  });
+});
+
+describe('clampSeek', () => {
+  it('keeps a time inside the video', () => {
+    expect(clampSeek(42, 100)).toBe(42);
+  });
+  it('clamps to the start and the end', () => {
+    expect(clampSeek(-5, 100)).toBe(0);
+    expect(clampSeek(130, 100)).toBe(100);
+  });
+  it('is 0 while the duration is unknown', () => {
+    expect(clampSeek(42, 0)).toBe(0);
+    expect(clampSeek(42, NaN)).toBe(0);
+    expect(clampSeek(NaN, 100)).toBe(0);
+  });
+});
+
+describe('scrubTime', () => {
+  it('maps a position on the track to a time', () => {
+    expect(scrubTime(150, 300, 600)).toBe(300);
+    expect(scrubTime(0, 300, 600)).toBe(0);
+    expect(scrubTime(300, 300, 600)).toBe(600);
+  });
+  it('clamps a touch past either end of the track', () => {
+    expect(scrubTime(-20, 300, 600)).toBe(0);
+    expect(scrubTime(400, 300, 600)).toBe(600);
+  });
+  it('is 0 before the track has been laid out', () => {
+    expect(scrubTime(150, 0, 600)).toBe(0);
   });
 });

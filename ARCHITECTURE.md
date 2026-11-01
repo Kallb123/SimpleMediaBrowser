@@ -969,11 +969,23 @@ episode or Personal video in `MediaBrowserScreen` runs `playVideoInApp`:
 - **Screen** (`app/videoplayer.tsx`). A `fullScreenModal` (falls back to `modal` on Android)
   with `animation: 'fade'` and no header, status bar hidden. It owns its player
   (`useVideoPlayer`, `timeUpdateEventInterval = 1`, `keepScreenOnWhilePlaying`) and shows it
-  in a `VideoView` with native controls (contain, black background, expo-video's own
+  in a `VideoView` without native controls (contain, black background, expo-video's own
   fullscreen button off). On the first `readyToPlay` it pauses the audiobook player
   (`AudiobookPlayer.pause()`, so the two never play over each other), seeks to `startAt` and
   plays. There is no background playback and no Picture-in-Picture: expo-video pauses when
   the app is backgrounded, and closing the screen releases the player.
+- **Controls** (`components/VideoControls.tsx`). The app draws its own controls instead of
+  Media3's, which expo-video cannot hide on start or resize: they are sized for children. A big
+  back arrow (top left, closes the screen) beside the title, the speed and CC buttons (top right,
+  passed in by the screen), a big play/pause button (replay after the end) between ±10 s skip
+  buttons, and a thick scrubber with position and duration. The scrubber is drawn with a
+  `PanResponder` (`@react-native-community/slider` cannot be resized on Android): a touch
+  anywhere on it grabs the thumb there and it seeks on release (`scrubTime`/`clampSeek` in
+  `VideoPlayback.ts`). The controls start hidden, so a video opens on its picture; a tap anywhere
+  toggles them. While playing they hide 4 s after the last touch on them (not while the thumb is
+  held); while paused they stay, and playback stopping by itself (the end, losing audio focus)
+  shows them. A spinner shows while the player is `loading` (first load and rebuffering). The
+  controls (spinner included) render nothing while a problem overlay or picker is open.
 - **Subtitle and audio tracks** (`hooks/useVideoTracks.ts`, `components/VideoTrackPicker.tsx`).
   The hook follows the player's embedded tracks (`sourceLoad`, `available*TracksChange`,
   `*TrackChange`, plus the player's current values, since it may be ahead of the subscription).
@@ -981,11 +993,9 @@ episode or Personal video in `MediaBrowserScreen` runs `playVideoInApp`:
   (so a choice made during playback is never undone): subtitles `'off'` sets
   `player.subtitleTrack = null`; a language picks the track `preferredTrack`
   (`VideoPlayback.ts`) matches, exactly or by primary subtag ('en' finds 'en-GB'), else the
-  player's default stays. Audio is only switched when there are two or more tracks. A small "CC"
-  button (top right) shows when there is a subtitle track or a second audio track. expo-video
-  does not report when its native controls show, so `useControlsVisible` keeps the corner
-  buttons up while paused and for 4 s after playback starts; they hide behind a problem overlay
-  or an open picker. It opens a sheet listing
+  player's default stays. Audio is only switched when there are two or more tracks. A "CC"
+  button (top right of the controls) shows when there is a subtitle track or a second audio
+  track. It opens a sheet listing
   "Subtitles" (Off + each track) and "Audio" (only with two or more); labels come from
   `trackLabels`, which tells identical labels apart. A choice is applied to the player and
   remembered in `videoSubtitleLanguage` / `videoAudioLanguage` (a track without a language is
@@ -996,7 +1006,7 @@ episode or Personal video in `MediaBrowserScreen` runs `playVideoInApp`:
   nothing when off), `videoTrackPickerEnabled` (off: no CC button, and `useVideoTracks` does not
   apply the remembered languages, so the player keeps its default tracks),
   `videoSpeedControlEnabled` and `videoAutoPlayNext` (below).
-- **Playback speed.** With `videoSpeedControlEnabled`, a corner button next to "CC" shows the
+- **Playback speed.** With `videoSpeedControlEnabled`, a button next to "CC" shows the
   rate ("1×", "1.25×") and opens an `OptionSheet` of rates (0.5× plus the audiobook player's
   `PLAYBACK_RATES`). Choosing one sets `player.playbackRate` (pitch is preserved, expo-video's
   default) and remembers it in `videoPlaybackRate`; the remembered rate is applied on the first
