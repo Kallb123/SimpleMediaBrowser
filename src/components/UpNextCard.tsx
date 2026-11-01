@@ -12,7 +12,7 @@ interface UpNextCardProps {
 /**
  * The "Up next" prompt over the video player: the next episode's title, a "Play now" button and a
  * dismiss button. Semi-transparent like the player's other overlays, and kept clear of the bottom
- * edge so the native seek bar stays usable. The countdown itself is run by the screen.
+ * edge so the player's seek bar stays usable when the controls are up. The countdown itself is run by the screen.
  */
 export function UpNextCard({ title, secondsLeft, onPlay, onDismiss }: UpNextCardProps) {
   return (
@@ -32,7 +32,7 @@ export function UpNextCard({ title, secondsLeft, onPlay, onDismiss }: UpNextCard
 }
 
 const styles = StyleSheet.create({
-  card: { position: 'absolute', right: 16, bottom: 80, maxWidth: '70%', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 8, backgroundColor: 'rgba(0, 0, 0, 0.75)' },
+  card: { position: 'absolute', right: 16, bottom: 104, maxWidth: '70%', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 8, backgroundColor: 'rgba(0, 0, 0, 0.75)' },
   text: { flexShrink: 1, gap: 2 },
   label: { color: '#ccc', fontSize: 13 },
   title: { color: '#fff', fontSize: 15, fontWeight: '600' },

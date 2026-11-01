@@ -23,9 +23,10 @@ import {
 import type { videoAutoPlayNextModes } from '@/store/settingsReducer';
 import { useBedtime } from '@/contexts/BedtimeContext';
 import { useAppDispatch, useAppStore } from '@/hooks/useRedux';
-import { useControlsVisible, useVideoTracks } from '@/hooks/useVideoTracks';
+import { useVideoTracks } from '@/hooks/useVideoTracks';
 import { OptionSheet } from '@/components/OptionSheet';
 import { UpNextCard } from '@/components/UpNextCard';
+import { VideoControls } from '@/components/VideoControls';
 import { VideoTrackPicker } from '@/components/VideoTrackPicker';
 
 const TAG = 'VideoPlayerScreen';
@@ -205,7 +206,6 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
     p.keepScreenOnWhilePlaying = true;
   });
   const tracks = useVideoTracks(player, settings.trackPicker);
-  const controlsVisible = useControlsVisible(player);
 
   // Replaces this screen with the next episode's: the new route key remounts the screen, so
   // `VideoPlayback` resolves a fresh request, and this tracker's cleanup still saves this one.
@@ -316,35 +316,40 @@ function VideoPlayback({ request }: { request: VideoRequest }) {
       <VideoView
         style={StyleSheet.absoluteFill}
         player={player}
-        nativeControls
+        nativeControls={false}
         contentFit="contain"
         fullscreenOptions={{ enable: false }}
       />
-      {/* A small corner button rather than a touch layer, so the native controls keep every other tap. */}
-      {controlsVisible && !problem && !pickerOpen && !speedOpen && (
-        <View style={styles.cornerButtons} pointerEvents="box-none">
-          {settings.speedControl && (
-            <TouchableOpacity
-              style={styles.cornerButton}
-              onPress={() => setSpeedOpen(true)}
-              accessibilityRole="button"
-              accessibilityLabel={`Playback speed ${formatRate(playbackRate)}`}
-            >
-              <Text style={styles.buttonText}>{formatRate(playbackRate)}</Text>
-            </TouchableOpacity>
-          )}
-          {settings.trackPicker && tracks.hasChoices && (
-            <TouchableOpacity
-              style={styles.cornerButton}
-              onPress={() => setPickerOpen(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Subtitles and audio"
-            >
-              <Text style={styles.buttonText}>CC</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+      <VideoControls
+        player={player}
+        title={title}
+        suspended={!!problem || pickerOpen || speedOpen}
+        onBack={closeScreen}
+        topRight={
+          <>
+            {settings.speedControl && (
+              <TouchableOpacity
+                style={styles.cornerButton}
+                onPress={() => setSpeedOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`Playback speed ${formatRate(playbackRate)}`}
+              >
+                <Text style={styles.cornerButtonText}>{formatRate(playbackRate)}</Text>
+              </TouchableOpacity>
+            )}
+            {settings.trackPicker && tracks.hasChoices && (
+              <TouchableOpacity
+                style={styles.cornerButton}
+                onPress={() => setPickerOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Subtitles and audio"
+              >
+                <Text style={styles.cornerButtonText}>CC</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        }
+      />
       {settings.speedControl && (
         <OptionSheet
           visible={speedOpen && !problem}
@@ -397,6 +402,6 @@ const styles = StyleSheet.create({
   message: { color: '#ccc', fontSize: 16, textAlign: 'center' },
   button: { minWidth: 220, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, backgroundColor: '#333', alignItems: 'center' },
   buttonText: { color: '#fff', fontSize: 16 },
-  cornerButtons: { position: 'absolute', top: 16, right: 16, flexDirection: 'row', gap: 8 },
-  cornerButton: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: 'rgba(0, 0, 0, 0.6)' },
+  cornerButton: { minWidth: 64, height: 56, paddingHorizontal: 16, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0, 0, 0, 0.6)' },
+  cornerButtonText: { color: '#fff', fontSize: 20, fontWeight: '600' },
 });

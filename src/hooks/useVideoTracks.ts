@@ -7,34 +7,6 @@ import { useAppDispatch, useAppStore } from '@/hooks/useRedux';
 
 const TAG = 'VideoTracks';
 
-/** How long the corner buttons stay up after playback starts (the native controls hide on a similar timer). */
-const BUTTON_HIDE_MS = 4000;
-
-/**
- * Whether the corner buttons (tracks, speed) should show. It stands in for the native controls:
- * expo-video does not report when they show, so this is true while paused and for a few seconds
- * after play starts.
- */
-export function useControlsVisible(player: VideoPlayer): boolean {
-  const [visible, setVisible] = useState(true);
-  useEffect(() => {
-    let hideTimer: ReturnType<typeof setTimeout> | undefined;
-    const onPlaying = (isPlaying: boolean) => {
-      clearTimeout(hideTimer);
-      setVisible(true);
-      if (isPlaying) hideTimer = setTimeout(() => setVisible(false), BUTTON_HIDE_MS);
-    };
-    const subscription = player.addListener('playingChange', ({ isPlaying }) => onPlaying(isPlaying));
-    // The player starts loading when it is created, so it may be ahead of this subscription.
-    onPlaying(player.playing);
-    return () => {
-      clearTimeout(hideTimer);
-      subscription.remove();
-    };
-  }, [player]);
-  return visible;
-}
-
 /**
  * The embedded subtitle and audio tracks of a player and the user's choice among them. Applies the
  * remembered language once per list (so a choice made during playback is never overridden) and

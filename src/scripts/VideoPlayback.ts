@@ -195,3 +195,18 @@ export function trackLabels(tracks: readonly LanguageTrack[]): string[] {
         return `${label} ${n}`;
     });
 }
+
+/**
+ * The time a seek should land on: `time` clamped to the video, or 0 while the duration is not
+ * known yet. Used by the scrubber (for a touch past either end of the track) and the skip buttons.
+ */
+export function clampSeek(time: number, duration: number): number {
+    if (!(duration > 0) || !Number.isFinite(time)) return 0;
+    return Math.min(Math.max(time, 0), duration);
+}
+
+/** The time under `x` on a scrubber track `width` wide that spans a `duration`-second video. */
+export function scrubTime(x: number, width: number, duration: number): number {
+    if (!(width > 0)) return 0;
+    return clampSeek((x / width) * duration, duration);
+}
