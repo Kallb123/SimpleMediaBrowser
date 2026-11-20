@@ -1,0 +1,88 @@
+# Dependabot version updates.
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Expo SDK note: many native packages (expo*, react, react-native, reanimated,
+# gesture-handler, ...) must stay on the exact versions the current Expo SDK
+# expects, otherwise native builds break or `npx expo install --check` fails.
+# Those packages only receive patch updates here; moving them to a new
+# minor/major is done as part of an SDK upgrade (`npx expo install expo@^NN
+# --fix`), not by Dependabot.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+    groups:
+      # Patch releases within the current Expo SDK, in one PR.
+      expo-sdk:
+        patterns:
+          - "expo"
+          - "expo-*"
+          - "@expo/*"
+          - "jest-expo"
+          - "eslint-config-expo"
+          - "react"
+          - "react-dom"
+          - "react-native"
+          - "react-native-*"
+          - "@react-native-async-storage/*"
+          - "@react-native-community/*"
+          - "@shopify/flash-list"
+          - "@types/react"
+          - "typescript"
+          - "jest"
+      # Everything else: batch minor/patch bumps; majors still get their own PR.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # SDK-coupled packages: only patch updates (see note at top).
+      - dependency-name: "expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "expo-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@expo/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "jest-expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "eslint-config-expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react-native-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@react-native-async-storage/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@react-native-community/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@shopify/flash-list"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "jest"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns:
+          - "*"
