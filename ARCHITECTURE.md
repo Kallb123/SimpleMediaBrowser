@@ -180,7 +180,11 @@ turns it into `extra.router.root`, which both the dev server and
 4. Renders a `Stack` with screens: `firsttime`, `(drawer)`, `+not-found`,
    `modal` (presentation: modal), `edititem`, `editposter` and `editrematch`
    (all presentation: modal), `mergeshows` (presentation: modal), `player` (presentation: modal),
-   `videoplayer` (presentation: fullScreenModal, no header).
+   `videoplayer` (presentation: fullScreenModal, no header). `player` and `videoplayer` are
+   `dangerouslySingular`: pushing one that is already in the stack (a double tap) brings that
+   screen forward with the new params instead of stacking a second. This matters most for
+   `videoplayer`, whose screen owns its player: two would play the same file twice, slightly
+   out of sync. `router.replace` (the next episode) is unaffected and still remounts.
 
 **Route guards are declared on the navigators, not run as effects.** Expo
 Router's `Stack.Protected` / `Drawer.Protected guard={…}` removes a guarded
@@ -956,7 +960,8 @@ episode or Personal video in `MediaBrowserScreen` runs `playVideoInApp`:
 - **Flow.** It records `lastOpened`, looks up `watchProgress[parsedPath]` and, when
   `resumePosition` (`videoProgress.ts`) says there is something to resume (at least 10 s in,
   not past the watched threshold), asks with a native `Alert` ("Resume from 23:41?", buttons
-  "Start over" / "Resume"; dismissing it does nothing). Otherwise it plays from 0 straight
+  "Start over" / "Resume"; dismissing it does nothing). Taps on another video are ignored while
+  the prompt is up, so a double tap does not queue a second prompt. Otherwise it plays from 0 straight
   away. The `/videoplayer` screen is pushed with route params `{ parsedPath, startAt }`: the
   library key and the start in seconds. The `content://` URI is not a param, so it never goes
   through URL encoding. The screen resolves them once on mount with `resolveVideoRequest`

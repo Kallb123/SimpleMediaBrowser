@@ -8,7 +8,7 @@ import { Image } from 'expo-image';
 import type { VideoThumbnail } from 'expo-video';
 import { Link, Stack, router } from 'expo-router';
 import { useRoute } from '@react-navigation/native';
-import { useEffect, useMemo, useCallback, useState } from 'react';
+import { useEffect, useMemo, useCallback, useRef, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectMediaSources, selectMediaStructure, selectViewScale, selectViewOrientation, selectSortOrder, selectAudiobookPlayer, selectVideoPlayer, selectPersonalLayout } from '@/store/settingsReducer';
 import { clearEpisodeMetadata, clearMovieMetadata, clearPersonalMetadata, clearMediaOverride, clearShowMetadata, setMediaOverride, markWatched, markUnwatched, getShowWatchKeys, getSeasonWatchKeys, getAudiobookWatchKeys, setEpisodeLastOpened, setMovieLastOpened, setPersonalLastOpened, setAudiobookLastOpened, getShowLastOpened, getSeasonLastOpened, getShowFirstDetected, getSeasonFirstDetected, selectMediaLibrary, selectMovies, selectAudiobooks, selectPersonal, selectPersonalFolderPosters, selectMediaOverrides } from '@/store/libraryReducer';
@@ -858,20 +858,26 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
     router.push('/player');
   }, []);
 
+  const resumePromptOpen = useRef(false);
+
   /**
    * Plays a movie, episode or Personal video in the in-app video player and opens it. Unlike the external hand-off
    * nothing is ticked here: the player marks it watched once it gets near the end. With a saved resume
    * point it asks first whether to continue from there. It also records the file as last opened.
    */
   const playVideoInApp = useCallback((item: DisplayItem & { kind: 'file' }) => {
+    // A second tap while the resume prompt is up would queue a second prompt behind it.
+    if (resumePromptOpen.current) return;
     const { path, parsedPath, filename } = item.mediaObject;
     recordLastOpened(item);
     const resumeAt = resumePosition(store.getState().libraryReducer.watchProgress[parsedPath]);
     const play = (startAt: number) => {
+      resumePromptOpen.current = false;
       logger.log('MediaBrowserScreen', `Playing video in-app: ${filename} (${path}) from ${Math.round(startAt)}s`);
       router.push({ pathname: '/videoplayer', params: { parsedPath, startAt: String(startAt) } });
     };
     if (resumeAt > 0) {
+      resumePromptOpen.current = true;
       Alert.alert(
         item.label,
         `Resume from ${formatClock(resumeAt)}?`,
@@ -879,7 +885,7 @@ export function MediaBrowserScreen({ mediaFilter, location }: MediaBrowserScreen
           { text: 'Start over', onPress: () => play(0) },
           { text: 'Resume', onPress: () => play(resumeAt) },
         ],
-        { cancelable: true },
+        { cancelable: true, onDismiss: () => { resumePromptOpen.current = false; } },
       );
     } else {
       play(0);
