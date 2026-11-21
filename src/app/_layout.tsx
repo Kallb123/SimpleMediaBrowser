@@ -158,8 +158,12 @@ function AppRoot() {
                       title: 'Merge Shows',
                     }}
                   />
+                  {/* Both players are singular: a second push (a double tap, say) brings the open one
+                      forward instead of stacking another. Each video screen owns its own player, so a
+                      second one would play the same file again, slightly out of sync (issue 271). */}
                   <Stack.Screen
                     name="player"
+                    dangerouslySingular
                     options={{
                       presentation: 'modal',
                       title: 'Now Playing',
@@ -167,6 +171,7 @@ function AppRoot() {
                   />
                   <Stack.Screen
                     name="videoplayer"
+                    dangerouslySingular
                     options={{
                       headerShown: false,
                       presentation: 'fullScreenModal',
