@@ -74,6 +74,11 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "jest"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # ESLint majors wait until eslint-config-expo's bundled plugins
+      # (eslint-plugin-react, eslint-plugin-import, ...) support them; ESLint 10
+      # crashes `expo lint` (see #269). Minor/patch updates still come through.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
